@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Login — Alo Worklogs</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+        :root{
+            --bg:#f7f8fb; --card:#ffffff; --text:#0f1115; --muted:#6b7280; --border:#e9e9ef;
+            --accent:#007aff; --accent-press:#0063cc; --soft:#f2f4f8;
+        }
+        *{box-sizing:border-box}
+        html,body{height:100%; display: flex; justify-content: center; align-items: center; gap: 1rem; flex-direction: column;}
+        body{
+            margin:0; display:flex; align-items:center; justify-content:center;
+            background:var(--bg); color:var(--text);
+            font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Inter,system-ui,Arial,sans-serif;
+            padding:16px;
+        }
+        .card{
+            width:min(520px, 92vw); background:var(--card); border:1px solid var(--border);
+            border-radius:20px; padding:24px; box-shadow:0 12px 30px rgba(0,0,0,.06);
+        }
+        h2{margin:0 0 6px 0; font-size:22px}
+        p{margin:0 0 16px 0; color:var(--muted)}
+        label{display:block; font-weight:600; margin-top:8px; font-size:13px}
+        input{
+            width:100%; padding:12px 14px; margin-top:8px; border-radius:14px; border:1px solid var(--border);
+            outline:none; background:#fff; color:var(--text);
+        }
+        input:focus{border-color:var(--accent)}
+        button{
+            width:100%; padding:12px 16px; margin-top:16px; border:0; border-radius:14px;
+            background:var(--accent); color:#fff; font-weight:700; cursor:pointer;
+        }
+        button:hover{background:var(--accent-press)}
+        .hint{font-size:12px; color:var(--muted); margin-top:8px}
+        .error{color:#b00020; margin-top:8px}
+    </style>
+</head>
+<body>
+<div class="card">
+    <h2>Authorize</h2>
+    <p>Paste your Jira Access Token.</p>
+
+    <label>Access Token</label>
+    <input id="token" type="password" placeholder="Bearer … or Basic …" />
+
+    <button id="authorize">Authorize</button>
+    <div id="msg" class="error" style="display:none;"></div>
+    <div class="hint">Stored securely in your system keychain.</div>
+</div>
+<small style="font-size: 10px; color: #aaa">by SkyBlueDev</small>
+
+<script src="./login.js"></script>
+</body>
+</html>
