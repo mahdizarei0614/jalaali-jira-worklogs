@@ -58,8 +58,19 @@
     });
 
     const initialActive = Array.from(viewNodes.entries()).find(([, el]) => el.classList.contains('is-active'));
-    const defaultRoute = initialActive ? initialActive[0] : (navItems[0]?.dataset.route || 'profile');
+    const defaultRoute = initialActive ? initialActive[0] : (navItems[0]?.dataset.route || 'monthly-overview');
     let activeRoute = null;
+    const routeListeners = new Set();
+
+    function notifyRouteChange(route) {
+        routeListeners.forEach((listener) => {
+            try {
+                listener(route);
+            } catch (err) {
+                console.error(err);
+            }
+        });
+    }
 
     function setRoute(route, { pushState = true } = {}) {
         if (!viewNodes.has(route)) {
@@ -101,6 +112,8 @@
             window.location.hash = route;
         }
 
+        notifyRouteChange(route);
+
         return route;
     }
 
@@ -127,12 +140,21 @@
         current: () => activeRoute,
         routes: () => Array.from(viewNodes.keys()),
         defaultRoute,
-        titleFor: (route) => routeLabels[route] || null
+        titleFor: (route) => routeLabels[route] || null,
+        onChange: (listener) => {
+            if (typeof listener === 'function') {
+                routeListeners.add(listener);
+                return () => routeListeners.delete(listener);
+            }
+            return () => {};
+        }
     });
 
     const controllers = {
-        profile: initProfile,
-        'monthly-report': initMonthlyReport
+        'monthly-overview': initReportsController,
+        'detailed-worklogs': initReportsController,
+        'due-issues': initReportsController,
+        'quarter-report': initReportsController
     };
 
     const initTasks = [];
@@ -151,36 +173,27 @@
         });
     }
 
-    async function initProfile(root) {
-        if (!root || root.dataset.controllerReady === 'true') return;
-        root.dataset.controllerReady = 'true';
-    }
+    async function initReportsController(root) {
+        if (!root) return;
+        if (initReportsController.ready) return;
+        initReportsController.ready = true;
 
-    async function initMonthlyReport(root) {
-        if (!root || root.dataset.controllerReady === 'true') return;
-        root.dataset.controllerReady = 'true';
-
-        const baseUrl = root.querySelector('#baseUrl');
-        const baseUrlWrap = root.querySelector('#baseUrlWrap');
-        const usernameSelect = root.querySelector('#usernameSelect');
-        const jYear = root.querySelector('#jYear');
-        const jMonth = root.querySelector('#jMonth');
-        const timeOffHours = root.querySelector('#timeOffHours');
-        const table = root.querySelector('#results');
+        const baseUrl = document.querySelector('#baseUrl');
+        const baseUrlWrap = document.querySelector('#baseUrlWrap');
+        const usernameSelect = document.querySelector('#sidebarUsernameSelect');
+        const jYear = document.querySelector('#jYear');
+        const jMonth = document.querySelector('#jMonth');
+        const timeOffHours = document.querySelector('#timeOffHours');
+        const table = document.querySelector('#results');
         const tbody = table?.querySelector('tbody');
-        const footerTotals = root.querySelector('#footerTotals');
-        const worklogsWrap = root.querySelector('#worklogsWrap');
-        const detailedBody = root.querySelector('#detailedWorklogsTable tbody');
-        const dueThisMonthSection = root.querySelector('#dueThisMonthSection');
-        const dueThisMonthBody = root.querySelector('#dueThisMonthTable tbody');
-        const quarterSection = root.querySelector('#quarterReportSection');
-        const quarterTableBody = root.querySelector('#quarterReportTable tbody');
-        const debug = root.querySelector('#debug');
-        const saveBtn = root.querySelector('#save');
-        const scanBtn = root.querySelector('#scan');
+        const footerTotals = document.querySelector('#footerTotals');
+        const detailedBody = document.querySelector('#detailedWorklogsTable tbody');
+        const dueThisMonthBody = document.querySelector('#dueThisMonthTable tbody');
+        const quarterTableBody = document.querySelector('#quarterReportTable tbody');
+        const saveBtn = document.querySelector('#save');
 
-        if (!baseUrl || !baseUrlWrap || !usernameSelect || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !worklogsWrap || !detailedBody || !dueThisMonthSection || !dueThisMonthBody || !quarterSection || !quarterTableBody || !saveBtn || !scanBtn) {
-            console.warn('Monthly report view missing required elements.');
+        if (!baseUrl || !baseUrlWrap || !usernameSelect || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !detailedBody || !dueThisMonthBody || !quarterTableBody || !saveBtn) {
+            console.warn('Report views missing required elements.');
             return;
         }
 
@@ -207,6 +220,16 @@
         jMonth.innerHTML = persianMonths.map((name, idx) => `<option value="${idx + 1}">${name}</option>`).join('');
 
         const ADMIN_USERS = new Set(['Momahdi.Zarei', 'r.mohammadkhan']);
+
+        function toAsciiDigits(val) {
+            if (val == null) return '';
+            const s = String(val);
+            const map = {
+                '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4', '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9',
+                '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9'
+            };
+            return s.replace(/[0-9\u06F0-\u06F9\u0660-\u0669]/g, (ch) => map[ch] ?? ch);
+        }
 
         async function enforceUserVisibility() {
             const who = await window.appApi.whoami();
@@ -235,16 +258,6 @@
                 jMonth: parseInt(toAsciiDigits(jMonth.value), 10),
                 username: usernameSelect.value
             });
-        }
-
-        function toAsciiDigits(val) {
-            if (val == null) return '';
-            const s = String(val);
-            const map = {
-                '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4', '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9',
-                '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9'
-            };
-            return s.replace(/[0-9\u06F0-\u06F9\u0660-\u0669]/g, (ch) => map[ch] ?? ch);
         }
 
         function sanitizeUrl(u) { return (u || '').trim(); }
@@ -279,24 +292,9 @@
             });
         }
 
-        jYear.addEventListener('input', async () => {
-            const caret = jYear.selectionStart;
-            jYear.value = toAsciiDigits(jYear.value).replace(/[^\d]/g, '');
-            try { jYear.setSelectionRange(caret, caret); } catch (err) { /* ignore */ }
-            await pushSelection();
-            updateFooter();
-        });
-        jMonth.addEventListener('change', async () => { await pushSelection(); updateFooter(); });
-        usernameSelect.addEventListener('change', pushSelection);
-
-        saveBtn.addEventListener('click', async () => {
-            baseUrl.value = stripTrailingSlash(sanitizeUrl(baseUrl.value));
-            updateBaseUrlUI();
-            await window.appApi.saveSettings({ baseUrl: baseUrl.value });
-            await enforceUserVisibility();
-        });
-
         let lastResult = null;
+        let fetchTimer = null;
+        let inFlightKey = null;
 
         function updateFooter() {
             if (!lastResult?.ok) {
@@ -323,24 +321,6 @@
         <span class="pill ${deltaCls}"><strong>${deltaLabel}:</strong> ${deltaEnd.toFixed(2)} h</span>
       </div>
     `;
-            if (debug) {
-                debug.textContent = JSON.stringify({
-                    username: usernameSelect.value,
-                    sent: { jYear: parseInt(toAsciiDigits(jYear.value), 10), jMonth: parseInt(toAsciiDigits(jMonth.value), 10) },
-                    jql: lastResult.jql,
-                    month: lastResult.jMonthLabel,
-                    timeOffHours: timeOff,
-                    totals: {
-                        totalHours: total,
-                        expectedByNowHours: expectedNow,
-                        expectedByEndMonthHours: expectedEnd,
-                        adjustedLoggedPlusTimeOff: adjusted,
-                        deltaVsEnd: deltaEnd
-                    },
-                    worklogsRows: lastResult.worklogs?.length ?? 0,
-                    deficitsSample: lastResult.deficits.slice(0, 10)
-                }, null, 2);
-            }
         }
 
         function renderWorklogs(res) {
@@ -354,7 +334,7 @@
           <td>${w.date || ''}</td>
           <td>${w.issueKey || ''}</td>
           <td>${(w.summary || '').toString().replace(/\n/g, ' ')}</td>
-          <td>${Number(w.hours).toFixed(2)}</td>
+          <td>${Number.parseFloat(w.hours ?? 0).toFixed(2)}</td>
           <td>${w.timeSpent || ''}</td>
           <td>${(w.comment || '').toString().replace(/\n/g, ' ')}</td>
         `;
@@ -368,20 +348,16 @@
                 tr.innerHTML = '<td colspan="8">—</td>';
                 detailedBody.appendChild(tr);
             }
-            worklogsWrap.style.display = 'block';
         }
 
         function renderDueIssues(res) {
-            if (!dueThisMonthSection || !dueThisMonthBody) return;
-
             const issues = Array.isArray(res?.dueIssuesCurrentMonth) ? res.dueIssuesCurrentMonth : [];
+            dueThisMonthBody.innerHTML = '';
             if (!issues.length) {
                 dueThisMonthBody.innerHTML = '<tr><td colspan="8">—</td></tr>';
-                dueThisMonthSection.style.display = 'none';
                 return;
             }
 
-            dueThisMonthBody.innerHTML = '';
             issues.forEach((issue, idx) => {
                 const tr = document.createElement('tr');
                 const summary = (issue.summary || '').toString().replace(/\n/g, ' ');
@@ -397,16 +373,11 @@
         `;
                 dueThisMonthBody.appendChild(tr);
             });
-
-            dueThisMonthSection.style.display = 'block';
         }
 
         function renderQuarterReport(data) {
-            if (!quarterSection || !quarterTableBody) return;
-
             if (!data?.ok || !Array.isArray(data.seasons) || data.seasons.length === 0) {
                 quarterTableBody.innerHTML = '<tr><td colspan="7">—</td></tr>';
-                quarterSection.style.display = 'none';
                 return;
             }
 
@@ -448,8 +419,6 @@
                 `;
                 quarterTableBody.appendChild(tr);
             });
-
-            quarterSection.style.display = 'block';
         }
 
         function render(res) {
@@ -458,10 +427,9 @@
             if (!res?.ok) {
                 table.style.display = 'none';
                 tbody.innerHTML = '';
-                worklogsWrap.style.display = 'none';
-                if (dueThisMonthSection) dueThisMonthSection.style.display = 'none';
-                if (dueThisMonthBody) dueThisMonthBody.innerHTML = '<tr><td colspan="8">—</td></tr>';
-                renderQuarterReport(null);
+                detailedBody.innerHTML = '<tr><td colspan="8">—</td></tr>';
+                dueThisMonthBody.innerHTML = '<tr><td colspan="8">—</td></tr>';
+                quarterTableBody.innerHTML = '<tr><td colspan="7">—</td></tr>';
                 updateFooter();
                 return;
             }
@@ -493,23 +461,83 @@
             updateFooter();
         }
 
-        scanBtn.addEventListener('click', async () => {
-            const jy = Number.parseInt(toAsciiDigits(jYear.value), 10);
-            const jm = Number.parseInt(toAsciiDigits(jMonth.value), 10);
+        function getSelection() {
+            return {
+                jYear: Number.parseInt(toAsciiDigits(jYear.value), 10),
+                jMonth: Number.parseInt(toAsciiDigits(jMonth.value), 10),
+                username: usernameSelect.value
+            };
+        }
+
+        async function fetchAndRender() {
+            const selection = getSelection();
+            if (!Number.isInteger(selection.jYear) || !Number.isInteger(selection.jMonth) || !selection.username) {
+                return;
+            }
+            const requestKey = `${selection.jYear}-${selection.jMonth}-${selection.username}`;
+            inFlightKey = requestKey;
+            try {
+                const res = await window.appApi.scanNow(selection);
+                if (inFlightKey === requestKey) {
+                    render(res);
+                }
+            } catch (err) {
+                console.error('Failed to fetch report:', err);
+            } finally {
+                if (inFlightKey === requestKey) {
+                    inFlightKey = null;
+                }
+            }
+        }
+
+        function scheduleFetch() {
+            if (fetchTimer) {
+                clearTimeout(fetchTimer);
+            }
+            fetchTimer = setTimeout(() => {
+                fetchTimer = null;
+                fetchAndRender().catch((err) => console.error(err));
+            }, 250);
+        }
+
+        jYear.addEventListener('input', async () => {
+            const caret = jYear.selectionStart;
+            jYear.value = toAsciiDigits(jYear.value).replace(/[^\d]/g, '');
+            try { jYear.setSelectionRange(caret, caret); } catch (err) { /* ignore */ }
             await pushSelection();
-            const res = await window.appApi.scanNow({ jYear: jy, jMonth: jm, username: usernameSelect.value });
-            render(res);
+            updateFooter();
+            scheduleFetch('year-input');
+        });
+        jMonth.addEventListener('change', async () => {
+            await pushSelection();
+            updateFooter();
+            scheduleFetch('month-change');
+        });
+        usernameSelect.addEventListener('change', async () => {
+            await pushSelection();
+            scheduleFetch('user-change');
+        });
+
+        saveBtn.addEventListener('click', async () => {
+            baseUrl.value = stripTrailingSlash(sanitizeUrl(baseUrl.value));
+            updateBaseUrlUI();
+            await window.appApi.saveSettings({ baseUrl: baseUrl.value });
+            await enforceUserVisibility();
+            scheduleFetch('save');
         });
 
         timeOffHours.addEventListener('input', updateFooter);
 
         window.appApi.onScanResult((res) => {
             if (!res?.ok) return;
-            const curY = Number.parseInt(toAsciiDigits(jYear.value), 10);
-            const curM = Number.parseInt(toAsciiDigits(jMonth.value), 10);
-            if (res.jYear === curY && res.jMonth === curM) render(res);
+            const selection = getSelection();
+            if (res.jYear === selection.jYear && res.jMonth === selection.jMonth && res.username === selection.username) {
+                render(res);
+            }
         });
 
         await pushSelection();
+        scheduleFetch('initial');
+        window.appRouter.onChange(() => scheduleFetch('route-change'));
     }
 })();

@@ -16,11 +16,6 @@
             </div>
 
             <div class="field">
-                <span class="label">Jira User</span>
-                <select id="usernameSelect"></select>
-            </div>
-
-            <div class="field">
                 <span class="label">Jalaali Year</span>
                 <input id="jYear" type="text" inputmode="numeric" />
             </div>
@@ -37,7 +32,6 @@
 
             <div class="actions">
                 <button class="btn" id="save">Save</button>
-                <button class="btn btn-primary" id="scan">Scan Now</button>
             </div>
         </div>
     </div>
@@ -71,71 +65,5 @@
             </tr>
             </tfoot>
         </table>
-    </div>
-
-    <div id="worklogsWrap" style="display:none; padding-bottom: 2rem;">
-        <div class="section-title">Detailed Worklogs</div>
-        <div class="table-wrap small">
-            <table id="detailedWorklogsTable">
-                <thead>
-                <tr>
-                    <th>#</th>
-                    <th>Jalaali Date</th>
-                    <th>Gregorian Date</th>
-                    <th>Issue</th>
-                    <th>Summary</th>
-                    <th>Hours</th>
-                    <th>Time Spent</th>
-                    <th>Comment</th>
-                </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
-        </div>
-    </div>
-
-    <div id="dueThisMonthSection" style="display:none; padding-bottom: 2rem;">
-        <div class="section-title">Issues Due This Month</div>
-        <div class="table-wrap">
-            <table id="dueThisMonthTable">
-                <thead>
-                <tr>
-                    <th>#</th>
-                    <th>Due Date</th>
-                    <th>Issue</th>
-                    <th>Title</th>
-                    <th>Status</th>
-                    <th>Estimate (h)</th>
-                    <th>Logged (h)</th>
-                    <th>Remaining (h)</th>
-                </tr>
-                </thead>
-                <tbody>
-                <tr><td colspan="8">—</td></tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <div id="quarterReportSection" style="display:none; padding-bottom: 2rem;">
-        <div class="section-title">Quarter Report</div>
-        <div class="table-wrap">
-            <table id="quarterReportTable">
-                <thead>
-                <tr>
-                    <th>Season</th>
-                    <th>Month 1</th>
-                    <th>Month 2</th>
-                    <th>Month 3</th>
-                    <th>Quarter Total</th>
-                    <th>Expected</th>
-                    <th>Delta</th>
-                </tr>
-                </thead>
-                <tbody>
-                <tr><td colspan="7">—</td></tr>
-                </tbody>
-            </table>
-        </div>
     </div>
 </div>
