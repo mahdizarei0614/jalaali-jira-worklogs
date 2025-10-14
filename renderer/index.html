@@ -45,16 +45,18 @@
         .sidebar-header{ display:flex; flex-direction:column; gap:4px; } 
         .sidebar-title{ font-size:20px; font-weight:700; letter-spacing:.2px; } 
         .sidebar-subtitle{ font-size:12px; color:var(--muted); } 
-        .sidebar-control{ display:flex; flex-direction:column; gap:6px; } 
-        .sidebar-label{ font-size:12px; font-weight:600; color:var(--muted); padding-left:2px; } 
-        .sidebar-control select{ 
-            appearance:none; -webkit-appearance:none; 
-            width:100%; padding:10px 12px; border-radius:12px; 
-            border:1px solid var(--border); background:#fff; color:var(--text); 
-            font-weight:600; 
-            outline:none; transition:border-color .15s ease, box-shadow .15s ease; 
-        } 
-        .sidebar-control select:focus{ border-color:var(--accent); box-shadow:0 0 0 4px rgba(0,122,255,.12); } 
+        .sidebar-control{ display:flex; flex-direction:column; gap:6px; }
+        .sidebar-label{ font-size:12px; font-weight:600; color:var(--muted); padding-left:2px; }
+        .sidebar-control select,
+        .sidebar-control input{
+            appearance:none; -webkit-appearance:none;
+            width:100%; padding:10px 12px; border-radius:12px;
+            border:1px solid var(--border); background:#fff; color:var(--text);
+            font-weight:600;
+            outline:none; transition:border-color .15s ease, box-shadow .15s ease;
+        }
+        .sidebar-control select:focus,
+        .sidebar-control input:focus{ border-color:var(--accent); box-shadow:0 0 0 4px rgba(0,122,255,.12); }
         .sidebar-divider{ height:1px; border:none; background:var(--border); margin:6px 0 2px; } 
         .nav{ display:flex; flex-direction:column; gap:6px; } 
         .nav-item{ 
@@ -222,12 +224,25 @@
             <label class="sidebar-label" for="sidebarUserSelect">User</label>
             <select id="sidebarUserSelect"></select>
         </div>
+        <div class="sidebar-control">
+            <label class="sidebar-label" for="sidebarJYear">Jalaali Year</label>
+            <input id="sidebarJYear" type="text" inputmode="numeric" />
+        </div>
+        <div class="sidebar-control">
+            <label class="sidebar-label" for="sidebarJMonth">Jalaali Month</label>
+            <select id="sidebarJMonth"></select>
+        </div>
+        <div class="sidebar-control">
+            <label class="sidebar-label" for="sidebarTimeOff">Time-off (hours this month)</label>
+            <input id="sidebarTimeOff" type="number" step="0.5" min="0" value="0" />
+        </div>
         <hr class="sidebar-divider" />
         <nav class="nav" aria-label="Primary">
             <button type="button" class="nav-item is-active" data-route="monthly-summary" aria-controls="monthlySummaryView">Monthly Summary</button>
             <button type="button" class="nav-item" data-route="detailed-worklogs" aria-controls="detailedWorklogsView">Detailed Worklogs</button>
             <button type="button" class="nav-item" data-route="due-issues" aria-controls="dueIssuesView">Issues Due This Month</button>
             <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView">Quarter Report</button>
+            <button type="button" class="nav-item" data-route="configurations" aria-controls="configurationsView">Configurations</button>
         </nav>
     </aside>
     <main class="main">
@@ -266,6 +281,14 @@
                 data-route-view="quarter-report"
                 data-route-title="Quarter Report"
                 data-template="./views/quarter-report.html">
+        </section>
+
+        <section
+                id="configurationsView"
+                class="view"
+                data-route-view="configurations"
+                data-route-title="Configurations"
+                data-template="./views/configurations.html">
         </section>
     </main>
 </div>
