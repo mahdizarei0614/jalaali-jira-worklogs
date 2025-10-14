@@ -99,6 +99,9 @@
             min-height:100vh;
         }
         .sidebar{
+            position:sticky;
+            top:0;
+            align-self:flex-start;
             width:240px;
             background:var(--card);
             border-right:1px solid var(--border);
@@ -107,6 +110,9 @@
             gap:18px;
             padding:24px 20px;
             box-shadow:8px 0 32px rgba(15,17,21,.06);
+            max-height:100vh;
+            overflow:auto;
+            flex-shrink:0;
         }
         .sidebar-header{ display:flex; flex-direction:column; gap:4px; } 
         .sidebar-title{ font-size:20px; font-weight:700; letter-spacing:.2px; } 
@@ -121,12 +127,14 @@
             outline:none; transition:border-color .15s ease, box-shadow .15s ease;
         }
         .sidebar-control select:focus{ border-color:var(--accent); box-shadow:0 0 0 4px var(--focus-ring); }
-        .sidebar-divider{ height:1px; border:none; background:var(--border); margin:6px 0 2px; } 
-        .nav{ display:flex; flex-direction:column; gap:6px; } 
-        .nav-item{ 
-            display:flex; 
-            align-items:center; 
-            gap:8px; 
+        .sidebar-divider{ height:1px; border:none; background:var(--border); margin:6px 0 2px; }
+        .sidebar-divider--spaced{ margin:16px 0 6px; }
+        .nav{ display:flex; flex-direction:column; gap:6px; }
+        .nav-secondary{ margin-top:4px; }
+        .nav-item{
+            display:flex;
+            align-items:center;
+            gap:8px;
             width:100%;
             padding:10px 14px;
             border-radius:12px;
@@ -158,8 +166,6 @@
         header{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
         h1{ font-size:20px; margin:0; letter-spacing:.2px; }
         .muted{ color:var(--muted); font-size:13px }
-
-        .header-actions{ display:flex; align-items:center; gap:8px; }
 
         .theme-toggle{ display:inline-flex; align-items:center; gap:6px; }
         .theme-toggle__icon{ font-size:16px; line-height:1; }
@@ -225,6 +231,17 @@
         .btn-primary:hover{ background:var(--accent-press); border-color:var(--accent-press) }
         .btn-ghost{ background:transparent; border-color:transparent; color:var(--muted); }
         .btn-ghost:hover{ background:var(--soft); color:var(--text) }
+        .btn-danger{ background:var(--red); border-color:var(--red); color:#ffffff; }
+        .btn-danger:hover{ background:#e13229; border-color:#e13229; }
+        .btn-soft{ background:var(--soft); border-color:var(--border); color:var(--text); }
+        .btn-soft:hover{ background:var(--border); }
+
+        .settings-grid{ display:flex; flex-direction:column; gap:16px; max-width:520px; }
+        .settings-section{ background:var(--card); border:1px solid var(--border); border-radius:16px; padding:20px; box-shadow:0 6px 24px rgba(0,0,0,.04); display:flex; flex-direction:column; gap:12px; }
+        .settings-section__header{ display:flex; flex-direction:column; gap:4px; }
+        .settings-section__title{ font-size:16px; font-weight:600; letter-spacing:.2px; }
+        .settings-section__description{ font-size:13px; color:var(--muted); line-height:1.5; }
+        .settings-actions{ display:flex; flex-wrap:wrap; gap:10px; }
 
         .legend{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin:12px 4px 0 }
         .chip{ display:inline-block; width:14px; height:14px; border-radius:4px; border:1px solid var(--border); margin-right:6px; vertical-align:middle; }
@@ -317,17 +334,14 @@
             <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView">Quarter Report</button>
             <button type="button" class="nav-item" data-route="configurations" aria-controls="configurationsView">Configurations</button>
         </nav>
+        <hr class="sidebar-divider sidebar-divider--spaced" />
+        <nav class="nav nav-secondary" aria-label="Secondary">
+            <button type="button" class="nav-item" data-route="settings" aria-controls="settingsView">Settings</button>
+        </nav>
     </aside>
     <main class="main">
         <header>
             <h1 id="viewTitle">Monthly Summary</h1>
-            <div class="header-actions">
-                <button class="btn btn-ghost theme-toggle" id="themeToggle" type="button" aria-pressed="false">
-                    <span class="theme-toggle__icon" aria-hidden="true">🌙</span>
-                    <span data-theme-label>Dark mode</span>
-                </button>
-                <button class="btn btn-ghost" id="logout">Logout</button>
-            </div>
         </header>
 
         <section
@@ -368,6 +382,14 @@
                 data-route-view="configurations"
                 data-route-title="Configurations"
                 data-template="./views/configurations.html">
+        </section>
+
+        <section
+                id="settingsView"
+                class="view"
+                data-route-view="settings"
+                data-route-title="Settings"
+                data-template="./views/settings.html">
         </section>
     </main>
 </div>
