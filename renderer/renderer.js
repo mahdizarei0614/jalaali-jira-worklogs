@@ -171,13 +171,15 @@
         const footerTotals = root.querySelector('#footerTotals');
         const worklogsWrap = root.querySelector('#worklogsWrap');
         const detailedBody = root.querySelector('#detailedWorklogsTable tbody');
+        const dueThisMonthSection = root.querySelector('#dueThisMonthSection');
+        const dueThisMonthBody = root.querySelector('#dueThisMonthTable tbody');
         const quarterSection = root.querySelector('#quarterReportSection');
         const quarterTableBody = root.querySelector('#quarterReportTable tbody');
         const debug = root.querySelector('#debug');
         const saveBtn = root.querySelector('#save');
         const scanBtn = root.querySelector('#scan');
 
-        if (!baseUrl || !baseUrlWrap || !usernameSelect || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !worklogsWrap || !detailedBody || !quarterSection || !quarterTableBody || !saveBtn || !scanBtn) {
+        if (!baseUrl || !baseUrlWrap || !usernameSelect || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !worklogsWrap || !detailedBody || !dueThisMonthSection || !dueThisMonthBody || !quarterSection || !quarterTableBody || !saveBtn || !scanBtn) {
             console.warn('Monthly report view missing required elements.');
             return;
         }
@@ -356,6 +358,9 @@
           <td>${w.timeSpent || ''}</td>
           <td>${(w.comment || '').toString().replace(/\n/g, ' ')}</td>
         `;
+                    if (!w.dueDate) {
+                        tr.classList.add('no-due-date');
+                    }
                     detailedBody.appendChild(tr);
                 });
             } else {
@@ -364,6 +369,36 @@
                 detailedBody.appendChild(tr);
             }
             worklogsWrap.style.display = 'block';
+        }
+
+        function renderDueIssues(res) {
+            if (!dueThisMonthSection || !dueThisMonthBody) return;
+
+            const issues = Array.isArray(res?.dueIssuesCurrentMonth) ? res.dueIssuesCurrentMonth : [];
+            if (!issues.length) {
+                dueThisMonthBody.innerHTML = '<tr><td colspan="8">—</td></tr>';
+                dueThisMonthSection.style.display = 'none';
+                return;
+            }
+
+            dueThisMonthBody.innerHTML = '';
+            issues.forEach((issue, idx) => {
+                const tr = document.createElement('tr');
+                const summary = (issue.summary || '').toString().replace(/\n/g, ' ');
+                tr.innerHTML = `
+          <td>${idx + 1}</td>
+          <td>${issue.dueDate || ''}</td>
+          <td>${issue.issueKey || ''}</td>
+          <td>${summary}</td>
+          <td>${issue.status || ''}</td>
+          <td>${Number(issue.estimateHours || 0).toFixed(2)}</td>
+          <td>${Number(issue.loggedHours || 0).toFixed(2)}</td>
+          <td>${Number(issue.remainingHours || 0).toFixed(2)}</td>
+        `;
+                dueThisMonthBody.appendChild(tr);
+            });
+
+            dueThisMonthSection.style.display = 'block';
         }
 
         function renderQuarterReport(data) {
@@ -424,6 +459,8 @@
                 table.style.display = 'none';
                 tbody.innerHTML = '';
                 worklogsWrap.style.display = 'none';
+                if (dueThisMonthSection) dueThisMonthSection.style.display = 'none';
+                if (dueThisMonthBody) dueThisMonthBody.innerHTML = '<tr><td colspan="8">—</td></tr>';
                 renderQuarterReport(null);
                 updateFooter();
                 return;
@@ -451,6 +488,7 @@
             table.style.display = 'table';
 
             renderWorklogs(res);
+            renderDueIssues(res);
             renderQuarterReport(res.quarterReport);
             updateFooter();
         }
