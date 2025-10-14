@@ -4,10 +4,47 @@
     <meta charset="utf-8" />
     <title>Login — Alo Worklogs</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+        (function () {
+            try {
+                const theme = localStorage.getItem('alo-worklogs:theme');
+                if (theme === 'dark' || theme === 'light') {
+                    document.documentElement.dataset.theme = theme;
+                    document.documentElement.style.colorScheme = theme;
+                }
+            } catch (err) {
+                console.warn('Unable to pre-load theme', err);
+            }
+        })();
+    </script>
     <style>
         :root{
-            --bg:#f7f8fb; --card:#ffffff; --text:#0f1115; --muted:#6b7280; --border:#e9e9ef;
-            --accent:#007aff; --accent-press:#0063cc; --soft:#f2f4f8;
+            color-scheme:light;
+            --bg:#f7f8fb;
+            --card:#ffffff;
+            --text:#0f1115;
+            --muted:#6b7280;
+            --border:#e1e4eb;
+            --accent:#007aff;
+            --accent-press:#0063cc;
+            --soft:#f2f4f8;
+            --input-bg:#ffffff;
+            --shadow-card:0 12px 30px rgba(0,0,0,.06);
+            --red:#ff3b30;
+        }
+        :root[data-theme="dark"]{
+            color-scheme:dark;
+            --bg:#0f131c;
+            --card:#161c29;
+            --text:#e5e7eb;
+            --muted:#9ca3af;
+            --border:rgba(148,163,184,0.24);
+            --accent:#4b8cff;
+            --accent-press:#3a6fd9;
+            --soft:rgba(73,86,120,0.16);
+            --input-bg:#121723;
+            --shadow-card:0 12px 30px rgba(2,6,23,.5);
+            --red:#f87171;
         }
         *{box-sizing:border-box}
         html,body{height:100%; display: flex; justify-content: center; align-items: center; gap: 1rem; flex-direction: column;}
@@ -16,17 +53,18 @@
             background:var(--bg); color:var(--text);
             font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Inter,system-ui,Arial,sans-serif;
             padding:16px;
+            transition:background .2s ease, color .2s ease;
         }
         .card{
             width:min(520px, 92vw); background:var(--card); border:1px solid var(--border);
-            border-radius:20px; padding:24px; box-shadow:0 12px 30px rgba(0,0,0,.06);
+            border-radius:20px; padding:24px; box-shadow:var(--shadow-card);
         }
         h2{margin:0 0 6px 0; font-size:22px}
         p{margin:0 0 16px 0; color:var(--muted)}
         label{display:block; font-weight:600; margin-top:8px; font-size:13px}
         input{
             width:100%; padding:12px 14px; margin-top:8px; border-radius:14px; border:1px solid var(--border);
-            outline:none; background:#fff; color:var(--text);
+            outline:none; background:var(--input-bg); color:var(--text);
         }
         input:focus{border-color:var(--accent)}
         button{
@@ -35,10 +73,29 @@
         }
         button:hover{background:var(--accent-press)}
         .hint{font-size:12px; color:var(--muted); margin-top:8px}
-        .error{color:#b00020; margin-top:8px}
+        .error{color:var(--red, #f87171); margin-top:8px}
+        .theme-toggle{
+            position:fixed;
+            top:16px;
+            right:16px;
+            width:42px;
+            height:42px;
+            border-radius:999px;
+            border:1px solid var(--border);
+            background:var(--card);
+            color:var(--text);
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            font-size:18px;
+            cursor:pointer;
+            transition:background .15s ease, border-color .15s ease;
+        }
+        .theme-toggle:hover{ background:var(--soft); }
     </style>
 </head>
 <body>
+<button class="theme-toggle" type="button" data-theme-toggle aria-label="Activate dark mode">🌙</button>
 <div class="card">
     <h2>Authorize</h2>
     <p>Paste your Jira Access Token.</p>
@@ -50,8 +107,9 @@
     <div id="msg" class="error" style="display:none;"></div>
     <div class="hint">Stored securely in your system keychain.</div>
 </div>
-<small style="font-size: 10px; color: #aaa">by SkyBlueDev</small>
+<small style="font-size: 10px; color: var(--muted)">by SkyBlueDev</small>
 
+<script src="./theme.js"></script>
 <script src="./login.js"></script>
 </body>
 </html>
