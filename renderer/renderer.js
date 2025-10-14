@@ -19,6 +19,22 @@
     const routeTitle = $('#viewTitle');
     const defaultTitle = routeTitle?.textContent || 'Alo Worklogs';
     const navItems = $$('[data-route]');
+    const themeToggle = $('#themeToggle');
+
+    if (themeToggle && window.themeManager) {
+        const updateThemeToggle = (theme) => {
+            const isDark = theme === 'dark';
+            const label = isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode';
+            themeToggle.textContent = label;
+            themeToggle.setAttribute('aria-pressed', String(isDark));
+            themeToggle.setAttribute('title', label);
+        };
+        themeToggle.addEventListener('click', () => {
+            window.themeManager.toggle();
+        });
+        window.themeManager.subscribe(updateThemeToggle);
+    }
+
     const viewNodes = new Map(
         $$('[data-route-view]').map((el) => {
             const route = el.getAttribute('data-route-view');
