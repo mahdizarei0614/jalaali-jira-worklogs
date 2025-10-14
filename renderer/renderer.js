@@ -1,4 +1,8 @@
 (async function () {
+    if (!window.appApi) {
+        console.warn('appApi bridge is not available; renderer initialisation skipped.');
+        return;
+    }
     const $ = (s) => document.querySelector(s);
     const baseUrl = $('#baseUrl');
     const baseUrlWrap = $('#baseUrlWrap');
