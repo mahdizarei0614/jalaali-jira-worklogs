@@ -314,6 +314,77 @@
         .tip[data-tip]:hover::after{ opacity:1; transform:translateY(6px); }
         .tip[data-tip]{ max-width:100%; overflow:visible }
 
+        .loading-overlay{
+            position:fixed;
+            inset:0;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            background:rgba(12,17,29,.35);
+            backdrop-filter:blur(12px);
+            -webkit-backdrop-filter:blur(12px);
+            z-index:9999;
+            opacity:0;
+            visibility:hidden;
+            transition:opacity .2s ease, visibility .2s ease;
+            pointer-events:none;
+        }
+        .loading-overlay.is-active{
+            opacity:1;
+            visibility:visible;
+            pointer-events:auto;
+        }
+        .loading-overlay__panel{
+            background:var(--card);
+            color:var(--text);
+            padding:24px 28px;
+            border-radius:26px;
+            box-shadow:0 22px 55px rgba(12,17,29,.28);
+            display:flex;
+            flex-direction:column;
+            align-items:center;
+            gap:14px;
+            min-width:140px;
+        }
+        .loading-overlay__text{
+            font-weight:600;
+            font-size:14px;
+            letter-spacing:.02em;
+        }
+        .loading-spinner{
+            position:relative;
+            width:48px;
+            height:48px;
+        }
+        .loading-spinner div{
+            position:absolute;
+            top:4px;
+            left:22px;
+            width:4px;
+            height:12px;
+            border-radius:2px;
+            background:var(--accent);
+            opacity:0;
+            transform-origin:2px 20px;
+            animation:loading-spinner 1s linear infinite;
+        }
+        .loading-spinner div:nth-child(1){ transform:rotate(0deg); animation-delay:-0.9167s; }
+        .loading-spinner div:nth-child(2){ transform:rotate(30deg); animation-delay:-0.8333s; }
+        .loading-spinner div:nth-child(3){ transform:rotate(60deg); animation-delay:-0.75s; }
+        .loading-spinner div:nth-child(4){ transform:rotate(90deg); animation-delay:-0.6667s; }
+        .loading-spinner div:nth-child(5){ transform:rotate(120deg); animation-delay:-0.5833s; }
+        .loading-spinner div:nth-child(6){ transform:rotate(150deg); animation-delay:-0.5s; }
+        .loading-spinner div:nth-child(7){ transform:rotate(180deg); animation-delay:-0.4167s; }
+        .loading-spinner div:nth-child(8){ transform:rotate(210deg); animation-delay:-0.3333s; }
+        .loading-spinner div:nth-child(9){ transform:rotate(240deg); animation-delay:-0.25s; }
+        .loading-spinner div:nth-child(10){ transform:rotate(270deg); animation-delay:-0.1667s; }
+        .loading-spinner div:nth-child(11){ transform:rotate(300deg); animation-delay:-0.0833s; }
+        .loading-spinner div:nth-child(12){ transform:rotate(330deg); animation-delay:0s; }
+        @keyframes loading-spinner{
+            0%{ opacity:1; }
+            100%{ opacity:0; }
+        }
+
         pre{ white-space:pre-wrap; background:var(--code-bg); border:1px solid var(--border); border-radius:12px; padding:10px; color:var(--code-text) }
     </style>
 </head>
@@ -410,6 +481,26 @@
                 data-template="./views/settings.html">
         </section>
     </main>
+</div>
+
+<div id="loadingOverlay" class="loading-overlay" aria-hidden="true">
+    <div class="loading-overlay__panel" role="status" aria-live="polite">
+        <div class="loading-spinner" aria-hidden="true">
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+        </div>
+        <div class="loading-overlay__text">Loading…</div>
+    </div>
 </div>
 
 <script src="./theme.js"></script>
