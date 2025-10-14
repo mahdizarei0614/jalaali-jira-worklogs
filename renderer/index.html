@@ -97,6 +97,7 @@
         .layout{
             display:flex;
             min-height:100vh;
+            align-items:flex-start;
         }
         .sidebar{
             width:240px;
@@ -107,6 +108,12 @@
             gap:18px;
             padding:24px 20px;
             box-shadow:8px 0 32px rgba(15,17,21,.06);
+            position:sticky;
+            top:0;
+            align-self:flex-start;
+            height:100vh;
+            overflow-y:auto;
+            flex-shrink:0;
         }
         .sidebar-header{ display:flex; flex-direction:column; gap:4px; } 
         .sidebar-title{ font-size:20px; font-weight:700; letter-spacing:.2px; } 
@@ -121,8 +128,8 @@
             outline:none; transition:border-color .15s ease, box-shadow .15s ease;
         }
         .sidebar-control select:focus{ border-color:var(--accent); box-shadow:0 0 0 4px var(--focus-ring); }
-        .sidebar-divider{ height:1px; border:none; background:var(--border); margin:6px 0 2px; } 
-        .nav{ display:flex; flex-direction:column; gap:6px; } 
+        .sidebar-divider{ height:1px; border:none; background:var(--border); margin:6px 0 2px; }
+        .nav{ display:flex; flex-direction:column; gap:6px; }
         .nav-item{ 
             display:flex; 
             align-items:center; 
@@ -159,10 +166,22 @@
         h1{ font-size:20px; margin:0; letter-spacing:.2px; }
         .muted{ color:var(--muted); font-size:13px }
 
-        .header-actions{ display:flex; align-items:center; gap:8px; }
-
-        .theme-toggle{ display:inline-flex; align-items:center; gap:6px; }
-        .theme-toggle__icon{ font-size:16px; line-height:1; }
+        .sidebar-footer{ margin-top:auto; display:flex; flex-direction:column; gap:14px; }
+        .sidebar-settings{ display:flex; flex-direction:column; gap:12px; padding:16px; border-radius:16px; background:linear-gradient(135deg, rgba(77,141,255,.08), rgba(77,141,255,0)); border:1px solid var(--border); }
+        .sidebar-section-title{ font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+        .settings-tile{ display:flex; align-items:center; gap:12px; width:100%; padding:12px 14px; border-radius:14px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; transition:border-color .15s ease, box-shadow .2s ease, transform .15s ease, background .15s ease; text-align:left; }
+        .settings-tile:hover{ border-color:var(--accent); box-shadow:0 14px 34px rgba(77,141,255,.16); transform:translateY(-1px); }
+        .settings-tile:active{ transform:translateY(0); }
+        .settings-tile__icon{ width:36px; height:36px; border-radius:12px; display:flex; align-items:center; justify-content:center; background:var(--soft); font-size:18px; line-height:1; }
+        .settings-tile__body{ flex:1; display:flex; flex-direction:column; gap:2px; align-items:flex-start; }
+        .settings-tile__title{ font-size:13px; font-weight:600; }
+        .settings-tile__subtitle{ font-size:12px; color:var(--muted); }
+        .settings-tile--danger{ background:var(--chip-red); border-color:transparent; color:var(--red); }
+        .settings-tile--danger:hover{ border-color:var(--red); box-shadow:0 14px 34px rgba(255,59,48,.18); }
+        .settings-tile--danger .settings-tile__icon{ background:rgba(255,59,48,.12); color:var(--red); }
+        .settings-tile--danger .settings-tile__subtitle{ color:inherit; opacity:.8; }
+        .theme-toggle__icon{ font-size:18px; }
+        .settings-tile__indicator{ font-size:16px; color:var(--muted); }
 
         .view{ display:none; }
         .view.is-active{ display:block; }
@@ -317,17 +336,31 @@
             <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView">Quarter Report</button>
             <button type="button" class="nav-item" data-route="configurations" aria-controls="configurationsView">Configurations</button>
         </nav>
+        <div class="sidebar-footer">
+            <hr class="sidebar-divider" />
+            <div class="sidebar-settings" aria-label="Settings">
+                <div class="sidebar-section-title">Settings</div>
+                <button class="settings-tile" id="themeToggle" type="button" aria-pressed="false">
+                    <span class="settings-tile__icon theme-toggle__icon" aria-hidden="true">🌙</span>
+                    <span class="settings-tile__body">
+                        <span class="settings-tile__title">Appearance</span>
+                        <span class="settings-tile__subtitle" data-theme-label>Dark mode</span>
+                    </span>
+                    <span class="settings-tile__indicator" aria-hidden="true">›</span>
+                </button>
+                <button class="settings-tile settings-tile--danger" id="logout" type="button">
+                    <span class="settings-tile__icon" aria-hidden="true">🔓</span>
+                    <span class="settings-tile__body">
+                        <span class="settings-tile__title">Log out</span>
+                        <span class="settings-tile__subtitle">Sign out of your account</span>
+                    </span>
+                </button>
+            </div>
+        </div>
     </aside>
     <main class="main">
         <header>
             <h1 id="viewTitle">Monthly Summary</h1>
-            <div class="header-actions">
-                <button class="btn btn-ghost theme-toggle" id="themeToggle" type="button" aria-pressed="false">
-                    <span class="theme-toggle__icon" aria-hidden="true">🌙</span>
-                    <span data-theme-label>Dark mode</span>
-                </button>
-                <button class="btn btn-ghost" id="logout">Logout</button>
-            </div>
         </header>
 
         <section
