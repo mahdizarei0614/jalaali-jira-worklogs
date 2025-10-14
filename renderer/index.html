@@ -97,8 +97,12 @@
         .layout{
             display:flex;
             min-height:100vh;
+            align-items:flex-start;
         }
         .sidebar{
+            position:sticky;
+            top:0;
+            align-self:flex-start;
             width:240px;
             background:var(--card);
             border-right:1px solid var(--border);
@@ -107,12 +111,14 @@
             gap:18px;
             padding:24px 20px;
             box-shadow:8px 0 32px rgba(15,17,21,.06);
+            max-height:100vh;
+            overflow-y:auto;
         }
         .sidebar-header{ display:flex; flex-direction:column; gap:4px; } 
         .sidebar-title{ font-size:20px; font-weight:700; letter-spacing:.2px; } 
         .sidebar-subtitle{ font-size:12px; color:var(--muted); } 
-        .sidebar-control{ display:flex; flex-direction:column; gap:6px; } 
-        .sidebar-label{ font-size:12px; font-weight:600; color:var(--muted); padding-left:2px; } 
+        .sidebar-control{ display:flex; flex-direction:column; gap:6px; }
+        .sidebar-label{ font-size:12px; font-weight:600; color:var(--muted); padding-left:2px; }
         .sidebar-control select{
             appearance:none; -webkit-appearance:none;
             width:100%; padding:10px 12px; border-radius:12px;
@@ -121,12 +127,13 @@
             outline:none; transition:border-color .15s ease, box-shadow .15s ease;
         }
         .sidebar-control select:focus{ border-color:var(--accent); box-shadow:0 0 0 4px var(--focus-ring); }
-        .sidebar-divider{ height:1px; border:none; background:var(--border); margin:6px 0 2px; } 
-        .nav{ display:flex; flex-direction:column; gap:6px; } 
-        .nav-item{ 
-            display:flex; 
-            align-items:center; 
-            gap:8px; 
+        .sidebar-divider{ height:1px; border:none; background:var(--border); margin:6px 0 2px; }
+        .sidebar-section{ display:flex; flex-direction:column; gap:10px; }
+        .nav{ display:flex; flex-direction:column; gap:6px; }
+        .nav-item{
+            display:flex;
+            align-items:center;
+            gap:8px;
             width:100%;
             padding:10px 14px;
             border-radius:12px;
@@ -146,6 +153,53 @@
             box-shadow:0 10px 30px rgba(0,122,255,.18);
         }
         .nav-item.is-active:hover{ background:var(--accent-press); border-color:var(--accent-press); }
+
+        .settings-panel{
+            display:flex;
+            flex-direction:column;
+            gap:8px;
+            padding:14px;
+            border-radius:16px;
+            border:1px solid var(--border);
+            background:linear-gradient(140deg, rgba(0,122,255,.08), rgba(0,122,255,0) 55%);
+        }
+        .settings-item{
+            display:flex;
+            align-items:center;
+            gap:12px;
+            width:100%;
+            padding:10px 12px;
+            border-radius:12px;
+            border:1px solid transparent;
+            background:transparent;
+            font-size:14px;
+            font-weight:600;
+            color:var(--text);
+            cursor:pointer;
+            transition:background .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease;
+        }
+        .settings-item:hover{
+            background:var(--card);
+            border-color:var(--border);
+            box-shadow:0 8px 22px rgba(15,17,21,.08);
+        }
+        .settings-item:focus{ outline:none; border-color:var(--accent); box-shadow:0 0 0 4px var(--focus-ring); }
+        .settings-item-icon{
+            width:32px;
+            height:32px;
+            border-radius:12px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            background:var(--soft);
+            font-size:16px;
+        }
+        .settings-item-content{ display:flex; flex-direction:column; align-items:flex-start; }
+        .settings-item-title{ font-size:13px; font-weight:600; letter-spacing:.2px; }
+        .settings-item-sub{ font-size:12px; color:var(--muted); font-weight:500; }
+        .settings-item.logout{ color:var(--red); }
+        .settings-item.logout .settings-item-icon{ background:rgba(255,59,48,.08); color:var(--red); }
+        .settings-item.logout:hover{ background:rgba(255,59,48,.08); border-color:rgba(255,59,48,.24); box-shadow:none; }
 
         .main{
             flex:1;
@@ -317,17 +371,30 @@
             <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView">Quarter Report</button>
             <button type="button" class="nav-item" data-route="configurations" aria-controls="configurationsView">Configurations</button>
         </nav>
+        <hr class="sidebar-divider" />
+        <div class="sidebar-section sidebar-settings">
+            <span class="sidebar-label">Settings</span>
+            <div class="settings-panel" role="group" aria-label="Application settings">
+                <button class="settings-item theme-toggle" id="themeToggle" type="button" aria-pressed="false">
+                    <span class="settings-item-icon theme-toggle__icon" aria-hidden="true">🌙</span>
+                    <span class="settings-item-content">
+                        <span class="settings-item-title">Appearance</span>
+                        <span class="settings-item-sub" data-theme-label>Dark mode</span>
+                    </span>
+                </button>
+                <button class="settings-item logout" id="logout" type="button">
+                    <span class="settings-item-icon" aria-hidden="true">🚪</span>
+                    <span class="settings-item-content">
+                        <span class="settings-item-title">Sign out</span>
+                        <span class="settings-item-sub">Log out of your account</span>
+                    </span>
+                </button>
+            </div>
+        </div>
     </aside>
     <main class="main">
         <header>
             <h1 id="viewTitle">Monthly Summary</h1>
-            <div class="header-actions">
-                <button class="btn btn-ghost theme-toggle" id="themeToggle" type="button" aria-pressed="false">
-                    <span class="theme-toggle__icon" aria-hidden="true">🌙</span>
-                    <span data-theme-label>Dark mode</span>
-                </button>
-                <button class="btn btn-ghost" id="logout">Logout</button>
-            </div>
         </header>
 
         <section
