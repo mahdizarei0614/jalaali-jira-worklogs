@@ -1,5 +1,106 @@
 (async function () {
     const $ = (s) => document.querySelector(s);
+    const routeTitle = $('#viewTitle');
+    const defaultTitle = routeTitle?.textContent || 'Alo Worklogs';
+    const navItems = Array.from(document.querySelectorAll('[data-route]'));
+    const viewNodes = new Map(
+        Array.from(document.querySelectorAll('[data-route-view]'))
+            .map((el) => {
+                const route = el.getAttribute('data-route-view');
+                return route ? [route, el] : null;
+            })
+            .filter(Boolean)
+    );
+    const routeLabels = {};
+    viewNodes.forEach((el, key) => {
+        const label = el.getAttribute('data-route-title');
+        if (label) {
+            routeLabels[key] = label;
+        }
+    });
+    navItems.forEach((btn) => {
+        const route = btn.dataset.route;
+        if (!route) return;
+        if (!routeLabels[route]) {
+            const label = btn.dataset.routeLabel || btn.textContent.trim();
+            if (label) {
+                routeLabels[route] = label;
+            }
+        }
+    });
+    const initialActive = Array.from(viewNodes.entries()).find(([, el]) => el.classList.contains('is-active'));
+    const defaultRoute = initialActive ? initialActive[0] : (navItems[0]?.dataset.route || 'profile');
+    let activeRoute = null;
+
+    function setRoute(route, { pushState = true } = {}) {
+        if (!viewNodes.has(route)) {
+            route = defaultRoute;
+        }
+        if (route === activeRoute) {
+            if (pushState && window.location.hash.replace(/^#/, '') !== route) {
+                window.location.hash = route;
+            }
+            return route;
+        }
+
+        viewNodes.forEach((el, key) => {
+            el.classList.toggle('is-active', key === route);
+        });
+
+        navItems.forEach((btn) => {
+            if (!btn) return;
+            const isActive = btn.dataset.route === route;
+            btn.classList.toggle('is-active', isActive);
+            if (isActive) {
+                btn.setAttribute('aria-current', 'page');
+            } else {
+                btn.removeAttribute('aria-current');
+            }
+        });
+
+        if (routeTitle) {
+            routeTitle.textContent = routeLabels[route] || defaultTitle;
+        }
+
+        if (document.body) {
+            document.body.dataset.route = route;
+        }
+
+        activeRoute = route;
+
+        if (pushState) {
+            window.location.hash = route;
+        }
+
+        return route;
+    }
+
+    function syncFromHash() {
+        const hash = (window.location.hash || '').replace(/^#/, '');
+        return setRoute(hash || defaultRoute, { pushState: false });
+    }
+
+    navItems.forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const route = btn.dataset.route;
+            setRoute(route);
+        });
+    });
+
+    window.addEventListener('hashchange', syncFromHash);
+    syncFromHash();
+
+    if (typeof window.appRouter !== 'object' || window.appRouter === null) {
+        window.appRouter = {};
+    }
+    Object.assign(window.appRouter, {
+        navigate: (route, options) => setRoute(route, options),
+        current: () => activeRoute,
+        routes: () => Array.from(viewNodes.keys()),
+        defaultRoute,
+        titleFor: (route) => routeLabels[route] || null
+    });
+
     const baseUrl = $('#baseUrl');
     const baseUrlWrap = $('#baseUrlWrap');
     const usernameSelect = $('#usernameSelect');
