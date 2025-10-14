@@ -1,5 +1,32 @@
 (async function () {
     const $ = (s) => document.querySelector(s);
+    const pages = document.querySelectorAll('.page');
+    const menuItems = document.querySelectorAll('[data-route]');
+
+    function showRoute(route) {
+        let matched = false;
+        pages.forEach((page) => {
+            const isMatch = page.dataset.page === route;
+            if (isMatch) matched = true;
+            page.classList.toggle('is-active', isMatch);
+        });
+        menuItems.forEach((item) => {
+            item.classList.toggle('is-active', item.dataset.route === route);
+        });
+        if (!matched) {
+            if (pages.length) pages[0].classList.add('is-active');
+            if (menuItems.length) menuItems[0].classList.add('is-active');
+        }
+    }
+
+    menuItems.forEach((item) => {
+        item.addEventListener('click', () => {
+            const route = item.dataset.route;
+            if (route) showRoute(route);
+        });
+    });
+
+    showRoute('profile');
     const baseUrl = $('#baseUrl');
     const baseUrlWrap = $('#baseUrlWrap');
     const usernameSelect = $('#usernameSelect');
