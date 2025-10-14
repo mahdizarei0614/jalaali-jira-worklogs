@@ -22,18 +22,76 @@
         *{box-sizing:border-box; margin: 0; padding: 0}
         html,body{height:100%}
         body{
-            margin:0; padding:1rem;
+            margin:0;
             font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Inter,system-ui,Arial,sans-serif;
-            color:var(--text); background:var(--bg);
+            color:var(--text);
+            background:var(--bg);
         }
 
-        /* Shell */
-        .app{ max-width:1240px; margin:0 auto; }
-        header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+        .layout{
+            display:flex;
+            min-height:100vh;
+        }
+        .sidebar{
+            width:240px;
+            background:var(--card);
+            border-right:1px solid var(--border);
+            display:flex;
+            flex-direction:column;
+            gap:24px;
+            padding:24px 20px;
+            box-shadow:8px 0 32px rgba(15,17,21,.06);
+        }
+        .sidebar-header{ display:flex; flex-direction:column; gap:4px; }
+        .sidebar-title{ font-size:20px; font-weight:700; letter-spacing:.2px; }
+        .sidebar-subtitle{ font-size:12px; color:var(--muted); }
+        .nav{ display:flex; flex-direction:column; gap:6px; }
+        .nav-item{
+            display:flex;
+            align-items:center;
+            gap:8px;
+            width:100%;
+            padding:10px 14px;
+            border-radius:12px;
+            border:1px solid transparent;
+            background:transparent;
+            font-size:14px;
+            font-weight:600;
+            color:var(--text);
+            cursor:pointer;
+            transition:background .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease;
+        }
+        .nav-item:hover{ background:var(--soft); border-color:var(--border); }
+        .nav-item.is-active{
+            background:var(--accent);
+            border-color:var(--accent);
+            color:#fff;
+            box-shadow:0 10px 30px rgba(0,122,255,.18);
+        }
+        .nav-item.is-active:hover{ background:var(--accent-press); border-color:var(--accent-press); }
+
+        .main{
+            flex:1;
+            padding:32px;
+            display:flex;
+            flex-direction:column;
+            gap:24px;
+            overflow-y:auto;
+        }
+        header{ display:flex; align-items:center; justify-content:space-between; }
         h1{ font-size:20px; margin:0; letter-spacing:.2px; }
         .muted{ color:var(--muted); font-size:13px }
 
-        /* Cards / Controls */
+        .view{ display:none; }
+        .view.is-active{ display:block; }
+
+        .profile-card{ max-width:520px; box-shadow:0 12px 30px rgba(15,17,21,.06); }
+        .profile-heading{ font-size:18px; font-weight:700; margin-bottom:8px; }
+        .profile-body{ color:var(--muted); line-height:1.6; }
+        .profile-actions{ margin-top:16px; display:flex; gap:10px; flex-wrap:wrap; }
+        .profile-pill{ display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; background:var(--soft); border:1px solid var(--border); font-size:12px; color:var(--muted); }
+
+        .app{ max-width:1240px; margin:0 auto; }
         .card{
             background:var(--card); border:1px solid var(--border);
             border-radius:16px; padding:14px; box-shadow:0 6px 24px rgba(0,0,0,.04);
@@ -46,7 +104,6 @@
         .field{ display:flex; flex-direction:column; gap:6px; }
         .label{ font-size:12px; font-weight:600; color:#2a2a2a; padding-left:2px; }
 
-        /* Base URL input with icon + status */
         .input-wrap{ position:relative; display:flex; align-items:center; }
         .input-wrap input{
             width:100%; padding:10px 32px 10px 36px; border-radius:12px;
@@ -66,7 +123,6 @@
         .input-wrap.is-invalid .status-dot{ background:var(--red); }
         .help{ font-size:12px; color:var(--muted); margin-top:4px; padding-left:2px; }
 
-        /* Selects & other inputs */
         input[type="text"], input[type="number"], select{
             appearance:none; -webkit-appearance:none;
             width:100%; padding:10px 12px; border-radius:12px;
@@ -76,7 +132,6 @@
         input[type="text"]:focus, input[type="number"]:focus, select:focus{ border-color:var(--accent) }
         .actions{ display:flex; gap:8px; justify-content:flex-end; align-items:center; }
 
-        /* Buttons */
         .btn{
             border:1px solid var(--border); background:#fff; color:var(--text);
             border-radius:12px; padding:10px 14px; font-weight:600; cursor:pointer;
@@ -89,11 +144,9 @@
         .btn-ghost{ background:transparent; border-color:transparent; color:var(--muted); }
         .btn-ghost:hover{ background:var(--soft); color:var(--text) }
 
-        /* Legend */
         .legend{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin:12px 4px 0 }
         .chip{ display:inline-block; width:14px; height:14px; border-radius:4px; border:1px solid var(--border); margin-right:6px; vertical-align:middle; }
 
-        /* Tables */
         .table-wrap{
             margin-top:12px; border:1px solid var(--border); border-radius:16px; overflow:hidden; background:var(--card);
             box-shadow:0 6px 24px rgba(0,0,0,.04);
@@ -105,19 +158,15 @@
             border-bottom:1px solid var(--border); padding:10px 12px; text-align:left;
         }
         tbody td{ padding:10px 12px; border-bottom:1px solid var(--border) }
-        /* IMPORTANT: no odd-even for the FIRST table; keep colors 100% visible */
-        /* Stripe only the detailed table: */
         #detailedWorklogsTable tbody tr:nth-child(2n){ background:var(--row-alt) }
 
         tfoot td{ position:sticky; bottom:0; background:#fff; border-top:1px solid var(--border); padding:10px 12px; }
 
-        /* Row status colors (calendar) */
         tr.gray   { background:#f5f6f8; color:#aaa; }
         tr.green  { background:#eaf9ef; }
         tr.yellow { background:#fff8e1; }
         tr.red    { background:#ffeef0; }
 
-        /* Footer pills */
         .footer-grid{ display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; line-height:1.5 }
         .pill{ display:inline-flex; gap:6px; align-items:center; padding:6px 10px; border-radius:999px;
             background:var(--soft); border:1px solid var(--border); font-size:13px; }
@@ -125,12 +174,10 @@
         .delta-pos{ color:var(--green) }
         .delta-neg{ color:var(--red) }
 
-        /* Sections */
         .section-title{ font-size:16px; margin:18px 4px 8px; font-weight:700 }
 
         .table-wrap.small{ max-height:42vh; overflow:auto; }
 
-        /* Tooltip (for Jalaali cell showing Gregorian) */
         .tip{ position:relative; cursor:help; border-bottom:1px dotted rgba(0,0,0,.2); }
         .tip[data-tip]::after{
             content:attr(data-tip);
@@ -140,116 +187,45 @@
             opacity:0; pointer-events:none; transition:opacity .12s ease, transform .12s ease;
         }
         .tip[data-tip]:hover::after{ opacity:1; transform:translateY(6px); }
-        /* keep inside viewport */
         .tip[data-tip]{ max-width:100%; overflow:visible }
 
-        /* Debug */
         pre{ white-space:pre-wrap; background:#fff; border:1px solid var(--border); border-radius:12px; padding:10px; color:#374151 }
     </style>
 </head>
 <body>
-<div class="app">
-    <header>
-        <h1>Alo Worklogs <small style="font-size: 12px; color: #aaa">by SkyBlueDev</small></h1>
-        <button class="btn btn-ghost" id="logout">Logout</button>
-    </header>
-    <div class="muted">Timezone: <strong>Asia/Tehran</strong>. Thu/Fri & static holidays are non-workdays. Future days are shown too.</div>
-
-    <div class="card" style="margin-top:10px;">
-        <div class="controls">
-            <div class="field">
-                <span class="label">Jira Base URL</span>
-                <div class="input-wrap" id="baseUrlWrap">
-                    <!-- Globe icon -->
-                    <svg class="left-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/>
-                        <path d="M3 12h18M12 3c2.5 2.8 3.75 6.2 3.75 9s-1.25 6.2-3.75 9c-2.5-2.8-3.75-6.2-3.75-9S9.5 5.8 12 3Z" stroke="currentColor" stroke-width="1.5"/>
-                    </svg>
-                    <input id="baseUrl" placeholder="https://your-domain.atlassian.net" />
-                    <span class="status-dot" id="baseUrlStatus" aria-hidden="true"></span>
-                </div>
-            </div>
-
-            <div class="field">
-                <span class="label">Jira User</span>
-                <select id="usernameSelect"></select>
-            </div>
-
-            <div class="field">
-                <span class="label">Jalaali Year</span>
-                <input id="jYear" type="text" inputmode="numeric" />
-            </div>
-
-            <div class="field">
-                <span class="label">Jalaali Month</span>
-                <select id="jMonth"></select>
-            </div>
-
-            <div class="field">
-                <span class="label">Time-off (hours this month)</span>
-                <input id="timeOffHours" type="number" step="0.5" min="0" value="0" />
-            </div>
-
-            <div class="actions">
-                <button class="btn" id="save">Save</button>
-                <button class="btn btn-primary" id="scan">Scan Now</button>
-            </div>
+<div class="layout">
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-title">Alo Worklogs</div>
+            <div class="sidebar-subtitle">by SkyBlueDev</div>
         </div>
-    </div>
+        <nav class="nav" aria-label="Primary">
+            <button type="button" class="nav-item is-active" data-route="profile" aria-controls="profileView">Profile</button>
+            <button type="button" class="nav-item" data-route="monthly-report" aria-controls="monthlyReportView">Monthly Report</button>
+        </nav>
+    </aside>
+    <main class="main">
+        <header>
+            <h1 id="viewTitle">Profile</h1>
+            <button class="btn btn-ghost" id="logout">Logout</button>
+        </header>
 
-    <div class="legend">
-        <span><span class="chip" style="background:#f5f6f8;"></span>Gray: non-workday (Thu/Fri/holiday) or future</span>
-        <span><span class="chip" style="background:#eaf9ef;"></span>Green: 6 to &lt;7 hours</span>
-        <span><span class="chip" style="background:#fff8e1;"></span>Yellow: 7 to 8 hours</span>
-        <span><span class="chip" style="background:#ffeef0;"></span>Red: &lt;6 hours or &gt;8 hours</span>
-    </div>
+        <section
+                id="profileView"
+                class="view is-active"
+                data-route-view="profile"
+                data-route-title="Profile"
+                data-template="./views/profile.html">
+        </section>
 
-    <!-- Calendar table (no odd/even stripes, status colors only) -->
-    <div class="table-wrap" style="margin-top:12px;">
-        <table id="results" style="display:none;">
-            <thead>
-            <tr>
-                <th>#</th>
-                <th>Jalaali</th>
-                <th>Weekday</th>
-                <th>Flags</th>
-                <th>Hours</th>
-            </tr>
-            </thead>
-            <tbody></tbody>
-            <tfoot>
-            <tr>
-                <td colspan="5" id="footerTotals">
-                    <div class="footer-grid">
-                        <span class="pill">Totals here…</span>
-                    </div>
-                </td>
-            </tr>
-            </tfoot>
-        </table>
-    </div>
-
-    <!-- Detailed Worklogs (striped) -->
-    <div id="worklogsWrap" style="display:none; padding-bottom: 2rem;">
-        <div class="section-title">Detailed Worklogs</div>
-        <div class="table-wrap small">
-            <table id="detailedWorklogsTable">
-                <thead>
-                <tr>
-                    <th>#</th>
-                    <th>Jalaali Date</th>
-                    <th>Gregorian Date</th>
-                    <th>Issue</th>
-                    <th>Summary</th>
-                    <th>Hours</th>
-                    <th>Time Spent</th>
-                    <th>Comment</th>
-                </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
-        </div>
-    </div>
+        <section
+                id="monthlyReportView"
+                class="view"
+                data-route-view="monthly-report"
+                data-route-title="Monthly Report"
+                data-template="./views/monthly-report.html">
+        </section>
+    </main>
 </div>
 
 <script src="./renderer.js"></script>
