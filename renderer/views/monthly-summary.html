@@ -1,41 +1,6 @@
 <div class="app">
     <div class="muted">Timezone: <strong>Asia/Tehran</strong>. Thu/Fri &amp; static holidays are non-workdays. Future days are shown too.</div>
 
-    <div class="card" style="margin-top:10px;">
-        <div class="controls">
-            <div class="field">
-                <span class="label">Jira Base URL</span>
-                <div class="input-wrap" id="baseUrlWrap">
-                    <svg class="left-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/>
-                        <path d="M3 12h18M12 3c2.5 2.8 3.75 6.2 3.75 9s-1.25 6.2-3.75 9c-2.5-2.8-3.75-6.2-3.75-9S9.5 5.8 12 3Z" stroke="currentColor" stroke-width="1.5"/>
-                    </svg>
-                    <input id="baseUrl" placeholder="https://your-domain.atlassian.net" />
-                    <span class="status-dot" id="baseUrlStatus" aria-hidden="true"></span>
-                </div>
-            </div>
-
-            <div class="field">
-                <span class="label">Jalaali Year</span>
-                <input id="jYear" type="text" inputmode="numeric" />
-            </div>
-
-            <div class="field">
-                <span class="label">Jalaali Month</span>
-                <select id="jMonth"></select>
-            </div>
-
-            <div class="field">
-                <span class="label">Time-off (hours this month)</span>
-                <input id="timeOffHours" type="number" step="0.5" min="0" value="0" />
-            </div>
-
-            <div class="actions">
-                <button class="btn" id="save">Save</button>
-            </div>
-        </div>
-    </div>
-
     <div class="legend">
         <span><span class="chip" style="background:#f5f6f8;"></span>Gray: non-workday (Thu/Fri/holiday) or future</span>
         <span><span class="chip" style="background:#eaf9ef;"></span>Green: 6 to &lt;7 hours</span>
