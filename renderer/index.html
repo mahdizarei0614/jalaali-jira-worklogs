@@ -19,21 +19,110 @@
             --green:#34c759;
             --yellow:#ffcc00;
         }
-        *{box-sizing:border-box; margin: 0; padding: 0}
+        *{box-sizing:border-box; margin:0; padding:0}
         html,body{height:100%}
         body{
-            margin:0; padding:1rem;
+            margin:0;
             font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Inter,system-ui,Arial,sans-serif;
-            color:var(--text); background:var(--bg);
+            color:var(--text);
+            background:var(--bg);
         }
 
-        /* Shell */
-        .app{ max-width:1240px; margin:0 auto; }
-        header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
-        h1{ font-size:20px; margin:0; letter-spacing:.2px; }
+        .shell{
+            min-height:100vh;
+            display:flex;
+            background:var(--bg);
+        }
+
+        .sidebar{
+            width:240px;
+            padding:32px 24px;
+            background:var(--card);
+            border-right:1px solid var(--border);
+            display:flex;
+            flex-direction:column;
+            gap:24px;
+            box-shadow:8px 0 24px rgba(15,17,21,0.04);
+        }
+        .sidebar__brand{
+            font-size:20px;
+            font-weight:700;
+            line-height:1.3;
+            color:var(--text);
+        }
+        .sidebar__brand small{
+            display:block;
+            font-size:12px;
+            font-weight:500;
+            color:var(--muted);
+        }
+        .sidebar__nav{
+            display:flex;
+            flex-direction:column;
+            gap:8px;
+        }
+        .nav-item{
+            appearance:none;
+            border:0;
+            background:transparent;
+            color:var(--muted);
+            font-weight:600;
+            font-size:14px;
+            padding:10px 14px;
+            border-radius:12px;
+            text-align:left;
+            cursor:pointer;
+            transition:background .2s ease, color .2s ease;
+        }
+        .nav-item:hover{
+            background:var(--soft);
+            color:var(--text);
+        }
+        .nav-item.is-active{
+            background:var(--accent);
+            color:#fff;
+        }
+        .sidebar__footer{
+            margin-top:auto;
+            font-size:12px;
+            color:var(--muted);
+        }
+
+        .content{
+            flex:1;
+            padding:32px;
+            display:flex;
+            flex-direction:column;
+            gap:24px;
+            overflow:auto;
+        }
+        header{
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+        }
+        h1{
+            font-size:24px;
+            margin:0;
+            letter-spacing:.2px;
+        }
         .muted{ color:var(--muted); font-size:13px }
 
+        .view{
+            display:none;
+        }
+        .view.is-active{
+            display:block;
+        }
+        .profile-placeholder{
+            max-width:620px;
+            display:flex;
+            flex-direction:column;
+            gap:12px;
+        }
+
         /* Cards / Controls */
+        .app{ max-width:1240px; margin:0 auto; }
         .card{
             background:var(--card); border:1px solid var(--border);
             border-radius:16px; padding:14px; box-shadow:0 6px 24px rgba(0,0,0,.04);
@@ -148,108 +237,132 @@
     </style>
 </head>
 <body>
-<div class="app">
-    <header>
-        <h1>Alo Worklogs <small style="font-size: 12px; color: #aaa">by SkyBlueDev</small></h1>
-        <button class="btn btn-ghost" id="logout">Logout</button>
-    </header>
-    <div class="muted">Timezone: <strong>Asia/Tehran</strong>. Thu/Fri & static holidays are non-workdays. Future days are shown too.</div>
+<div class="shell">
+    <aside class="sidebar">
+        <div class="sidebar__brand">Alo Worklogs<small>by SkyBlueDev</small></div>
+        <nav class="sidebar__nav">
+            <button type="button" class="nav-item is-active" data-target-view="profile" data-label="Profile">Profile</button>
+            <button type="button" class="nav-item" data-target-view="monthly-report" data-label="Monthly Report">Monthly Report</button>
+        </nav>
+        <div class="sidebar__footer">More sections coming soon…</div>
+    </aside>
+    <main class="content">
+        <header>
+            <h1 id="viewTitle">Profile</h1>
+            <button class="btn btn-ghost" id="logout">Logout</button>
+        </header>
 
-    <div class="card" style="margin-top:10px;">
-        <div class="controls">
-            <div class="field">
-                <span class="label">Jira Base URL</span>
-                <div class="input-wrap" id="baseUrlWrap">
-                    <!-- Globe icon -->
-                    <svg class="left-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/>
-                        <path d="M3 12h18M12 3c2.5 2.8 3.75 6.2 3.75 9s-1.25 6.2-3.75 9c-2.5-2.8-3.75-6.2-3.75-9S9.5 5.8 12 3Z" stroke="currentColor" stroke-width="1.5"/>
-                    </svg>
-                    <input id="baseUrl" placeholder="https://your-domain.atlassian.net" />
-                    <span class="status-dot" id="baseUrlStatus" aria-hidden="true"></span>
-                </div>
+        <section class="view is-active" data-view="profile">
+            <div class="card profile-placeholder">
+                <h2 style="font-size:18px;">Your Profile</h2>
+                <p class="muted">Profile details will live here. We&#39;ll add more information soon.</p>
+                <p class="muted">Use the menu on the left to switch to the monthly report.</p>
             </div>
+        </section>
 
-            <div class="field">
-                <span class="label">Jira User</span>
-                <select id="usernameSelect"></select>
-            </div>
+        <section class="view" data-view="monthly-report">
+            <div class="app">
+                <div class="muted">Timezone: <strong>Asia/Tehran</strong>. Thu/Fri &amp; static holidays are non-workdays. Future days are shown too.</div>
 
-            <div class="field">
-                <span class="label">Jalaali Year</span>
-                <input id="jYear" type="text" inputmode="numeric" />
-            </div>
+                <div class="card" style="margin-top:10px;">
+                    <div class="controls">
+                        <div class="field">
+                            <span class="label">Jira Base URL</span>
+                            <div class="input-wrap" id="baseUrlWrap">
+                                <!-- Globe icon -->
+                                <svg class="left-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/>
+                                    <path d="M3 12h18M12 3c2.5 2.8 3.75 6.2 3.75 9s-1.25 6.2-3.75 9c-2.5-2.8-3.75-6.2-3.75-9S9.5 5.8 12 3Z" stroke="currentColor" stroke-width="1.5"/>
+                                </svg>
+                                <input id="baseUrl" placeholder="https://your-domain.atlassian.net" />
+                                <span class="status-dot" id="baseUrlStatus" aria-hidden="true"></span>
+                            </div>
+                        </div>
 
-            <div class="field">
-                <span class="label">Jalaali Month</span>
-                <select id="jMonth"></select>
-            </div>
+                        <div class="field">
+                            <span class="label">Jira User</span>
+                            <select id="usernameSelect"></select>
+                        </div>
 
-            <div class="field">
-                <span class="label">Time-off (hours this month)</span>
-                <input id="timeOffHours" type="number" step="0.5" min="0" value="0" />
-            </div>
+                        <div class="field">
+                            <span class="label">Jalaali Year</span>
+                            <input id="jYear" type="text" inputmode="numeric" />
+                        </div>
 
-            <div class="actions">
-                <button class="btn" id="save">Save</button>
-                <button class="btn btn-primary" id="scan">Scan Now</button>
-            </div>
-        </div>
-    </div>
+                        <div class="field">
+                            <span class="label">Jalaali Month</span>
+                            <select id="jMonth"></select>
+                        </div>
 
-    <div class="legend">
-        <span><span class="chip" style="background:#f5f6f8;"></span>Gray: non-workday (Thu/Fri/holiday) or future</span>
-        <span><span class="chip" style="background:#eaf9ef;"></span>Green: 6 to &lt;7 hours</span>
-        <span><span class="chip" style="background:#fff8e1;"></span>Yellow: 7 to 8 hours</span>
-        <span><span class="chip" style="background:#ffeef0;"></span>Red: &lt;6 hours or &gt;8 hours</span>
-    </div>
+                        <div class="field">
+                            <span class="label">Time-off (hours this month)</span>
+                            <input id="timeOffHours" type="number" step="0.5" min="0" value="0" />
+                        </div>
 
-    <!-- Calendar table (no odd/even stripes, status colors only) -->
-    <div class="table-wrap" style="margin-top:12px;">
-        <table id="results" style="display:none;">
-            <thead>
-            <tr>
-                <th>#</th>
-                <th>Jalaali</th>
-                <th>Weekday</th>
-                <th>Flags</th>
-                <th>Hours</th>
-            </tr>
-            </thead>
-            <tbody></tbody>
-            <tfoot>
-            <tr>
-                <td colspan="5" id="footerTotals">
-                    <div class="footer-grid">
-                        <span class="pill">Totals here…</span>
+                        <div class="actions">
+                            <button class="btn" id="save">Save</button>
+                            <button class="btn btn-primary" id="scan">Scan Now</button>
+                        </div>
                     </div>
-                </td>
-            </tr>
-            </tfoot>
-        </table>
-    </div>
+                </div>
 
-    <!-- Detailed Worklogs (striped) -->
-    <div id="worklogsWrap" style="display:none; padding-bottom: 2rem;">
-        <div class="section-title">Detailed Worklogs</div>
-        <div class="table-wrap small">
-            <table id="detailedWorklogsTable">
-                <thead>
-                <tr>
-                    <th>#</th>
-                    <th>Jalaali Date</th>
-                    <th>Gregorian Date</th>
-                    <th>Issue</th>
-                    <th>Summary</th>
-                    <th>Hours</th>
-                    <th>Time Spent</th>
-                    <th>Comment</th>
-                </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
-        </div>
-    </div>
+                <div class="legend">
+                    <span><span class="chip" style="background:#f5f6f8;"></span>Gray: non-workday (Thu/Fri/holiday) or future</span>
+                    <span><span class="chip" style="background:#eaf9ef;"></span>Green: 6 to &lt;7 hours</span>
+                    <span><span class="chip" style="background:#fff8e1;"></span>Yellow: 7 to 8 hours</span>
+                    <span><span class="chip" style="background:#ffeef0;"></span>Red: &lt;6 hours or &gt;8 hours</span>
+                </div>
+
+                <!-- Calendar table (no odd/even stripes, status colors only) -->
+                <div class="table-wrap" style="margin-top:12px;">
+                    <table id="results" style="display:none;">
+                        <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Jalaali</th>
+                            <th>Weekday</th>
+                            <th>Flags</th>
+                            <th>Hours</th>
+                        </tr>
+                        </thead>
+                        <tbody></tbody>
+                        <tfoot>
+                        <tr>
+                            <td colspan="5" id="footerTotals">
+                                <div class="footer-grid">
+                                    <span class="pill">Totals here…</span>
+                                </div>
+                            </td>
+                        </tr>
+                        </tfoot>
+                    </table>
+                </div>
+
+                <!-- Detailed Worklogs (striped) -->
+                <div id="worklogsWrap" style="display:none; padding-bottom: 2rem;">
+                    <div class="section-title">Detailed Worklogs</div>
+                    <div class="table-wrap small">
+                        <table id="detailedWorklogsTable">
+                            <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Jalaali Date</th>
+                                <th>Gregorian Date</th>
+                                <th>Issue</th>
+                                <th>Summary</th>
+                                <th>Hours</th>
+                                <th>Time Spent</th>
+                                <th>Comment</th>
+                            </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+                <pre id="debug" style="display:none;"></pre>
+            </div>
+        </section>
+    </main>
 </div>
 
 <script src="./renderer.js"></script>

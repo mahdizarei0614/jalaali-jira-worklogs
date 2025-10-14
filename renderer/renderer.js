@@ -1,5 +1,34 @@
 (async function () {
     const $ = (s) => document.querySelector(s);
+    const viewTitle = $('#viewTitle');
+    const views = Array.from(document.querySelectorAll('[data-view]'));
+    const navButtons = Array.from(document.querySelectorAll('[data-target-view]'));
+
+    function setActiveView(target) {
+        const normalized = target || 'profile';
+        views.forEach((section) => {
+            section.classList.toggle('is-active', section.dataset.view === normalized);
+        });
+        navButtons.forEach((btn) => {
+            btn.classList.toggle('is-active', btn.dataset.targetView === normalized);
+        });
+        if (viewTitle) {
+            const activeButton = navButtons.find((btn) => btn.dataset.targetView === normalized);
+            if (activeButton) {
+                const label = activeButton.dataset.label || activeButton.textContent.trim();
+                viewTitle.textContent = label;
+            }
+        }
+    }
+
+    const initialView = navButtons.find((btn) => btn.classList.contains('is-active'))?.dataset.targetView || 'profile';
+    setActiveView(initialView);
+    navButtons.forEach((btn) => {
+        btn.addEventListener('click', () => {
+            setActiveView(btn.dataset.targetView);
+        });
+    });
+
     const baseUrl = $('#baseUrl');
     const baseUrlWrap = $('#baseUrlWrap');
     const usernameSelect = $('#usernameSelect');
