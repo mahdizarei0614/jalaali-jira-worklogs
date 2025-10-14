@@ -238,6 +238,15 @@
     const settingsPromise = loadSettings();
     const userSelectContext = initUserSelect($('#sidebarUserSelect'), reportState);
 
+    const loadingOverlay = $('#globalLoading');
+    if (loadingOverlay) {
+        reportState.subscribe((state) => {
+            const active = Boolean(state?.isFetching);
+            loadingOverlay.dataset.active = active ? 'true' : 'false';
+            loadingOverlay.setAttribute('aria-hidden', active ? 'false' : 'true');
+        });
+    }
+
     await initSelectionControls(reportState, settingsPromise);
 
     await Promise.all([
@@ -284,7 +293,7 @@
         const listeners = new Set();
         const state = {
             selection: {
-                team: DEFAULT_TEAM,
+                team: null,
                 jYear: null,
                 jMonth: null,
                 username: null,
@@ -373,6 +382,8 @@
                 }
                 const selectionSnapshot = { jYear, jMonth, username };
                 const run = (async () => {
+                    state.result = null;
+                    state.lastError = null;
                     state.isFetching = true;
                     state.notify();
                     const matchesSelection = () => (
@@ -453,18 +464,24 @@
 
         if (!teamSelectEl) {
             const fallbackUsers = getTeamUsers(DEFAULT_TEAM);
-            selectEl.innerHTML = fallbackUsers.map((u) => `<option value="${u.value}">${u.text}</option>`).join('');
-            const initialValue = selectEl.value || fallbackUsers[0]?.value || '';
-            if (initialValue) {
-                reportStateInstance.setSelection({ username: initialValue }, { silent: true });
-            }
-            selectEl.addEventListener('change', () => {
+            const options = ['<option value="">Select a user…</option>'];
+            fallbackUsers.forEach((user) => {
+                options.push(`<option value="${user.value}">${user.text}</option>`);
+            });
+            selectEl.innerHTML = options.join('');
+            selectEl.value = '';
+            selectEl.addEventListener('change', async () => {
                 const username = selectEl.value || null;
                 if (!username) {
-                    reportStateInstance.setSelection({ username: null }, { clearResult: true });
+                    await reportStateInstance.setSelection({ username: null }, { clearResult: true });
                     return;
                 }
-                reportStateInstance.setSelection({ username }, { pushSelection: true, refresh: true });
+                const updates = { username };
+                const derivedTeam = findTeamForUser(username) || DEFAULT_TEAM || null;
+                if (derivedTeam) {
+                    updates.team = derivedTeam;
+                }
+                await reportStateInstance.setSelection(updates, { pushSelection: true, refresh: true });
             });
             return {
                 enforceUserVisibility: async () => {},
@@ -474,35 +491,34 @@
             };
         }
 
-        teamSelectEl.innerHTML = TEAM_OPTIONS.map((team) => `<option value="${team.value}">${team.text}</option>`).join('');
+        const teamOptions = ['<option value="">Select a team…</option>'];
+        TEAM_OPTIONS.forEach((team) => {
+            teamOptions.push(`<option value="${team.value}">${team.text}</option>`);
+        });
+        teamSelectEl.innerHTML = teamOptions.join('');
 
         const initialSelection = reportStateInstance.getSelection();
-        let initialTeam = initialSelection.team && TEAM_USERS.has(initialSelection.team)
-            ? initialSelection.team
-            : (findTeamForUser(initialSelection.username) || DEFAULT_TEAM || TEAM_OPTIONS[0]?.value || '');
-        if (!initialTeam && TEAM_OPTIONS.length) {
-            initialTeam = TEAM_OPTIONS[0].value;
-        }
-        if (initialTeam) {
-            teamSelectEl.value = initialTeam;
-            if (initialTeam !== initialSelection.team) {
-                reportStateInstance.setSelection({ team: initialTeam }, { silent: true });
+        let initialTeam = null;
+        if (initialSelection.team && TEAM_USERS.has(initialSelection.team)) {
+            initialTeam = initialSelection.team;
+        } else if (initialSelection.username) {
+            const derived = findTeamForUser(initialSelection.username);
+            if (derived && TEAM_USERS.has(derived)) {
+                initialTeam = derived;
             }
         }
+        teamSelectEl.value = initialTeam || '';
+        if (initialTeam && initialTeam !== initialSelection.team) {
+            reportStateInstance.setSelection({ team: initialTeam }, { silent: true });
+        }
 
-        let defaultUser = initialSelection.username;
-        if (!defaultUser || findTeamForUser(defaultUser) !== teamSelectEl.value) {
-            defaultUser = getTeamUsers(teamSelectEl.value)[0]?.value || '';
-        }
-        renderUserOptions(teamSelectEl.value, defaultUser);
-        if (defaultUser && defaultUser !== initialSelection.username) {
-            reportStateInstance.setSelection({ username: defaultUser }, { silent: true });
-        }
+        renderUserOptions(teamSelectEl.value, initialSelection.username || '');
 
         teamSelectEl.addEventListener('change', async () => {
-            const team = teamSelectEl.value;
-            renderUserOptions(team, '');
-            await reportStateInstance.setSelection({ team, username: null }, { clearResult: true });
+            const rawTeam = teamSelectEl.value || '';
+            renderUserOptions(rawTeam, '');
+            const normalizedTeam = rawTeam || null;
+            await reportStateInstance.setSelection({ team: normalizedTeam, username: null }, { clearResult: true });
         });
 
         selectEl.addEventListener('change', async () => {
@@ -511,24 +527,38 @@
                 await reportStateInstance.setSelection({ username: null }, { clearResult: true });
                 return;
             }
-            await reportStateInstance.setSelection({ username }, { pushSelection: true, refresh: true });
+            const updates = { username };
+            if (!teamSelectEl.value) {
+                const derivedTeam = findTeamForUser(username);
+                if (derivedTeam) {
+                    teamSelectEl.value = derivedTeam;
+                    updates.team = derivedTeam;
+                    renderUserOptions(derivedTeam, username);
+                }
+            }
+            await reportStateInstance.setSelection(updates, { pushSelection: true, refresh: true });
         });
 
         reportStateInstance.subscribe((state) => {
             const selection = state.selection || {};
             const { team, username } = selection;
-            if (team && TEAM_USERS.has(team) && teamSelectEl.value !== team) {
-                teamSelectEl.value = team;
-                renderUserOptions(team, username || '');
-                return;
-            }
             if (team && TEAM_USERS.has(team)) {
+                if (teamSelectEl.value !== team) {
+                    teamSelectEl.value = team;
+                    renderUserOptions(team, username || '');
+                    return;
+                }
                 const users = getTeamUsers(team);
                 if (username && !users.some((u) => u.value === username)) {
                     ensureUserInTeamMap(team, { value: username, text: username });
                     renderUserOptions(team, username);
                     return;
                 }
+            } else {
+                if (teamSelectEl.value !== '') {
+                    teamSelectEl.value = '';
+                }
+                renderUserOptions('', '');
             }
             const desiredValue = username || '';
             if (selectEl.value !== desiredValue) {
@@ -553,27 +583,31 @@
                 }
 
                 const currentSelection = reportStateInstance.getSelection();
-                if (!currentSelection.team && teamForSelf) {
+                const isAdmin = ADMIN_USERS.has(self);
+
+                if (!isAdmin && !currentSelection.team && teamForSelf) {
                     await reportStateInstance.setSelection({ team: teamForSelf }, { silent: true });
                     teamSelectEl.value = teamForSelf;
                 }
 
-                const isAdmin = ADMIN_USERS.has(self);
                 if (!isAdmin) {
                     const activeTeam = teamSelectEl.value || teamForSelf;
                     if (activeTeam) {
                         teamSelectEl.value = activeTeam;
                         renderUserOptions(activeTeam, self);
+                    } else {
+                        renderUserOptions('', '');
                     }
                     teamSelectEl.disabled = true;
                     selectEl.disabled = true;
-                    await reportStateInstance.setSelection({ team: teamSelectEl.value, username: self }, { pushSelection: true, refresh: true, clearResult: true });
+                    const normalizedTeam = teamSelectEl.value || null;
+                    await reportStateInstance.setSelection({ team: normalizedTeam, username: self }, { pushSelection: true, refresh: true, clearResult: true });
                 } else {
                     teamSelectEl.disabled = false;
                     selectEl.disabled = false;
                     const activeTeam = currentSelection.team && TEAM_USERS.has(currentSelection.team)
                         ? currentSelection.team
-                        : (teamSelectEl.value || teamForSelf);
+                        : (teamSelectEl.value || '');
                     if (activeTeam) {
                         if (teamSelectEl.value !== activeTeam) {
                             teamSelectEl.value = activeTeam;
@@ -581,6 +615,8 @@
                         } else {
                             renderUserOptions(activeTeam, currentSelection.username || selectEl.value || '');
                         }
+                    } else {
+                        renderUserOptions('', '');
                     }
                 }
             } catch (err) {
