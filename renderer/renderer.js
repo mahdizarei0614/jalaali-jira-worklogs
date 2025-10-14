@@ -2,19 +2,54 @@
     const $ = (selector, root = document) => root.querySelector(selector);
     const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
-    const USER_OPTIONS = [
-        { text: 'رضا محمدخان', value: 'r.mohammadkhan' },
-        { text: 'محمدمهدی زارعی', value: 'Momahdi.Zarei' },
-        { text: 'فرید ذوالقدر', value: 'zolghadr.farid' },
-        { text: 'نیلوفر صمدزادگان', value: 'n.samadzadegan' },
-        { text: 'یحیی کنگی', value: 'y.kangi' },
-        { text: 'امیرحسین فاطمی', value: 'a.fatemi' },
-        { text: 'ابراهیم علیپور', value: 'e.alipour' },
-        { text: 'ریحانه اخگری', value: 'r.akhgari' }
-    ];
+    const TEAM_DEFINITIONS = {
+        frontend: {
+            label: 'Frontend Team',
+            users: [
+                { text: 'رضا محمدخان', value: 'r.mohammadkhan' },
+                { text: 'محمدمهدی زارعی', value: 'Momahdi.Zarei' },
+                { text: 'فرید ذوالقدر', value: 'zolghadr.farid' },
+                { text: 'نیلوفر صمدزادگان', value: 'n.samadzadegan' },
+                { text: 'یحیی کنگی', value: 'y.kangi' },
+                { text: 'امیرحسین فاطمی', value: 'a.fatemi' },
+                { text: 'ابراهیم علیپور', value: 'e.alipour' },
+                { text: 'ریحانه اخگری', value: 'r.akhgari' }
+            ]
+        },
+        backend: {
+            label: 'Backend Team',
+            users: [
+                { text: 'John Doe', value: 'john.doe' }
+            ]
+        }
+    };
+    const TEAM_OPTIONS = Object.entries(TEAM_DEFINITIONS).map(([value, { label }]) => ({
+        value,
+        text: label || value
+    }));
+    const DEFAULT_TEAM = TEAM_OPTIONS[0]?.value || null;
     const ADMIN_USERS = new Set(['Momahdi.Zarei', 'r.mohammadkhan']);
     const PERSIAN_MONTHS = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
     const routeHooks = new Map();
+
+    function getTeamUsers(teamKey) {
+        const team = TEAM_DEFINITIONS[teamKey];
+        if (!team || !Array.isArray(team.users)) {
+            return [];
+        }
+        return team.users;
+    }
+
+    function findTeamForUser(username) {
+        if (!username) return null;
+        for (const [teamKey, team] of Object.entries(TEAM_DEFINITIONS)) {
+            if (!team || !Array.isArray(team.users)) continue;
+            if (team.users.some((user) => user.value === username)) {
+                return teamKey;
+            }
+        }
+        return null;
+    }
 
     const routeTitle = $('#viewTitle');
     const defaultTitle = routeTitle?.textContent || 'Alo Worklogs';
@@ -179,7 +214,8 @@
 
     const reportState = createReportState();
     const settingsPromise = loadSettings();
-    const userSelectContext = initUserSelect($('#sidebarUserSelect'), reportState);
+    const teamSelectContext = initTeamSelect($('#sidebarTeamSelect'), reportState);
+    const userSelectContext = initUserSelect($('#sidebarUserSelect'), reportState, teamSelectContext);
 
     await initSelectionControls(reportState, settingsPromise);
 
@@ -227,6 +263,7 @@
         const listeners = new Set();
         const state = {
             selection: {
+                team: DEFAULT_TEAM || null,
                 jYear: null,
                 jMonth: null,
                 username: null,
@@ -261,10 +298,14 @@
             },
             async pushSelection() {
                 if (typeof window.appApi?.updateSelection !== 'function') return;
-                const { jYear, jMonth, username } = state.selection;
+                const { jYear, jMonth, username, team } = state.selection;
                 if (!Number.isFinite(jYear) || !Number.isFinite(jMonth) || !username) return;
                 try {
-                    await window.appApi.updateSelection({ jYear, jMonth, username });
+                    const payload = { jYear, jMonth, username };
+                    if (team) {
+                        payload.team = team;
+                    }
+                    await window.appApi.updateSelection(payload);
                 } catch (err) {
                     console.error('Failed to push selection', err);
                 }
@@ -281,6 +322,10 @@
                             changed = true;
                         }
                     }
+                }
+                if (changed && update && Object.prototype.hasOwnProperty.call(update, 'username') && !state.selection.username) {
+                    state.result = null;
+                    state.lastError = null;
                 }
                 if (changed && !silent) {
                     state.notify();
@@ -299,7 +344,7 @@
                 if (state.pendingRefresh && !force) {
                     return state.pendingRefresh;
                 }
-                const { jYear, jMonth, username } = state.selection;
+                const { jYear, jMonth, username, team } = state.selection;
                 if (!Number.isFinite(jYear) || !Number.isFinite(jMonth) || !username) {
                     return null;
                 }
@@ -312,7 +357,11 @@
                     state.notify();
                     try {
                         await state.pushSelection();
-                        const res = await window.appApi.scanNow({ jYear, jMonth, username });
+                        const payload = { jYear, jMonth, username };
+                        if (team) {
+                            payload.team = team;
+                        }
+                        const res = await window.appApi.scanNow(payload);
                         state.result = res;
                         state.lastError = res?.ok ? null : (res?.reason || null);
                         return res;
@@ -359,7 +408,85 @@
         return state;
     }
 
-    function initUserSelect(selectEl, reportStateInstance) {
+    function initTeamSelect(selectEl, reportStateInstance) {
+        if (!selectEl) {
+            return {
+                selectEl: null,
+                getTeam: () => DEFAULT_TEAM,
+                setTeam: () => {},
+                subscribe: () => () => {},
+                ready: Promise.resolve()
+            };
+        }
+
+        selectEl.innerHTML = TEAM_OPTIONS.map((team) => `<option value="${team.value}">${team.text}</option>`).join('');
+
+        const listeners = new Set();
+        let currentTeam = null;
+        let lastNotifyData = {};
+
+        function notify(team, data = {}) {
+            currentTeam = team;
+            lastNotifyData = data;
+            listeners.forEach((listener) => {
+                try {
+                    listener(team, data);
+                } catch (err) {
+                    console.error('Team listener execution failed', err);
+                }
+            });
+        }
+
+        const selection = reportStateInstance.getSelection();
+        const initialTeam = (selection.team && TEAM_DEFINITIONS[selection.team])
+            ? selection.team
+            : (selectEl.value || DEFAULT_TEAM);
+        if (initialTeam) {
+            selectEl.value = initialTeam;
+            reportStateInstance.setSelection({ team: initialTeam }, { silent: true });
+            notify(initialTeam, { initial: true, resetUser: false });
+        }
+
+        selectEl.addEventListener('change', () => {
+            const team = selectEl.value;
+            if (!team) return;
+            reportStateInstance.setSelection({ team, username: null }, { pushSelection: true, refresh: true });
+            notify(team, { resetUser: true });
+        });
+
+        return {
+            selectEl,
+            getTeam: () => currentTeam,
+            setTeam(team, options = {}) {
+                if (!team || !TEAM_DEFINITIONS[team]) return;
+                const { resetUser = false, silent = false } = options;
+                const changed = team !== currentTeam;
+                if (selectEl.value !== team) {
+                    selectEl.value = team;
+                }
+                const update = resetUser ? { team, username: null } : { team };
+                reportStateInstance.setSelection(update, { pushSelection: false, refresh: resetUser, silent });
+                if (changed || resetUser) {
+                    notify(team, { resetUser });
+                }
+            },
+            subscribe(listener) {
+                if (typeof listener !== 'function') return () => {};
+                listeners.add(listener);
+                if (currentTeam) {
+                    try {
+                        listener(currentTeam, { ...lastNotifyData, replay: true });
+                    } catch (err) {
+                        console.error('Team listener execution failed', err);
+                    }
+                }
+                return () => listeners.delete(listener);
+            },
+            ready: Promise.resolve()
+        };
+    }
+
+    function initUserSelect(selectEl, reportStateInstance, teamContext) {
         if (!selectEl) {
             return {
                 enforceUserVisibility: async () => {},
@@ -368,15 +495,50 @@
             };
         }
 
-        selectEl.innerHTML = USER_OPTIONS.map((u) => `<option value="${u.value}">${u.text}</option>`).join('');
-        const initialValue = selectEl.value || USER_OPTIONS[0]?.value || '';
-        if (initialValue) {
-            reportStateInstance.setSelection({ username: initialValue }, { silent: true });
+        const USER_PLACEHOLDER_LABEL = 'Select a user…';
+
+        function updateUsersForTeam(team, { preserveSelection = true, autoSelect = false } = {}) {
+            const resolvedTeam = team && TEAM_DEFINITIONS[team] ? team : (teamContext?.getTeam?.() || DEFAULT_TEAM);
+            const users = getTeamUsers(resolvedTeam);
+            const placeholderOption = `<option value="">${USER_PLACEHOLDER_LABEL}</option>`;
+            selectEl.innerHTML = [placeholderOption]
+                .concat(users.map((u) => `<option value="${u.value}">${u.text}</option>`))
+                .join('');
+            selectEl.disabled = users.length === 0;
+
+            const selection = reportStateInstance.getSelection();
+            let nextValue = '';
+            if (preserveSelection && selection.username && users.some((u) => u.value === selection.username)) {
+                nextValue = selection.username;
+            } else if (autoSelect && users[0]) {
+                nextValue = users[0].value;
+            }
+            selectEl.value = nextValue;
+            return { users, value: nextValue, team: resolvedTeam };
+        }
+
+        const initialTeam = teamContext?.getTeam?.() || reportStateInstance.getSelection().team || DEFAULT_TEAM;
+        const initialRender = updateUsersForTeam(initialTeam, { preserveSelection: true, autoSelect: true });
+        if (initialRender.value) {
+            reportStateInstance.setSelection({ username: initialRender.value }, { silent: true });
+        }
+
+        if (teamContext && typeof teamContext.subscribe === 'function') {
+            teamContext.subscribe((team, { resetUser } = {}) => {
+                const render = updateUsersForTeam(team, { preserveSelection: !resetUser, autoSelect: false });
+                if (!render.value && resetUser) {
+                    selectEl.value = '';
+                }
+            });
         }
 
         selectEl.addEventListener('change', () => {
             const username = selectEl.value;
-            reportStateInstance.setSelection({ username }, { pushSelection: true, refresh: true });
+            if (username) {
+                reportStateInstance.setSelection({ username }, { pushSelection: true, refresh: true });
+            } else {
+                reportStateInstance.setSelection({ username: null }, { refresh: true });
+            }
         });
 
         async function enforceUserVisibility() {
@@ -389,18 +551,47 @@
                 const self = (who.username || '').trim();
                 if (!self) return;
 
+                const displayName = who.raw?.displayName || self;
+                let resolvedTeam = findTeamForUser(self);
+                if (!resolvedTeam) {
+                    resolvedTeam = teamContext?.getTeam?.() || DEFAULT_TEAM;
+                    if (resolvedTeam && TEAM_DEFINITIONS[resolvedTeam]) {
+                        const teamUsers = getTeamUsers(resolvedTeam);
+                        if (!teamUsers.some((user) => user.value === self)) {
+                            teamUsers.push({ text: displayName, value: self });
+                        }
+                    }
+                }
+
+                if (resolvedTeam && teamContext && typeof teamContext.setTeam === 'function') {
+                    teamContext.setTeam(resolvedTeam, { resetUser: false });
+                } else {
+                    updateUsersForTeam(resolvedTeam || initialTeam, { preserveSelection: true, autoSelect: false });
+                }
+
                 if (![...selectEl.options].some((o) => o.value === self)) {
                     const opt = document.createElement('option');
                     opt.value = self;
-                    opt.textContent = who.raw?.displayName || self;
+                    opt.textContent = displayName;
                     selectEl.appendChild(opt);
                 }
 
+                const teamSelectEl = teamContext?.selectEl || null;
+
                 if (ADMIN_USERS.has(self)) {
                     selectEl.disabled = false;
+                    if (teamSelectEl) {
+                        teamSelectEl.disabled = false;
+                    }
                 } else {
                     selectEl.value = self;
                     selectEl.disabled = true;
+                    if (resolvedTeam && teamSelectEl && teamSelectEl.value !== resolvedTeam) {
+                        teamSelectEl.value = resolvedTeam;
+                    }
+                    if (teamSelectEl) {
+                        teamSelectEl.disabled = true;
+                    }
                 }
 
                 await reportStateInstance.setSelection({ username: selectEl.value }, { pushSelection: true, refresh: true });
@@ -584,15 +775,17 @@
             });
 
             updateFooter(state);
-            if (debug) {
-                const selection = reportStateInstance.getSelection();
-                debug.textContent = JSON.stringify({
-                    username: selection.username,
-                    selection: {
-                        jYear: selection.jYear,
-                        jMonth: selection.jMonth
-                    },
-                    jql: res.jql,
+                if (debug) {
+                    const selection = reportStateInstance.getSelection();
+                    debug.textContent = JSON.stringify({
+                        username: selection.username,
+                        team: selection.team,
+                        selection: {
+                            jYear: selection.jYear,
+                            jMonth: selection.jMonth,
+                            team: selection.team
+                        },
+                        jql: res.jql,
                     month: res.jMonthLabel,
                     timeOffHours: selection.timeOffHours,
                     totals: {
