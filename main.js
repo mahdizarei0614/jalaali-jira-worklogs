@@ -3,6 +3,7 @@
 
     const { app, BrowserWindow, ipcMain, Notification, Tray, Menu, nativeImage } = require('electron');
     const path = require('path');
+    const fs = require('fs/promises');
     const axios = require('axios');
     const keytar = require('keytar');
     const cron = require('node-cron');
@@ -449,6 +450,19 @@
     });
     app.on('window-all-closed', (e) => { if (process.platform !== 'darwin') e.preventDefault(); });
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+
+    ipcMain.handle('views:load', async (_evt, relPath) => {
+        if (typeof relPath !== 'string') {
+            throw new Error('Invalid view path');
+        }
+        const normalized = path.normalize(relPath);
+        const baseDir = path.join(__dirname, 'renderer');
+        const resolved = path.resolve(baseDir, normalized);
+        if (path.relative(baseDir, resolved).startsWith('..')) {
+            throw new Error('Invalid view path');
+        }
+        return fs.readFile(resolved, 'utf8');
+    });
 
     ipcMain.handle('auth:whoami', async () => whoAmI());
 

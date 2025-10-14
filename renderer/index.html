@@ -210,114 +210,20 @@
             <button class="btn btn-ghost" id="logout">Logout</button>
         </header>
 
-        <section id="profileView" class="view is-active" data-route-view="profile" data-route-title="Profile">
-            <div class="card profile-card">
-                <div class="profile-heading">Your profile</div>
-                <p class="profile-body">This space will soon surface personalized information about your account and saved presets. Use the menu to explore other sections of the app.</p>
-                <div class="profile-actions">
-                    <span class="profile-pill">Account details coming soon</span>
-                    <span class="profile-pill">Work summary widgets planned</span>
-                </div>
-            </div>
+        <section
+                id="profileView"
+                class="view is-active"
+                data-route-view="profile"
+                data-route-title="Profile"
+                data-template="./views/profile.html">
         </section>
 
-        <section id="monthlyReportView" class="view" data-route-view="monthly-report" data-route-title="Monthly Report">
-            <div class="app">
-                <div class="muted">Timezone: <strong>Asia/Tehran</strong>. Thu/Fri & static holidays are non-workdays. Future days are shown too.</div>
-
-                <div class="card" style="margin-top:10px;">
-                    <div class="controls">
-                        <div class="field">
-                            <span class="label">Jira Base URL</span>
-                            <div class="input-wrap" id="baseUrlWrap">
-                                <svg class="left-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                    <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/>
-                                    <path d="M3 12h18M12 3c2.5 2.8 3.75 6.2 3.75 9s-1.25 6.2-3.75 9c-2.5-2.8-3.75-6.2-3.75-9S9.5 5.8 12 3Z" stroke="currentColor" stroke-width="1.5"/>
-                                </svg>
-                                <input id="baseUrl" placeholder="https://your-domain.atlassian.net" />
-                                <span class="status-dot" id="baseUrlStatus" aria-hidden="true"></span>
-                            </div>
-                        </div>
-
-                        <div class="field">
-                            <span class="label">Jira User</span>
-                            <select id="usernameSelect"></select>
-                        </div>
-
-                        <div class="field">
-                            <span class="label">Jalaali Year</span>
-                            <input id="jYear" type="text" inputmode="numeric" />
-                        </div>
-
-                        <div class="field">
-                            <span class="label">Jalaali Month</span>
-                            <select id="jMonth"></select>
-                        </div>
-
-                        <div class="field">
-                            <span class="label">Time-off (hours this month)</span>
-                            <input id="timeOffHours" type="number" step="0.5" min="0" value="0" />
-                        </div>
-
-                        <div class="actions">
-                            <button class="btn" id="save">Save</button>
-                            <button class="btn btn-primary" id="scan">Scan Now</button>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="legend">
-                    <span><span class="chip" style="background:#f5f6f8;"></span>Gray: non-workday (Thu/Fri/holiday) or future</span>
-                    <span><span class="chip" style="background:#eaf9ef;"></span>Green: 6 to &lt;7 hours</span>
-                    <span><span class="chip" style="background:#fff8e1;"></span>Yellow: 7 to 8 hours</span>
-                    <span><span class="chip" style="background:#ffeef0;"></span>Red: &lt;6 hours or &gt;8 hours</span>
-                </div>
-
-                <div class="table-wrap" style="margin-top:12px;">
-                    <table id="results" style="display:none;">
-                        <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>Jalaali</th>
-                            <th>Weekday</th>
-                            <th>Flags</th>
-                            <th>Hours</th>
-                        </tr>
-                        </thead>
-                        <tbody></tbody>
-                        <tfoot>
-                        <tr>
-                            <td colspan="5" id="footerTotals">
-                                <div class="footer-grid">
-                                    <span class="pill">Totals here…</span>
-                                </div>
-                            </td>
-                        </tr>
-                        </tfoot>
-                    </table>
-                </div>
-
-                <div id="worklogsWrap" style="display:none; padding-bottom: 2rem;">
-                    <div class="section-title">Detailed Worklogs</div>
-                    <div class="table-wrap small">
-                        <table id="detailedWorklogsTable">
-                            <thead>
-                            <tr>
-                                <th>#</th>
-                                <th>Jalaali Date</th>
-                                <th>Gregorian Date</th>
-                                <th>Issue</th>
-                                <th>Summary</th>
-                                <th>Hours</th>
-                                <th>Time Spent</th>
-                                <th>Comment</th>
-                            </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+        <section
+                id="monthlyReportView"
+                class="view"
+                data-route-view="monthly-report"
+                data-route-title="Monthly Report"
+                data-template="./views/monthly-report.html">
         </section>
     </main>
 </div>
