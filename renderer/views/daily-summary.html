@@ -1,0 +1,34 @@
+<div class="app">
+    <div class="muted">Timezone: <strong>Asia/Tehran</strong>. Thu/Fri &amp; static holidays are non-workdays. Future days are shown too.</div>
+
+    <div class="legend">
+        <span><span class="chip" style="background:#f5f6f8;"></span>Gray: non-workday (Thu/Fri/holiday) or future</span>
+        <span><span class="chip" style="background:#eaf9ef;"></span>Green: 6 to &lt;7 hours</span>
+        <span><span class="chip" style="background:#fff8e1;"></span>Yellow: 7 to 8 hours</span>
+        <span><span class="chip" style="background:#ffeef0;"></span>Red: &lt;6 hours or &gt;8 hours</span>
+    </div>
+
+    <div class="table-wrap" style="margin-top:12px;">
+        <table id="results" style="display:none;">
+            <thead>
+            <tr>
+                <th>#</th>
+                <th>Jalaali</th>
+                <th>Weekday</th>
+                <th>Flags</th>
+                <th>Hours</th>
+            </tr>
+            </thead>
+            <tbody></tbody>
+            <tfoot>
+            <tr>
+                <td colspan="5" id="footerTotals">
+                    <div class="footer-grid">
+                        <span class="pill">Totals here…</span>
+                    </div>
+                </td>
+            </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>

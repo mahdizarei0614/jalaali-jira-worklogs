@@ -33,18 +33,21 @@
             min-height:100vh;
         }
         .sidebar{
-            width:240px;
+            width:260px;
             background:var(--card);
             border-right:1px solid var(--border);
             display:flex;
             flex-direction:column;
-            gap:24px;
+            gap:20px;
             padding:24px 20px;
             box-shadow:8px 0 32px rgba(15,17,21,.06);
         }
         .sidebar-header{ display:flex; flex-direction:column; gap:4px; }
         .sidebar-title{ font-size:20px; font-weight:700; letter-spacing:.2px; }
         .sidebar-subtitle{ font-size:12px; color:var(--muted); }
+        .sidebar-section{ display:flex; flex-direction:column; gap:8px; }
+        .sidebar-label{ font-size:12px; font-weight:600; color:#2a2a2a; padding-left:2px; }
+        .sidebar-divider{ height:1px; background:var(--border); margin:6px 0 2px; }
         .nav{ display:flex; flex-direction:column; gap:6px; }
         .nav-item{
             display:flex;
@@ -207,31 +210,89 @@
             <div class="sidebar-title">Alo Worklogs</div>
             <div class="sidebar-subtitle">by SkyBlueDev</div>
         </div>
+        <div class="sidebar-section" id="sidebarUserSection">
+            <label class="sidebar-label" for="usernameSelect">Jira User</label>
+            <select id="usernameSelect"></select>
+        </div>
+        <div class="sidebar-divider" role="separator"></div>
         <nav class="nav" aria-label="Primary">
-            <button type="button" class="nav-item is-active" data-route="profile" aria-controls="profileView">Profile</button>
-            <button type="button" class="nav-item" data-route="monthly-report" aria-controls="monthlyReportView">Monthly Report</button>
+            <button type="button" class="nav-item is-active" data-route="daily-summary" aria-controls="dailySummaryView">Daily Summary</button>
+            <button type="button" class="nav-item" data-route="detailed-worklogs" aria-controls="detailedWorklogsView">Detailed Worklogs</button>
+            <button type="button" class="nav-item" data-route="due-issues" aria-controls="dueIssuesView">Issues Due</button>
+            <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView">Quarter Report</button>
         </nav>
     </aside>
     <main class="main">
         <header>
-            <h1 id="viewTitle">Profile</h1>
+            <h1 id="viewTitle">Daily Summary</h1>
             <button class="btn btn-ghost" id="logout">Logout</button>
         </header>
 
+        <div class="card" id="reportControls">
+            <div class="controls">
+                <div class="field">
+                    <span class="label">Jira Base URL</span>
+                    <div class="input-wrap" id="baseUrlWrap">
+                        <svg class="left-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/>
+                            <path d="M3 12h18M12 3c2.5 2.8 3.75 6.2 3.75 9s-1.25 6.2-3.75 9c-2.5-2.8-3.75-6.2-3.75-9S9.5 5.8 12 3Z" stroke="currentColor" stroke-width="1.5"/>
+                        </svg>
+                        <input id="baseUrl" placeholder="https://your-domain.atlassian.net" />
+                        <span class="status-dot" id="baseUrlStatus" aria-hidden="true"></span>
+                    </div>
+                </div>
+
+                <div class="field">
+                    <span class="label">Jalaali Year</span>
+                    <input id="jYear" type="text" inputmode="numeric" />
+                </div>
+
+                <div class="field">
+                    <span class="label">Jalaali Month</span>
+                    <select id="jMonth"></select>
+                </div>
+
+                <div class="field">
+                    <span class="label">Time-off (hours this month)</span>
+                    <input id="timeOffHours" type="number" step="0.5" min="0" value="0" />
+                </div>
+
+                <div class="actions">
+                    <button class="btn" id="save">Save</button>
+                </div>
+            </div>
+        </div>
+
         <section
-                id="profileView"
+                id="dailySummaryView"
                 class="view is-active"
-                data-route-view="profile"
-                data-route-title="Profile"
-                data-template="./views/profile.html">
+                data-route-view="daily-summary"
+                data-route-title="Daily Summary"
+                data-template="./views/daily-summary.html">
         </section>
 
         <section
-                id="monthlyReportView"
+                id="detailedWorklogsView"
                 class="view"
-                data-route-view="monthly-report"
-                data-route-title="Monthly Report"
-                data-template="./views/monthly-report.html">
+                data-route-view="detailed-worklogs"
+                data-route-title="Detailed Worklogs"
+                data-template="./views/detailed-worklogs.html">
+        </section>
+
+        <section
+                id="dueIssuesView"
+                class="view"
+                data-route-view="due-issues"
+                data-route-title="Issues Due"
+                data-template="./views/due-issues.html">
+        </section>
+
+        <section
+                id="quarterReportView"
+                class="view"
+                data-route-view="quarter-report"
+                data-route-title="Quarter Report"
+                data-template="./views/quarter-report.html">
         </section>
     </main>
 </div>
