@@ -1,0 +1,26 @@
+<section class="settings-grid" aria-labelledby="settingsHeading">
+    <h2 id="settingsHeading" class="visually-hidden">Application settings</h2>
+    <article class="settings-card" aria-labelledby="appearanceSettingsTitle">
+        <div class="settings-card__header">
+            <div>
+                <h3 id="appearanceSettingsTitle" class="settings-card__title">Appearance</h3>
+                <p class="settings-card__description">Choose the theme that feels right for your workspace.</p>
+            </div>
+            <button class="btn settings-action theme-toggle" id="themeToggle" type="button" aria-pressed="false">
+                <span class="theme-toggle__icon" aria-hidden="true">🌙</span>
+                <span data-theme-label>Dark mode</span>
+            </button>
+        </div>
+    </article>
+    <article class="settings-card" aria-labelledby="accountSettingsTitle">
+        <div class="settings-card__header">
+            <div>
+                <h3 id="accountSettingsTitle" class="settings-card__title">Account</h3>
+                <p class="settings-card__description">Sign out to switch users or end your current session.</p>
+            </div>
+        </div>
+        <div class="settings-card__actions">
+            <button class="btn btn-ghost btn-danger settings-action" id="logout" type="button">Logout</button>
+        </div>
+    </article>
+</section>

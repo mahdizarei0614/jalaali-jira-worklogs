@@ -93,6 +93,17 @@
             color:var(--text);
             background:var(--bg);
         }
+        .visually-hidden{
+            position:absolute;
+            width:1px;
+            height:1px;
+            padding:0;
+            margin:-1px;
+            overflow:hidden;
+            clip:rect(0 0 0 0);
+            white-space:nowrap;
+            border:0;
+        }
 
         .layout{
             display:flex;
@@ -107,6 +118,11 @@
             gap:18px;
             padding:24px 20px;
             box-shadow:8px 0 32px rgba(15,17,21,.06);
+            position:sticky;
+            top:0;
+            align-self:flex-start;
+            height:100vh;
+            overflow:auto;
         }
         .sidebar-header{ display:flex; flex-direction:column; gap:4px; } 
         .sidebar-title{ font-size:20px; font-weight:700; letter-spacing:.2px; } 
@@ -155,17 +171,25 @@
             gap:24px;
             overflow-y:auto;
         }
-        header{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
+        header{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
         h1{ font-size:20px; margin:0; letter-spacing:.2px; }
         .muted{ color:var(--muted); font-size:13px }
-
-        .header-actions{ display:flex; align-items:center; gap:8px; }
 
         .theme-toggle{ display:inline-flex; align-items:center; gap:6px; }
         .theme-toggle__icon{ font-size:16px; line-height:1; }
 
         .view{ display:none; }
         .view.is-active{ display:block; }
+
+        .settings-grid{ display:flex; flex-direction:column; gap:20px; max-width:520px; }
+        .settings-card{ background:var(--card); border:1px solid var(--border); border-radius:16px; padding:24px; box-shadow:0 12px 30px rgba(15,17,21,.06); }
+        .settings-card__header{ display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+        .settings-card__title{ font-size:16px; font-weight:700; letter-spacing:.2px; }
+        .settings-card__description{ font-size:13px; color:var(--muted); margin-top:6px; line-height:1.5; }
+        .settings-card__actions{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:16px; }
+        .settings-action{ display:inline-flex; align-items:center; gap:8px; }
+        .btn-danger{ color:var(--red); }
+        .btn-danger:hover{ background:var(--chip-red); border-color:var(--red); color:var(--red); }
 
         .profile-card{ max-width:520px; box-shadow:0 12px 30px rgba(15,17,21,.06); }
         .profile-heading{ font-size:18px; font-weight:700; margin-bottom:8px; }
@@ -316,18 +340,13 @@
             <button type="button" class="nav-item" data-route="due-issues" aria-controls="dueIssuesView">Issues Due This Month</button>
             <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView">Quarter Report</button>
             <button type="button" class="nav-item" data-route="configurations" aria-controls="configurationsView">Configurations</button>
+            <hr class="sidebar-divider" />
+            <button type="button" class="nav-item" data-route="settings" aria-controls="settingsView">Settings</button>
         </nav>
     </aside>
     <main class="main">
         <header>
             <h1 id="viewTitle">Monthly Summary</h1>
-            <div class="header-actions">
-                <button class="btn btn-ghost theme-toggle" id="themeToggle" type="button" aria-pressed="false">
-                    <span class="theme-toggle__icon" aria-hidden="true">🌙</span>
-                    <span data-theme-label>Dark mode</span>
-                </button>
-                <button class="btn btn-ghost" id="logout">Logout</button>
-            </div>
         </header>
 
         <section
@@ -368,6 +387,14 @@
                 data-route-view="configurations"
                 data-route-title="Configurations"
                 data-template="./views/configurations.html">
+        </section>
+
+        <section
+                id="settingsView"
+                class="view"
+                data-route-view="settings"
+                data-route-title="Settings"
+                data-template="./views/settings.html">
         </section>
     </main>
 </div>
