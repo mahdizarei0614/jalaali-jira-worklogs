@@ -171,13 +171,15 @@
         const footerTotals = root.querySelector('#footerTotals');
         const worklogsWrap = root.querySelector('#worklogsWrap');
         const detailedBody = root.querySelector('#detailedWorklogsTable tbody');
+        const dueThisMonthSection = root.querySelector('#dueThisMonthSection');
+        const dueThisMonthBody = root.querySelector('#dueThisMonthTable tbody');
         const quarterSection = root.querySelector('#quarterReportSection');
         const quarterTableBody = root.querySelector('#quarterReportTable tbody');
         const debug = root.querySelector('#debug');
         const saveBtn = root.querySelector('#save');
         const scanBtn = root.querySelector('#scan');
 
-        if (!baseUrl || !baseUrlWrap || !usernameSelect || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !worklogsWrap || !detailedBody || !quarterSection || !quarterTableBody || !saveBtn || !scanBtn) {
+        if (!baseUrl || !baseUrlWrap || !usernameSelect || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !worklogsWrap || !detailedBody || !dueThisMonthSection || !dueThisMonthBody || !quarterSection || !quarterTableBody || !saveBtn || !scanBtn) {
             console.warn('Monthly report view missing required elements.');
             return;
         }
@@ -186,6 +188,11 @@
             const num = Number.parseFloat(val);
             if (!Number.isFinite(num)) return '0.00';
             return num.toFixed(2);
+        };
+
+        const formatNullableHours = (val) => {
+            if (val == null) return '—';
+            return formatHours(val);
         };
 
         const weekdayName = (w) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][w] || String(w);
@@ -344,15 +351,18 @@
         function renderWorklogs(res) {
             detailedBody.innerHTML = '';
             if (Array.isArray(res.worklogs) && res.worklogs.length) {
-                Array.from(new Set(res.worklogs)).forEach((w, idx) => {
+                res.worklogs.forEach((w, idx) => {
                     const tr = document.createElement('tr');
+                    if (!w?.dueDate) {
+                        tr.classList.add('wl-no-due-date');
+                    }
                     tr.innerHTML = `
           <td>${idx + 1}</td>
           <td>${w.persianDate || ''}</td>
           <td>${w.date || ''}</td>
           <td>${w.issueKey || ''}</td>
           <td>${(w.summary || '').toString().replace(/\n/g, ' ')}</td>
-          <td>${Number(w.hours).toFixed(2)}</td>
+          <td>${formatHours(w.hours)}</td>
           <td>${w.timeSpent || ''}</td>
           <td>${(w.comment || '').toString().replace(/\n/g, ' ')}</td>
         `;
@@ -364,6 +374,63 @@
                 detailedBody.appendChild(tr);
             }
             worklogsWrap.style.display = 'block';
+        }
+
+        function renderDueThisMonth(data) {
+            if (!dueThisMonthSection || !dueThisMonthBody) return;
+
+            dueThisMonthBody.innerHTML = '';
+
+            if (!data) {
+                dueThisMonthSection.style.display = 'none';
+                dueThisMonthBody.innerHTML = '<tr><td colspan="6">—</td></tr>';
+                return;
+            }
+
+            if (!data.ok) {
+                dueThisMonthBody.innerHTML = `<tr><td colspan="6">${data.reason || 'Unable to load due issues.'}</td></tr>`;
+                dueThisMonthSection.style.display = 'block';
+                return;
+            }
+
+            const issues = Array.isArray(data.issues) ? data.issues : [];
+            if (!issues.length) {
+                dueThisMonthBody.innerHTML = '<tr><td colspan="6">—</td></tr>';
+                dueThisMonthSection.style.display = 'block';
+                return;
+            }
+
+            issues.forEach((issue) => {
+                const tr = document.createElement('tr');
+
+                const tdKey = document.createElement('td');
+                tdKey.textContent = issue.key || '';
+                tr.appendChild(tdKey);
+
+                const tdTitle = document.createElement('td');
+                tdTitle.textContent = (issue.summary || '').toString().replace(/\n/g, ' ');
+                tr.appendChild(tdTitle);
+
+                const tdStatus = document.createElement('td');
+                tdStatus.textContent = issue.status || '';
+                tr.appendChild(tdStatus);
+
+                const tdEstimate = document.createElement('td');
+                tdEstimate.textContent = formatNullableHours(issue.estimateHours);
+                tr.appendChild(tdEstimate);
+
+                const tdLogged = document.createElement('td');
+                tdLogged.textContent = formatNullableHours(issue.loggedHours);
+                tr.appendChild(tdLogged);
+
+                const tdRemaining = document.createElement('td');
+                tdRemaining.textContent = formatNullableHours(issue.remainingHours);
+                tr.appendChild(tdRemaining);
+
+                dueThisMonthBody.appendChild(tr);
+            });
+
+            dueThisMonthSection.style.display = 'block';
         }
 
         function renderQuarterReport(data) {
@@ -424,6 +491,7 @@
                 table.style.display = 'none';
                 tbody.innerHTML = '';
                 worklogsWrap.style.display = 'none';
+                renderDueThisMonth(null);
                 renderQuarterReport(null);
                 updateFooter();
                 return;
@@ -451,6 +519,7 @@
             table.style.display = 'table';
 
             renderWorklogs(res);
+            renderDueThisMonth(res.dueThisMonth);
             renderQuarterReport(res.quarterReport);
             updateFooter();
         }

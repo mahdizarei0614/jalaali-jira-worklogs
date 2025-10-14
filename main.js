@@ -128,7 +128,7 @@
         while (true) {
             const { data } = await axios.get(`${baseUrl}/rest/api/latest/search`, {
                 headers,
-                params: { jql, startAt, maxResults, fields: 'key,summary,worklog' }
+                params: { jql, startAt, maxResults, fields: 'key,summary,worklog,duedate,status' }
             });
             if (Array.isArray(data?.issues)) issues.push(...data.issues);
             const total = data?.total ?? issues.length;
@@ -136,6 +136,64 @@
             if (startAt >= total) break;
         }
         return issues;
+    }
+
+    async function searchIssuesDueThisMonth({ baseUrl, headers, username, nowG }) {
+        const issues = [];
+        const startAtMoment = nowG.clone().startOf('month');
+        const endAtMoment = nowG.clone().endOf('month');
+        const from = startAtMoment.format('YYYY-MM-DD');
+        const to = endAtMoment.format('YYYY-MM-DD');
+        const jql = `assignee = "${username}" AND duedate >= "${from}" AND duedate <= "${to}" ORDER BY duedate ASC`;
+
+        let startAt = 0;
+        const maxResults = 100;
+        try {
+            while (true) {
+                const { data } = await axios.get(`${baseUrl}/rest/api/latest/search`, {
+                    headers,
+                    params: {
+                        jql,
+                        startAt,
+                        maxResults,
+                        fields: 'key,summary,duedate,status,timetracking,timeestimate,timeoriginalestimate,timespent,aggregatetimeestimate,aggregatetimespent'
+                    }
+                });
+                if (Array.isArray(data?.issues)) issues.push(...data.issues);
+                const total = data?.total ?? issues.length;
+                startAt += data?.maxResults ?? maxResults;
+                if (startAt >= total) break;
+            }
+        } catch (err) {
+            const message = err?.response
+                ? `${err.response.status} ${err.response.statusText}`
+                : (err?.message || 'Failed to query due issues');
+            return { ok: false, reason: message, issues: [], jql };
+        }
+
+        const secsToHours = (val) => {
+            if (val == null) return null;
+            const num = Number(val);
+            if (!Number.isFinite(num)) return null;
+            return +(num / 3600).toFixed(2);
+        };
+
+        const normalizedIssues = issues.map((issue) => {
+            const fields = issue?.fields || {};
+            const tt = fields.timetracking || {};
+            const dueDate = typeof fields.duedate === 'string' ? fields.duedate : null;
+            return {
+                key: issue?.key || '',
+                summary: fields.summary || '',
+                status: fields?.status?.name || '',
+                dueDate,
+                estimateHours: secsToHours(tt.originalEstimateSeconds ?? fields.timeoriginalestimate),
+                loggedHours: secsToHours(tt.timeSpentSeconds ?? fields.timespent),
+                remainingHours: secsToHours(tt.remainingEstimateSeconds ?? fields.timeestimate)
+            };
+        });
+
+        return { ok: true, jql, issues: normalizedIssues };
     }
 
     async function getFullIssueWorklogs(baseUrl, headers, issueKey, initialContainer) {
@@ -282,6 +340,8 @@
                         worklogId: log.id || null,
                         issueKey: issue.key,
                         summary: issue?.fields?.summary,
+                        dueDate: typeof issue?.fields?.duedate === 'string' ? issue.fields.duedate : null,
+                        status: issue?.fields?.status?.name || '',
                         date,
                         persianDate: dateMoment.format('jYYYY/jMM/jDD'),
                         timeSpent: log.timeSpent,
@@ -476,7 +536,9 @@
             monthCache
         });
 
-        return { ...monthResult, quarterReport };
+        const dueThisMonth = await searchIssuesDueThisMonth({ baseUrl, headers, username, nowG });
+
+        return { ...monthResult, quarterReport, dueThisMonth };
     }
     // ===== Notifications / scheduling, auth, routing, IPC (unchanged from your last working version) =====
     // ... keep the rest of your file exactly as in your latest working build ...
