@@ -155,13 +155,17 @@
     });
 
     const reportState = createReportState();
+    const settingsPromise = loadSettings();
     const userSelectContext = initUserSelect($('#sidebarUserSelect'), reportState);
 
+    await initSelectionControls(reportState, settingsPromise);
+
     await Promise.all([
-        registerController('monthly-summary', (node) => initMonthlySummary(node, reportState, userSelectContext)),
+        registerController('monthly-summary', (node) => initMonthlySummary(node, reportState)),
         registerController('detailed-worklogs', (node) => initDetailedWorklogs(node, reportState)),
         registerController('due-issues', (node) => initDueIssues(node, reportState)),
-        registerController('quarter-report', (node) => initQuarterReport(node, reportState))
+        registerController('quarter-report', (node) => initQuarterReport(node, reportState)),
+        registerController('configurations', (node) => initConfigurations(node, reportState, userSelectContext, settingsPromise))
     ]);
 
     if (activeRoute && routeHooks.has(activeRoute)) {
@@ -387,117 +391,129 @@
         return { enforceUserVisibility, ready, selectEl };
     }
 
-    async function initMonthlySummary(root, reportStateInstance, userSelectCtx) {
+    async function initSelectionControls(reportStateInstance, settingsPromise) {
+        const yearSelect = $('#sidebarJYear');
+        const monthSelect = $('#sidebarJMonth');
+        const timeOffSelect = $('#sidebarTimeOffHours');
+
+        if (!yearSelect || !monthSelect || !timeOffSelect) {
+            return;
+        }
+
+        const settings = await Promise.resolve(settingsPromise).catch(() => ({}));
+
+        const settingsYear = parseJalaaliInt(settings?.defaultJYear);
+        const settingsMonth = parseJalaaliInt(settings?.defaultJMonth);
+        const settingsTimeOff = Number.parseFloat(settings?.defaultTimeOffHours);
+
+        const currentYear = getCurrentJalaaliYear();
+        const baseYear = settingsYear ?? currentYear ?? 1400;
+        const years = buildYearRange(baseYear, settingsYear, currentYear);
+        yearSelect.innerHTML = years.map((year) => `<option value="${year}">${year}</option>`).join('');
+        ensureOption(yearSelect, baseYear);
+
+        const currentMonth = getCurrentJalaaliMonth();
+        const initialMonth = Number.isFinite(settingsMonth) && settingsMonth >= 1 && settingsMonth <= 12
+            ? settingsMonth
+            : (currentMonth ?? 1);
+        monthSelect.innerHTML = PERSIAN_MONTHS.map((name, idx) => `<option value="${idx + 1}">${name}</option>`).join('');
+        ensureOption(monthSelect, initialMonth, PERSIAN_MONTHS[initialMonth - 1] || String(initialMonth));
+        monthSelect.value = String(initialMonth);
+
+        const timeOffOptions = buildTimeOffOptions();
+        timeOffSelect.innerHTML = timeOffOptions.map(({ value, label }) => `<option value="${value}">${label}</option>`).join('');
+        const initialTimeOff = Number.isFinite(settingsTimeOff) && settingsTimeOff >= 0 ? settingsTimeOff : 0;
+        ensureTimeOffOption(timeOffSelect, initialTimeOff);
+        timeOffSelect.value = timeOffKey(initialTimeOff);
+
+        yearSelect.value = String(baseYear);
+
+        await reportStateInstance.setSelection({
+            jYear: baseYear,
+            jMonth: initialMonth,
+            timeOffHours: initialTimeOff
+        }, { silent: true });
+
+        yearSelect.addEventListener('change', async () => {
+            const parsed = parseJalaaliInt(yearSelect.value);
+            await reportStateInstance.setSelection({ jYear: parsed }, { pushSelection: true, refresh: true });
+        });
+
+        monthSelect.addEventListener('change', async () => {
+            const parsed = parseJalaaliInt(monthSelect.value);
+            await reportStateInstance.setSelection({ jMonth: parsed }, { pushSelection: true, refresh: true });
+        });
+
+        timeOffSelect.addEventListener('change', async () => {
+            const parsed = Number.parseFloat(timeOffSelect.value);
+            const clean = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+            ensureTimeOffOption(timeOffSelect, clean);
+            timeOffSelect.value = timeOffKey(clean);
+            await reportStateInstance.setSelection({ timeOffHours: clean }, { refresh: true });
+        });
+
+        reportStateInstance.subscribe((state) => {
+            const selection = state.selection || {};
+            if (Number.isFinite(selection.jYear)) {
+                ensureOption(yearSelect, selection.jYear);
+                if (yearSelect.value !== String(selection.jYear)) {
+                    yearSelect.value = String(selection.jYear);
+                }
+            }
+            if (Number.isFinite(selection.jMonth)) {
+                ensureOption(monthSelect, selection.jMonth, PERSIAN_MONTHS[selection.jMonth - 1] || String(selection.jMonth));
+                if (monthSelect.value !== String(selection.jMonth)) {
+                    monthSelect.value = String(selection.jMonth);
+                }
+            }
+            const timeOff = Number.parseFloat(selection.timeOffHours);
+            if (Number.isFinite(timeOff) && timeOff >= 0) {
+                ensureTimeOffOption(timeOffSelect, timeOff);
+                const key = timeOffKey(timeOff);
+                if (timeOffSelect.value !== key) {
+                    timeOffSelect.value = key;
+                }
+            }
+        });
+
+        function ensureOption(selectEl, value, label = String(value)) {
+            const valueStr = String(value);
+            if (![...selectEl.options].some((opt) => opt.value === valueStr)) {
+                const opt = document.createElement('option');
+                opt.value = valueStr;
+                opt.textContent = label;
+                selectEl.appendChild(opt);
+            }
+        }
+
+        function ensureTimeOffOption(selectEl, value) {
+            const key = timeOffKey(value);
+            if (![...selectEl.options].some((opt) => opt.value === key)) {
+                const opt = document.createElement('option');
+                opt.value = key;
+                opt.textContent = displayTimeOffLabel(value);
+                selectEl.appendChild(opt);
+            }
+        }
+    }
+
+    async function initMonthlySummary(root, reportStateInstance) {
         if (!root || root.dataset.controllerReady === 'true') return {};
         root.dataset.controllerReady = 'true';
 
-        const baseUrl = root.querySelector('#baseUrl');
-        const baseUrlWrap = root.querySelector('#baseUrlWrap');
-        const jYear = root.querySelector('#jYear');
-        const jMonth = root.querySelector('#jMonth');
-        const timeOffHours = root.querySelector('#timeOffHours');
         const table = root.querySelector('#results');
         const tbody = table?.querySelector('tbody');
         const footerTotals = root.querySelector('#footerTotals');
         const debug = root.querySelector('#debug');
-        const saveBtn = root.querySelector('#save');
 
-        if (!baseUrl || !baseUrlWrap || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !saveBtn) {
+        if (!table || !tbody || !footerTotals) {
             console.warn('Monthly summary view missing required elements.');
             return {};
         }
 
-        jMonth.innerHTML = PERSIAN_MONTHS.map((name, idx) => `<option value="${idx + 1}">${name}</option>`).join('');
-
-        const settings = typeof window.appApi?.getSettings === 'function' ? await window.appApi.getSettings() : {};
-        baseUrl.value = settings?.baseUrl || '';
-        updateBaseUrlUI();
-
-        baseUrl.addEventListener('input', updateBaseUrlUI);
-        baseUrl.addEventListener('blur', () => {
-            baseUrl.value = stripTrailingSlash(sanitizeUrl(baseUrl.value));
-            updateBaseUrlUI();
-        });
-
-        if (settings?.defaultJYear) {
-            jYear.value = toAsciiDigits(settings.defaultJYear).replace(/[^\d]/g, '');
-        }
-        const defaultMonth = Number.parseInt(settings?.defaultJMonth, 10);
-        if (Number.isFinite(defaultMonth) && defaultMonth >= 1 && defaultMonth <= 12) {
-            jMonth.value = String(defaultMonth);
-        }
-
-        const initialTimeOff = Number.parseFloat(timeOffHours.value || '0') || 0;
-        timeOffHours.value = initialTimeOff ? String(initialTimeOff) : '0';
-
-        await reportStateInstance.setSelection({
-            jYear: parseJalaaliInt(jYear.value),
-            jMonth: parseJalaaliInt(jMonth.value),
-            timeOffHours: initialTimeOff
-        }, { silent: true });
-
-        jYear.addEventListener('input', async () => {
-            const caret = jYear.selectionStart;
-            jYear.value = toAsciiDigits(jYear.value).replace(/[^\d]/g, '');
-            try { jYear.setSelectionRange(caret, caret); } catch (err) { /* ignore */ }
-            const parsed = parseJalaaliInt(jYear.value);
-            await reportStateInstance.setSelection({ jYear: parsed }, { pushSelection: true, refresh: true });
-        });
-
-        jMonth.addEventListener('change', async () => {
-            const parsed = parseJalaaliInt(jMonth.value);
-            await reportStateInstance.setSelection({ jMonth: parsed }, { pushSelection: true, refresh: true });
-        });
-
-        timeOffHours.addEventListener('input', () => {
-            const parsed = Number.parseFloat(timeOffHours.value);
-            const clean = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-            reportStateInstance.setSelection({ timeOffHours: clean });
-        });
-
-        saveBtn.addEventListener('click', async () => {
-            baseUrl.value = stripTrailingSlash(sanitizeUrl(baseUrl.value));
-            updateBaseUrlUI();
-            if (typeof window.appApi?.saveSettings === 'function') {
-                try {
-                    await window.appApi.saveSettings({ baseUrl: baseUrl.value });
-                } catch (err) {
-                    console.error('Failed to save settings', err);
-                }
-            } else {
-                console.warn('saveSettings API is not available.');
-            }
-            if (userSelectCtx?.enforceUserVisibility) {
-                await userSelectCtx.enforceUserVisibility();
-            }
-            await reportStateInstance.refresh({ force: true });
-        });
-
         reportStateInstance.subscribe((state) => {
-            syncInputs(state.selection);
             renderSummary(state);
         });
-
-        function syncInputs(selection) {
-            if (selection.jYear != null) {
-                const value = String(selection.jYear);
-                if (toAsciiDigits(jYear.value) !== value) {
-                    jYear.value = value;
-                }
-            }
-            if (selection.jMonth != null) {
-                const value = String(selection.jMonth);
-                if (jMonth.value !== value) {
-                    jMonth.value = value;
-                }
-            }
-            if (selection.timeOffHours != null) {
-                const current = Number.parseFloat(timeOffHours.value || '0');
-                if (!Number.isFinite(current) || Math.abs(current - selection.timeOffHours) > 1e-4) {
-                    timeOffHours.value = String(selection.timeOffHours);
-                }
-            }
-        }
 
         function renderSummary(state) {
             const res = state.result;
@@ -596,6 +612,52 @@
             `;
         }
 
+        return {
+            onShow: () => reportStateInstance.refresh()
+        };
+    }
+
+    async function initConfigurations(root, reportStateInstance, userSelectCtx, settingsPromise) {
+        if (!root || root.dataset.controllerReady === 'true') return {};
+        root.dataset.controllerReady = 'true';
+
+        const baseUrl = root.querySelector('#configBaseUrl');
+        const baseUrlWrap = root.querySelector('#configBaseUrlWrap');
+        const saveBtn = root.querySelector('#configSave');
+
+        if (!baseUrl || !baseUrlWrap || !saveBtn) {
+            console.warn('Configurations view missing required elements.');
+            return {};
+        }
+
+        const settings = await Promise.resolve(settingsPromise).catch(() => ({}));
+        baseUrl.value = settings?.baseUrl || '';
+        updateBaseUrlUI();
+
+        baseUrl.addEventListener('input', updateBaseUrlUI);
+        baseUrl.addEventListener('blur', () => {
+            baseUrl.value = stripTrailingSlash(sanitizeUrl(baseUrl.value));
+            updateBaseUrlUI();
+        });
+
+        saveBtn.addEventListener('click', async () => {
+            baseUrl.value = stripTrailingSlash(sanitizeUrl(baseUrl.value));
+            updateBaseUrlUI();
+            if (typeof window.appApi?.saveSettings === 'function') {
+                try {
+                    await window.appApi.saveSettings({ baseUrl: baseUrl.value });
+                } catch (err) {
+                    console.error('Failed to save settings', err);
+                }
+            } else {
+                console.warn('saveSettings API is not available.');
+            }
+            if (userSelectCtx?.enforceUserVisibility) {
+                await userSelectCtx.enforceUserVisibility();
+            }
+            await reportStateInstance.refresh({ force: true });
+        });
+
         function updateBaseUrlUI() {
             const value = sanitizeUrl(baseUrl.value);
             baseUrlWrap.classList.remove('is-valid', 'is-invalid');
@@ -607,9 +669,7 @@
             }
         }
 
-        return {
-            onShow: () => reportStateInstance.refresh()
-        };
+        return {};
     }
 
     function initDetailedWorklogs(root, reportStateInstance) {
@@ -794,6 +854,73 @@
         return {
             onShow: () => reportStateInstance.refresh()
         };
+    }
+
+    function buildYearRange(baseYear, ...extra) {
+        const values = new Set();
+        const core = Number.isFinite(baseYear) ? baseYear : 1400;
+        const start = Math.max(1300, core - 5);
+        const end = Math.max(core + 5, start);
+        for (let year = start; year <= end; year += 1) {
+            values.add(year);
+        }
+        [baseYear, ...extra].forEach((val) => {
+            if (Number.isFinite(val)) {
+                values.add(val);
+            }
+        });
+        return Array.from(values).sort((a, b) => a - b);
+    }
+
+    function buildTimeOffOptions() {
+        const options = [];
+        const maxHalfHours = 80 * 2;
+        for (let i = 0; i <= maxHalfHours; i += 1) {
+            const value = i / 2;
+            options.push({ value: timeOffKey(value), label: displayTimeOffLabel(value) });
+        }
+        return options;
+    }
+
+    function timeOffKey(val) {
+        const num = Number.isFinite(val) ? Math.max(0, val) : 0;
+        return (Math.round(num * 100) / 100).toFixed(2);
+    }
+
+    function displayTimeOffLabel(val) {
+        const num = Number.isFinite(val) ? Math.max(0, val) : 0;
+        const normalised = Math.round(num * 100) / 100;
+        return Number.isInteger(normalised) ? normalised.toFixed(0) : normalised.toFixed(1);
+    }
+
+    function getCurrentJalaaliYear() {
+        try {
+            const formatter = new Intl.DateTimeFormat('en-US-u-ca-persian', { year: 'numeric' });
+            return parseJalaaliInt(formatter.format(new Date()));
+        } catch (err) {
+            return null;
+        }
+    }
+
+    function getCurrentJalaaliMonth() {
+        try {
+            const formatter = new Intl.DateTimeFormat('en-US-u-ca-persian', { month: 'numeric' });
+            return parseJalaaliInt(formatter.format(new Date()));
+        } catch (err) {
+            return null;
+        }
+    }
+
+    async function loadSettings() {
+        if (typeof window.appApi?.getSettings === 'function') {
+            try {
+                const settings = await window.appApi.getSettings();
+                return settings || {};
+            } catch (err) {
+                console.error('Failed to load settings', err);
+            }
+        }
+        return {};
     }
 
     function setTableMessage(tbody, columns, message) {

@@ -222,12 +222,25 @@
             <label class="sidebar-label" for="sidebarUserSelect">User</label>
             <select id="sidebarUserSelect"></select>
         </div>
+        <div class="sidebar-control">
+            <label class="sidebar-label" for="sidebarJYear">Jalaali Year</label>
+            <select id="sidebarJYear"></select>
+        </div>
+        <div class="sidebar-control">
+            <label class="sidebar-label" for="sidebarJMonth">Jalaali Month</label>
+            <select id="sidebarJMonth"></select>
+        </div>
+        <div class="sidebar-control">
+            <label class="sidebar-label" for="sidebarTimeOffHours">Time-off (hours this month)</label>
+            <select id="sidebarTimeOffHours"></select>
+        </div>
         <hr class="sidebar-divider" />
         <nav class="nav" aria-label="Primary">
             <button type="button" class="nav-item is-active" data-route="monthly-summary" aria-controls="monthlySummaryView">Monthly Summary</button>
             <button type="button" class="nav-item" data-route="detailed-worklogs" aria-controls="detailedWorklogsView">Detailed Worklogs</button>
             <button type="button" class="nav-item" data-route="due-issues" aria-controls="dueIssuesView">Issues Due This Month</button>
             <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView">Quarter Report</button>
+            <button type="button" class="nav-item" data-route="configurations" aria-controls="configurationsView">Configurations</button>
         </nav>
     </aside>
     <main class="main">
@@ -266,6 +279,14 @@
                 data-route-view="quarter-report"
                 data-route-title="Quarter Report"
                 data-template="./views/quarter-report.html">
+        </section>
+
+        <section
+                id="configurationsView"
+                class="view"
+                data-route-view="configurations"
+                data-route-title="Configurations"
+                data-template="./views/configurations.html">
         </section>
     </main>
 </div>
