@@ -58,8 +58,25 @@
     });
 
     const initialActive = Array.from(viewNodes.entries()).find(([, el]) => el.classList.contains('is-active'));
-    const defaultRoute = initialActive ? initialActive[0] : (navItems[0]?.dataset.route || 'profile');
+    const defaultRoute = initialActive ? initialActive[0] : (navItems[0]?.dataset.route || 'monthly-summary');
     let activeRoute = null;
+    const routeChangeListeners = new Set();
+
+    function emitRouteChange(route) {
+        routeChangeListeners.forEach((cb) => {
+            try {
+                cb(route);
+            } catch (err) {
+                console.error(err);
+            }
+        });
+    }
+
+    function onRouteChange(cb) {
+        if (typeof cb === 'function') {
+            routeChangeListeners.add(cb);
+        }
+    }
 
     function setRoute(route, { pushState = true } = {}) {
         if (!viewNodes.has(route)) {
@@ -101,6 +118,8 @@
             window.location.hash = route;
         }
 
+        emitRouteChange(route);
+
         return route;
     }
 
@@ -130,9 +149,12 @@
         titleFor: (route) => routeLabels[route] || null
     });
 
+    const monthlyModule = createMonthlyModule({ onRouteChange });
     const controllers = {
-        profile: initProfile,
-        'monthly-report': initMonthlyReport
+        'monthly-summary': (root) => monthlyModule.initSummary(root),
+        'detailed-worklogs': (root) => monthlyModule.initDetailedWorklogs(root),
+        'due-issues': (root) => monthlyModule.initDueIssues(root),
+        'quarter-report': (root) => monthlyModule.initQuarterReport(root)
     };
 
     const initTasks = [];
@@ -151,48 +173,10 @@
         });
     }
 
-    async function initProfile(root) {
-        if (!root || root.dataset.controllerReady === 'true') return;
-        root.dataset.controllerReady = 'true';
-    }
-
-    async function initMonthlyReport(root) {
-        if (!root || root.dataset.controllerReady === 'true') return;
-        root.dataset.controllerReady = 'true';
-
-        const baseUrl = root.querySelector('#baseUrl');
-        const baseUrlWrap = root.querySelector('#baseUrlWrap');
-        const usernameSelect = root.querySelector('#usernameSelect');
-        const jYear = root.querySelector('#jYear');
-        const jMonth = root.querySelector('#jMonth');
-        const timeOffHours = root.querySelector('#timeOffHours');
-        const table = root.querySelector('#results');
-        const tbody = table?.querySelector('tbody');
-        const footerTotals = root.querySelector('#footerTotals');
-        const worklogsWrap = root.querySelector('#worklogsWrap');
-        const detailedBody = root.querySelector('#detailedWorklogsTable tbody');
-        const dueThisMonthSection = root.querySelector('#dueThisMonthSection');
-        const dueThisMonthBody = root.querySelector('#dueThisMonthTable tbody');
-        const quarterSection = root.querySelector('#quarterReportSection');
-        const quarterTableBody = root.querySelector('#quarterReportTable tbody');
-        const debug = root.querySelector('#debug');
-        const saveBtn = root.querySelector('#save');
-        const scanBtn = root.querySelector('#scan');
-
-        if (!baseUrl || !baseUrlWrap || !usernameSelect || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !worklogsWrap || !detailedBody || !dueThisMonthSection || !dueThisMonthBody || !quarterSection || !quarterTableBody || !saveBtn || !scanBtn) {
-            console.warn('Monthly report view missing required elements.');
-            return;
-        }
-
-        const formatHours = (val) => {
-            const num = Number.parseFloat(val);
-            if (!Number.isFinite(num)) return '0.00';
-            return num.toFixed(2);
-        };
-
-        const weekdayName = (w) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][w] || String(w);
+    function createMonthlyModule({ onRouteChange }) {
+        const monthlyRoutes = new Set(['monthly-summary', 'detailed-worklogs', 'due-issues', 'quarter-report']);
+        const usernameSelect = document.querySelector('#sidebarUserSelect');
         const persianMonths = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
-
         const userMap = [
             { text: 'رضا محمدخان', value: 'r.mohammadkhan' },
             { text: 'محمدمهدی زارعی', value: 'Momahdi.Zarei' },
@@ -203,38 +187,53 @@
             { text: 'ابراهیم علیپور', value: 'e.alipour' },
             { text: 'ریحانه اخگری', value: 'r.akhgari' }
         ];
-        usernameSelect.innerHTML = userMap.map((u) => `<option value="${u.value}">${u.text}</option>`).join('');
-        jMonth.innerHTML = persianMonths.map((name, idx) => `<option value="${idx + 1}">${name}</option>`).join('');
-
         const ADMIN_USERS = new Set(['Momahdi.Zarei', 'r.mohammadkhan']);
 
-        async function enforceUserVisibility() {
-            const who = await window.appApi.whoami();
-            if (!who?.ok) {
-                return;
-            }
-            const self = (who.username || '').trim();
-            if (!self) return;
+        let summary = null;
+        let worklogs = null;
+        let dueIssues = null;
+        let quarter = null;
+        let currentSelection = null;
+        let lastFetchedSelection = null;
+        let lastResult = null;
+        let fetching = false;
+        let refetchQueued = false;
+        let lastRequestedRoute = 'monthly-summary';
 
-            if (![...usernameSelect.options].some((o) => o.value === self)) {
-                const opt = document.createElement('option');
-                opt.value = self;
-                opt.textContent = (who.raw?.displayName || self);
-                usernameSelect.appendChild(opt);
-            }
+        ensureUserOptions();
 
-            if (ADMIN_USERS.has(self)) {
-                usernameSelect.disabled = false;
-            } else {
-                usernameSelect.value = self;
-                usernameSelect.disabled = true;
-            }
-
-            await window.appApi.updateSelection({
-                jYear: parseInt(toAsciiDigits(jYear.value), 10),
-                jMonth: parseInt(toAsciiDigits(jMonth.value), 10),
-                username: usernameSelect.value
+        if (usernameSelect) {
+            usernameSelect.addEventListener('change', async () => {
+                await pushSelection();
+                queueFetch('selection-change');
             });
+        }
+
+        if (typeof onRouteChange === 'function') {
+            onRouteChange((route) => {
+                if (!monthlyRoutes.has(route)) return;
+                if (!summary) return; // wait until summary init finishes
+                queueFetch('route-change', { route });
+            });
+        }
+
+        window.appApi.onScanResult((res) => {
+            if (!res?.ok) return;
+            if (!summary) return;
+            const cur = readSelectionFromInputs();
+            if (!cur) return;
+            if (res.jYear === cur.jYear && res.jMonth === cur.jMonth) {
+                lastResult = res;
+                lastFetchedSelection = { ...cur };
+                renderAll();
+            }
+        });
+
+        function ensureUserOptions() {
+            if (!usernameSelect) return;
+            if (usernameSelect.dataset.initialized === 'true') return;
+            usernameSelect.innerHTML = userMap.map((u) => `<option value="${u.value}">${u.text}</option>`).join('');
+            usernameSelect.dataset.initialized = 'true';
         }
 
         function toAsciiDigits(val) {
@@ -250,63 +249,178 @@
         function sanitizeUrl(u) { return (u || '').trim(); }
         function stripTrailingSlash(u) { return u.replace(/\/+$/, ''); }
         function isLikelyUrl(u) { return /^https?:\/\/[^/\s]+\.[^/\s]+/i.test(u); }
-        function updateBaseUrlUI() {
-            const v = sanitizeUrl(baseUrl.value);
-            baseUrlWrap.classList.remove('is-valid', 'is-invalid');
-            if (!v) return;
-            if (isLikelyUrl(v)) baseUrlWrap.classList.add('is-valid');
-            else baseUrlWrap.classList.add('is-invalid');
-        }
-        baseUrl.addEventListener('input', updateBaseUrlUI);
-        baseUrl.addEventListener('blur', () => {
-            baseUrl.value = stripTrailingSlash(sanitizeUrl(baseUrl.value));
-            updateBaseUrlUI();
-        });
 
-        const settings = await window.appApi.getSettings();
-        baseUrl.value = settings.baseUrl || '';
-        updateBaseUrlUI();
-        jYear.value = settings.defaultJYear || '';
-        jMonth.value = settings.defaultJMonth || 1;
-        usernameSelect.value = userMap[0].value;
-        await enforceUserVisibility();
+        function formatHours(val) {
+            const num = Number.parseFloat(val);
+            if (!Number.isFinite(num)) return '0.00';
+            return num.toFixed(2);
+        }
+
+        const weekdayName = (w) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][w] || String(w);
+
+        function readSelectionFromInputs() {
+            if (!summary) return null;
+            const year = Number.parseInt(toAsciiDigits(summary.jYear.value), 10);
+            const month = Number.parseInt(toAsciiDigits(summary.jMonth.value), 10);
+            const username = usernameSelect?.value?.trim();
+            if (!Number.isFinite(year) || !Number.isFinite(month) || !username) {
+                return null;
+            }
+            return { jYear: year, jMonth: month, username };
+        }
+
+        async function enforceUserVisibility() {
+            if (!usernameSelect) return;
+            try {
+                const who = await window.appApi.whoami();
+                if (!who?.ok) {
+                    return;
+                }
+                const self = (who.username || '').trim();
+                if (!self) return;
+
+                if (![...usernameSelect.options].some((o) => o.value === self)) {
+                    const opt = document.createElement('option');
+                    opt.value = self;
+                    opt.textContent = (who.raw?.displayName || self);
+                    usernameSelect.appendChild(opt);
+                }
+
+                if (ADMIN_USERS.has(self)) {
+                    usernameSelect.disabled = false;
+                } else {
+                    usernameSelect.value = self;
+                    usernameSelect.disabled = true;
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
 
         async function pushSelection() {
-            await window.appApi.updateSelection({
-                jYear: parseInt(toAsciiDigits(jYear.value), 10),
-                jMonth: parseInt(toAsciiDigits(jMonth.value), 10),
-                username: usernameSelect.value
+            const selection = readSelectionFromInputs();
+            if (!selection) {
+                return null;
+            }
+            currentSelection = selection;
+            await window.appApi.updateSelection(selection);
+            return selection;
+        }
+
+        function needsRefetch() {
+            if (!currentSelection) return false;
+            if (!lastFetchedSelection) return true;
+            return (
+                currentSelection.jYear !== lastFetchedSelection.jYear ||
+                currentSelection.jMonth !== lastFetchedSelection.jMonth ||
+                currentSelection.username !== lastFetchedSelection.username
+            );
+        }
+
+        function queueFetch(reason, { route } = {}) {
+            if (!summary) return;
+            if (!currentSelection) {
+                currentSelection = readSelectionFromInputs();
+            }
+            if (!currentSelection) return;
+
+            const forceFetch = reason === 'route-change';
+            if (route) {
+                lastRequestedRoute = route;
+            }
+
+            if (!needsRefetch() && !forceFetch) {
+                if (lastResult) {
+                    if (route) renderRoute(route);
+                    else renderRoute(lastRequestedRoute);
+                }
+                return;
+            }
+
+            if (fetching) {
+                refetchQueued = true;
+                return;
+            }
+
+            fetching = true;
+            window.appApi.scanNow({ ...currentSelection }).then((res) => {
+                lastResult = res;
+                lastFetchedSelection = { ...currentSelection };
+                renderAll();
+            }).catch((err) => {
+                console.error(err);
+            }).finally(() => {
+                fetching = false;
+                if (refetchQueued) {
+                    refetchQueued = false;
+                    queueFetch('refetch', { route: lastRequestedRoute });
+                }
             });
         }
 
-        jYear.addEventListener('input', async () => {
-            const caret = jYear.selectionStart;
-            jYear.value = toAsciiDigits(jYear.value).replace(/[^\d]/g, '');
-            try { jYear.setSelectionRange(caret, caret); } catch (err) { /* ignore */ }
-            await pushSelection();
-            updateFooter();
-        });
-        jMonth.addEventListener('change', async () => { await pushSelection(); updateFooter(); });
-        usernameSelect.addEventListener('change', pushSelection);
+        function renderAll() {
+            if (summary) renderSummary(lastResult);
+            if (worklogs) renderWorklogs(lastResult);
+            if (dueIssues) renderDueIssues(lastResult);
+            if (quarter) renderQuarterReport(lastResult?.quarterReport);
+        }
 
-        saveBtn.addEventListener('click', async () => {
-            baseUrl.value = stripTrailingSlash(sanitizeUrl(baseUrl.value));
-            updateBaseUrlUI();
-            await window.appApi.saveSettings({ baseUrl: baseUrl.value });
-            await enforceUserVisibility();
-        });
+        function renderRoute(route) {
+            switch (route) {
+                case 'monthly-summary':
+                    if (summary) renderSummary(lastResult);
+                    break;
+                case 'detailed-worklogs':
+                    if (worklogs) renderWorklogs(lastResult);
+                    break;
+                case 'due-issues':
+                    if (dueIssues) renderDueIssues(lastResult);
+                    break;
+                case 'quarter-report':
+                    if (quarter) renderQuarterReport(lastResult?.quarterReport);
+                    break;
+                default:
+                    break;
+            }
+        }
 
-        let lastResult = null;
+        function renderSummary(res) {
+            if (!summary) return;
+            const { table, tbody, footerTotals, timeOffHours } = summary;
+            if (!table || !tbody || !footerTotals) return;
 
-        function updateFooter() {
-            if (!lastResult?.ok) {
-                footerTotals.innerHTML = `<div class="footer-grid"><span class="pill">Totals here…</span></div>`;
+            if (!res?.ok || !Array.isArray(res.days)) {
+                table.style.display = 'none';
+                tbody.innerHTML = '';
+                footerTotals.innerHTML = '<div class="footer-grid"><span class="pill">Totals here…</span></div>';
                 return;
             }
-            const total = +(lastResult.totalHours ?? 0);
-            const expectedNow = +(lastResult.expectedByNowHours ?? 0);
-            const expectedEnd = +(lastResult.expectedByEndMonthHours ?? 0);
-            const timeOff = Math.max(0, parseFloat(timeOffHours.value || '0')) || 0;
+
+            tbody.innerHTML = '';
+            res.days.forEach((d, idx) => {
+                const tr = document.createElement('tr');
+                tr.className = d.color || '';
+                const flags = [
+                    d.isFuture ? 'future' : '',
+                    d.isThuFri ? 'Thu/Fri' : '',
+                    d.isHoliday ? 'holiday' : '',
+                    !d.isWorkday ? 'non-workday' : ''
+                ].filter(Boolean).join(', ');
+                tr.innerHTML = `
+        <td>${idx + 1}</td>
+        <td><span class="tip" data-tip="${d.g}">${d.j}</span></td>
+        <td>${weekdayName(d.weekday)}</td>
+        <td><small>${flags}</small></td>
+        <td>${Number.parseFloat(d.hours).toFixed(2)}</td>
+      `;
+                tbody.appendChild(tr);
+            });
+            table.style.display = 'table';
+
+            const total = +(res.totalHours ?? 0);
+            const expectedNow = +(res.expectedByNowHours ?? 0);
+            const expectedEnd = +(res.expectedByEndMonthHours ?? 0);
+            const timeOff = Math.max(0, parseFloat(timeOffHours?.value || '0')) || 0;
             const adjusted = +(total + timeOff);
             const deltaEnd = +(adjusted - expectedEnd);
             const deltaCls = deltaEnd >= 0 ? 'delta-pos' : 'delta-neg';
@@ -314,7 +428,7 @@
 
             footerTotals.innerHTML = `
       <div class="footer-grid">
-        <span class="pill"><strong>Month:</strong> ${lastResult.jMonthLabel}</span>
+        <span class="pill"><strong>Month:</strong> ${res.jMonthLabel}</span>
         <span class="pill"><strong>Total:</strong> ${total.toFixed(2)} h</span>
         <span class="pill"><strong>Time-off:</strong> ${timeOff.toFixed(2)} h</span>
         <span class="pill"><strong>Adjusted:</strong> ${adjusted.toFixed(2)} h</span>
@@ -323,32 +437,23 @@
         <span class="pill ${deltaCls}"><strong>${deltaLabel}:</strong> ${deltaEnd.toFixed(2)} h</span>
       </div>
     `;
-            if (debug) {
-                debug.textContent = JSON.stringify({
-                    username: usernameSelect.value,
-                    sent: { jYear: parseInt(toAsciiDigits(jYear.value), 10), jMonth: parseInt(toAsciiDigits(jMonth.value), 10) },
-                    jql: lastResult.jql,
-                    month: lastResult.jMonthLabel,
-                    timeOffHours: timeOff,
-                    totals: {
-                        totalHours: total,
-                        expectedByNowHours: expectedNow,
-                        expectedByEndMonthHours: expectedEnd,
-                        adjustedLoggedPlusTimeOff: adjusted,
-                        deltaVsEnd: deltaEnd
-                    },
-                    worklogsRows: lastResult.worklogs?.length ?? 0,
-                    deficitsSample: lastResult.deficits.slice(0, 10)
-                }, null, 2);
-            }
         }
 
         function renderWorklogs(res) {
-            detailedBody.innerHTML = '';
-            if (Array.isArray(res.worklogs) && res.worklogs.length) {
-                Array.from(new Set(res.worklogs)).forEach((w, idx) => {
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
+            if (!worklogs) return;
+            const { tbody } = worklogs;
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            if (!res?.ok || !Array.isArray(res.worklogs) || res.worklogs.length === 0) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = '<td colspan="8">—</td>';
+                tbody.appendChild(tr);
+                return;
+            }
+
+            Array.from(new Set(res.worklogs)).forEach((w, idx) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
           <td>${idx + 1}</td>
           <td>${w.persianDate || ''}</td>
           <td>${w.date || ''}</td>
@@ -358,30 +463,25 @@
           <td>${w.timeSpent || ''}</td>
           <td>${(w.comment || '').toString().replace(/\n/g, ' ')}</td>
         `;
-                    if (!w.dueDate) {
-                        tr.classList.add('no-due-date');
-                    }
-                    detailedBody.appendChild(tr);
-                });
-            } else {
-                const tr = document.createElement('tr');
-                tr.innerHTML = '<td colspan="8">—</td>';
-                detailedBody.appendChild(tr);
-            }
-            worklogsWrap.style.display = 'block';
+                if (!w.dueDate) {
+                    tr.classList.add('no-due-date');
+                }
+                tbody.appendChild(tr);
+            });
         }
 
         function renderDueIssues(res) {
-            if (!dueThisMonthSection || !dueThisMonthBody) return;
+            if (!dueIssues) return;
+            const { tbody } = dueIssues;
+            if (!tbody) return;
 
             const issues = Array.isArray(res?.dueIssuesCurrentMonth) ? res.dueIssuesCurrentMonth : [];
             if (!issues.length) {
-                dueThisMonthBody.innerHTML = '<tr><td colspan="8">—</td></tr>';
-                dueThisMonthSection.style.display = 'none';
+                tbody.innerHTML = '<tr><td colspan="8">—</td></tr>';
                 return;
             }
 
-            dueThisMonthBody.innerHTML = '';
+            tbody.innerHTML = '';
             issues.forEach((issue, idx) => {
                 const tr = document.createElement('tr');
                 const summary = (issue.summary || '').toString().replace(/\n/g, ' ');
@@ -395,22 +495,21 @@
           <td>${Number(issue.loggedHours || 0).toFixed(2)}</td>
           <td>${Number(issue.remainingHours || 0).toFixed(2)}</td>
         `;
-                dueThisMonthBody.appendChild(tr);
+                tbody.appendChild(tr);
             });
-
-            dueThisMonthSection.style.display = 'block';
         }
 
         function renderQuarterReport(data) {
-            if (!quarterSection || !quarterTableBody) return;
+            if (!quarter) return;
+            const { tbody } = quarter;
+            if (!tbody) return;
 
             if (!data?.ok || !Array.isArray(data.seasons) || data.seasons.length === 0) {
-                quarterTableBody.innerHTML = '<tr><td colspan="7">—</td></tr>';
-                quarterSection.style.display = 'none';
+                tbody.innerHTML = '<tr><td colspan="7">—</td></tr>';
                 return;
             }
 
-            quarterTableBody.innerHTML = '';
+            tbody.innerHTML = '';
             data.seasons.forEach((season) => {
                 const tr = document.createElement('tr');
                 const monthsHtml = (season.months || []).map((month) => {
@@ -446,70 +545,124 @@
                     <td>${formatHours(totals.expectedHours)} h</td>
                     <td class="${totalDeltaCls}">${totalDelta.toFixed(2)} h</td>
                 `;
-                quarterTableBody.appendChild(tr);
-            });
-
-            quarterSection.style.display = 'block';
-        }
-
-        function render(res) {
-            lastResult = res;
-
-            if (!res?.ok) {
-                table.style.display = 'none';
-                tbody.innerHTML = '';
-                worklogsWrap.style.display = 'none';
-                if (dueThisMonthSection) dueThisMonthSection.style.display = 'none';
-                if (dueThisMonthBody) dueThisMonthBody.innerHTML = '<tr><td colspan="8">—</td></tr>';
-                renderQuarterReport(null);
-                updateFooter();
-                return;
-            }
-
-            tbody.innerHTML = '';
-            res.days.forEach((d, idx) => {
-                const tr = document.createElement('tr');
-                tr.className = d.color;
-                const flags = [
-                    d.isFuture ? 'future' : '',
-                    d.isThuFri ? 'Thu/Fri' : '',
-                    d.isHoliday ? 'holiday' : '',
-                    !d.isWorkday ? 'non-workday' : ''
-                ].filter(Boolean).join(', ');
-                tr.innerHTML = `
-        <td>${idx + 1}</td>
-        <td><span class="tip" data-tip="${d.g}">${d.j}</span></td>
-        <td>${weekdayName(d.weekday)}</td>
-        <td><small>${flags}</small></td>
-        <td>${d.hours.toFixed(2)}</td>
-      `;
                 tbody.appendChild(tr);
             });
-            table.style.display = 'table';
-
-            renderWorklogs(res);
-            renderDueIssues(res);
-            renderQuarterReport(res.quarterReport);
-            updateFooter();
         }
 
-        scanBtn.addEventListener('click', async () => {
-            const jy = Number.parseInt(toAsciiDigits(jYear.value), 10);
-            const jm = Number.parseInt(toAsciiDigits(jMonth.value), 10);
-            await pushSelection();
-            const res = await window.appApi.scanNow({ jYear: jy, jMonth: jm, username: usernameSelect.value });
-            render(res);
-        });
+        return {
+            initSummary: async (root) => {
+                if (!root || root.dataset.controllerReady === 'true') return;
+                root.dataset.controllerReady = 'true';
 
-        timeOffHours.addEventListener('input', updateFooter);
+                const baseUrl = root.querySelector('#baseUrl');
+                const baseUrlWrap = root.querySelector('#baseUrlWrap');
+                const jYear = root.querySelector('#jYear');
+                const jMonth = root.querySelector('#jMonth');
+                const timeOffHours = root.querySelector('#timeOffHours');
+                const table = root.querySelector('#results');
+                const tbody = table?.querySelector('tbody');
+                const footerTotals = root.querySelector('#footerTotals');
+                const saveBtn = root.querySelector('#save');
 
-        window.appApi.onScanResult((res) => {
-            if (!res?.ok) return;
-            const curY = Number.parseInt(toAsciiDigits(jYear.value), 10);
-            const curM = Number.parseInt(toAsciiDigits(jMonth.value), 10);
-            if (res.jYear === curY && res.jMonth === curM) render(res);
-        });
+                if (!baseUrl || !baseUrlWrap || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !saveBtn) {
+                    console.warn('Monthly summary view missing required elements.');
+                    return;
+                }
 
-        await pushSelection();
+                summary = { root, baseUrl, baseUrlWrap, jYear, jMonth, timeOffHours, table, tbody, footerTotals, saveBtn };
+
+                jMonth.innerHTML = persianMonths.map((name, idx) => `<option value="${idx + 1}">${name}</option>`).join('');
+
+                const updateBaseUrlUI = () => {
+                    const v = sanitizeUrl(baseUrl.value);
+                    baseUrlWrap.classList.remove('is-valid', 'is-invalid');
+                    if (!v) return;
+                    if (isLikelyUrl(v)) baseUrlWrap.classList.add('is-valid');
+                    else baseUrlWrap.classList.add('is-invalid');
+                };
+                baseUrl.addEventListener('input', updateBaseUrlUI);
+                baseUrl.addEventListener('blur', () => {
+                    baseUrl.value = stripTrailingSlash(sanitizeUrl(baseUrl.value));
+                    updateBaseUrlUI();
+                });
+
+                const settings = await window.appApi.getSettings();
+                baseUrl.value = settings.baseUrl || '';
+                updateBaseUrlUI();
+                jYear.value = settings.defaultJYear || '';
+                jMonth.value = settings.defaultJMonth || 1;
+
+                await enforceUserVisibility();
+                if (!usernameSelect.disabled && !usernameSelect.value) {
+                    usernameSelect.value = userMap[0]?.value || '';
+                }
+
+                await pushSelection();
+
+                jYear.addEventListener('input', async () => {
+                    const caret = jYear.selectionStart;
+                    jYear.value = toAsciiDigits(jYear.value).replace(/[^\d]/g, '');
+                    try { jYear.setSelectionRange(caret, caret); } catch (err) { /* ignore */ }
+                    await pushSelection();
+                    queueFetch('selection-change');
+                });
+
+                jMonth.addEventListener('change', async () => {
+                    await pushSelection();
+                    queueFetch('selection-change');
+                });
+
+                timeOffHours.addEventListener('input', () => {
+                    renderSummary(lastResult);
+                });
+
+                saveBtn.addEventListener('click', async () => {
+                    baseUrl.value = stripTrailingSlash(sanitizeUrl(baseUrl.value));
+                    updateBaseUrlUI();
+                    await window.appApi.saveSettings({ baseUrl: baseUrl.value });
+                    await enforceUserVisibility();
+                    await pushSelection();
+                    queueFetch('settings-saved');
+                });
+
+                queueFetch('initial');
+            },
+            initDetailedWorklogs: (root) => {
+                if (!root || root.dataset.controllerReady === 'true') return;
+                root.dataset.controllerReady = 'true';
+                const table = root.querySelector('#detailedWorklogsTable');
+                const tbody = table?.querySelector('tbody');
+                if (!table || !tbody) {
+                    console.warn('Detailed worklogs view missing table.');
+                    return;
+                }
+                worklogs = { root, table, tbody };
+                renderWorklogs(lastResult);
+            },
+            initDueIssues: (root) => {
+                if (!root || root.dataset.controllerReady === 'true') return;
+                root.dataset.controllerReady = 'true';
+                const table = root.querySelector('#dueThisMonthTable');
+                const tbody = table?.querySelector('tbody');
+                if (!table || !tbody) {
+                    console.warn('Due issues view missing table.');
+                    return;
+                }
+                dueIssues = { root, table, tbody };
+                renderDueIssues(lastResult);
+            },
+            initQuarterReport: (root) => {
+                if (!root || root.dataset.controllerReady === 'true') return;
+                root.dataset.controllerReady = 'true';
+                const table = root.querySelector('#quarterReportTable');
+                const tbody = table?.querySelector('tbody');
+                if (!table || !tbody) {
+                    console.warn('Quarter report view missing table.');
+                    return;
+                }
+                quarter = { root, table, tbody };
+                renderQuarterReport(lastResult?.quarterReport);
+            }
+        };
     }
 })();

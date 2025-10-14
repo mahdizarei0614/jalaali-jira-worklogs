@@ -45,6 +45,9 @@
         .sidebar-header{ display:flex; flex-direction:column; gap:4px; }
         .sidebar-title{ font-size:20px; font-weight:700; letter-spacing:.2px; }
         .sidebar-subtitle{ font-size:12px; color:var(--muted); }
+        .sidebar-section{ display:flex; flex-direction:column; gap:8px; }
+        .sidebar-label{ font-size:12px; font-weight:600; color:#2a2a2a; }
+        .sidebar-divider{ height:1px; background:var(--border); margin:4px 0; }
         .nav{ display:flex; flex-direction:column; gap:6px; }
         .nav-item{
             display:flex;
@@ -207,31 +210,54 @@
             <div class="sidebar-title">Alo Worklogs</div>
             <div class="sidebar-subtitle">by SkyBlueDev</div>
         </div>
+        <div class="sidebar-section">
+            <label for="sidebarUserSelect" class="sidebar-label">Jira User</label>
+            <select id="sidebarUserSelect"></select>
+        </div>
+        <div class="sidebar-divider" role="presentation"></div>
         <nav class="nav" aria-label="Primary">
-            <button type="button" class="nav-item is-active" data-route="profile" aria-controls="profileView">Profile</button>
-            <button type="button" class="nav-item" data-route="monthly-report" aria-controls="monthlyReportView">Monthly Report</button>
+            <button type="button" class="nav-item is-active" data-route="monthly-summary" aria-controls="monthlySummaryView">Monthly Summary</button>
+            <button type="button" class="nav-item" data-route="detailed-worklogs" aria-controls="detailedWorklogsView">Detailed Worklogs</button>
+            <button type="button" class="nav-item" data-route="due-issues" aria-controls="dueIssuesView">Issues Due This Month</button>
+            <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView">Quarter Report</button>
         </nav>
     </aside>
     <main class="main">
         <header>
-            <h1 id="viewTitle">Profile</h1>
+            <h1 id="viewTitle">Monthly Summary</h1>
             <button class="btn btn-ghost" id="logout">Logout</button>
         </header>
 
         <section
-                id="profileView"
+                id="monthlySummaryView"
                 class="view is-active"
-                data-route-view="profile"
-                data-route-title="Profile"
-                data-template="./views/profile.html">
+                data-route-view="monthly-summary"
+                data-route-title="Monthly Summary"
+                data-template="./views/monthly-summary.html">
         </section>
 
         <section
-                id="monthlyReportView"
+                id="detailedWorklogsView"
                 class="view"
-                data-route-view="monthly-report"
-                data-route-title="Monthly Report"
-                data-template="./views/monthly-report.html">
+                data-route-view="detailed-worklogs"
+                data-route-title="Detailed Worklogs"
+                data-template="./views/detailed-worklogs.html">
+        </section>
+
+        <section
+                id="dueIssuesView"
+                class="view"
+                data-route-view="due-issues"
+                data-route-title="Issues Due This Month"
+                data-template="./views/due-issues.html">
+        </section>
+
+        <section
+                id="quarterReportView"
+                class="view"
+                data-route-view="quarter-report"
+                data-route-title="Quarter Report"
+                data-template="./views/quarter-report.html">
         </section>
     </main>
 </div>
