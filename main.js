@@ -16,6 +16,13 @@
     const TEHRAN_TZ = 'Asia/Tehran';
     const TEHRAN_OFFSET_MIN = 210; // +03:30
     const DAILY_REMINDER_TIMES = ['17:00', '18:00', '19:00'];
+    const PERSIAN_MONTHS = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
+    const QUARTERS = [
+        { key: 'spring', label: 'Spring', faLabel: 'بهار', months: [1, 2, 3] },
+        { key: 'summer', label: 'Summer', faLabel: 'تابستان', months: [4, 5, 6] },
+        { key: 'autumn', label: 'Autumn', faLabel: 'پاییز', months: [7, 8, 9] },
+        { key: 'winter', label: 'Winter', faLabel: 'زمستان', months: [10, 11, 12] }
+    ];
 
     const STATIC_JALALI_HOLIDAYS = [
         '1404/01/01',
@@ -259,6 +266,106 @@
         return { jYear, jMonth, source: 'current' };
     }
 
+    async function fetchWorklogRows({ baseUrl, headers, username, fromYMD, toYMD }) {
+        const jql = `worklogAuthor = "${username}" AND worklogDate >= "${fromYMD}" AND worklogDate <= "${toYMD}"`;
+        const issues = await searchIssuesWithWorklogsPaged(baseUrl, headers, jql);
+
+        let rows = [];
+        const seenWorklogKeys = new Set();
+
+        for (const issue of issues) {
+            const initial = issue?.fields?.worklog ?? {};
+            const fullWls = await getFullIssueWorklogs(baseUrl, headers, issue.key, initial);
+            rows.push(...buildReportRows(issue, fullWls, username, seenWorklogKeys));
+        }
+
+        const toMoment = moment(toYMD, 'YYYY-MM-DD', true);
+        const fromMoment = moment(fromYMD, 'YYYY-MM-DD', true);
+
+        rows = rows
+            .filter((r) => {
+                const m = moment(r.date, 'YYYY-MM-DD', true);
+                return m.isSameOrBefore(toMoment) && m.isSameOrAfter(fromMoment);
+            })
+            .sort((a, b) => moment(a.date, 'YYYY-MM-DD').diff(moment(b.date, 'YYYY-MM-DD')))
+            .map((r) => ({
+                ...r,
+                persianDate: moment(r.date, 'YYYY-MM-DD', true).format('jYYYY/jMM/jDD')
+            }));
+
+        return { rows, jql };
+    }
+
+    async function computeQuarterReport({ jYear, username, baseUrl, headers, nowG }) {
+        const quarters = [];
+
+        for (const quarter of QUARTERS) {
+            const firstMonth = quarter.months[0];
+            const lastMonth = quarter.months[quarter.months.length - 1];
+            const start = mj(jYear, firstMonth, 1).startOf('day');
+            const end = mj(jYear, lastMonth, 1).endOf('jMonth').endOf('day');
+
+            if (!start.isValid() || !end.isValid()) continue;
+
+            const fromYMD = start.format('YYYY-MM-DD');
+            const toYMD = end.format('YYYY-MM-DD');
+
+            const { rows } = await fetchWorklogRows({ baseUrl, headers, username, fromYMD, toYMD });
+
+            const totalHours = +rows.reduce((sum, entry) => sum + Number(entry.hours || 0), 0).toFixed(2);
+
+            let workdaysAll = 0;
+            let workdaysUntilNow = 0;
+
+            for (const month of quarter.months) {
+                const daysInMonth = mj(jYear, month, 1).endOf('jMonth').jDate();
+                const holidayDays = buildHolidaysSetFromStatic(jYear, month);
+
+                for (let jDay = 1; jDay <= daysInMonth; jDay++) {
+                    const g = mj(jYear, month, jDay);
+                    if (!g.isValid()) continue;
+                    const weekday = g.weekday();
+                    const isThuFri = weekday === 4 || weekday === 5;
+                    const isHoliday = holidayDays.has(jDay);
+                    const isWorkday = !(isThuFri || isHoliday);
+                    if (!isWorkday) continue;
+                    workdaysAll += 1;
+                    if (!g.isAfter(nowG, 'day')) {
+                        workdaysUntilNow += 1;
+                    }
+                }
+            }
+
+            const expectedByNowHours = +(6 * workdaysUntilNow).toFixed(2);
+            const expectedByEndQuarterHours = +(6 * workdaysAll).toFixed(2);
+            const deltaVsEnd = +(totalHours - expectedByEndQuarterHours).toFixed(2);
+
+            quarters.push({
+                key: quarter.key,
+                label: quarter.label,
+                faLabel: quarter.faLabel,
+                months: [...quarter.months],
+                monthsLabel: quarter.months.map((m) => PERSIAN_MONTHS[m - 1] || String(m)),
+                range: {
+                    from: start.format('jYYYY/jMM/jDD'),
+                    to: end.format('jYYYY/jMM/jDD')
+                },
+                totalHours,
+                expectedByNowHours,
+                expectedByEndQuarterHours,
+                deltaVsEnd,
+                workdaysAll,
+                workdaysUntilNow
+            });
+        }
+
+        return {
+            jYear,
+            username,
+            quarters
+        };
+    }
+
     async function computeScan(opts) {
         const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
         const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
@@ -276,31 +383,15 @@
         const nowG    = mtNow();
 
         const headers = buildHeaders(baseUrl, token);
-        const jql = `worklogAuthor = "${username}" AND worklogDate >= "${fromYMD}" AND worklogDate <= "${toYMD}"`;
+        const includeQuarter = opts?.includeQuarter !== false;
 
-        const issues = await searchIssuesWithWorklogsPaged(baseUrl, headers, jql);
-
-        // ---- Build detailed report rows (like your script) ----
-        let report = [];
-        const seenWorklogKeys = new Set(); // <--- add this
-
-        for (const issue of issues) {
-            const initial = issue?.fields?.worklog ?? {};
-            const fullWls = await getFullIssueWorklogs(baseUrl, headers, issue.key, initial);
-            report.push(...buildReportRows(issue, fullWls, username, seenWorklogKeys)); // pass set
-        }
-
-        // Filter + sort + add Persian date (exactly like your approach)
-        report = report
-            .filter(r =>
-                moment(r.date, 'YYYY-MM-DD', true).isSameOrBefore(moment(toYMD, 'YYYY-MM-DD')) &&
-                moment(r.date, 'YYYY-MM-DD', true).isSameOrAfter(moment(fromYMD, 'YYYY-MM-DD'))
-            )
-            .sort((a, b) => moment(a.date, 'YYYY-MM-DD').diff(moment(b.date, 'YYYY-MM-DD')))
-            .map(r => ({
-                ...r,
-                persianDate: moment(r.date, 'YYYY-MM-DD', true).format('jYYYY/jMM/jDD')
-            }));
+        const { rows: report, jql } = await fetchWorklogRows({
+            baseUrl,
+            headers,
+            username,
+            fromYMD,
+            toYMD
+        });
 
         // ---- Summary (like your calculateSummary) ----
         const totalWorklogs = report.length;
@@ -354,6 +445,10 @@
 
         const deficits = days.filter(d => d.isWorkday && !d.isFuture && d.hours < 6);
 
+        const quarterReport = includeQuarter
+            ? await computeQuarterReport({ jYear, username, baseUrl, headers, nowG })
+            : null;
+
         return {
             ok: true,
             jYear,
@@ -365,6 +460,7 @@
             totalHours,
             expectedByNowHours,
             expectedByEndMonthHours,
+            quarterReport,
             // NEW: expose script-style objects
             worklogs: report,
             summary: {

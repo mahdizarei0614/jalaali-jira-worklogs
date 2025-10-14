@@ -171,11 +171,13 @@
         const footerTotals = root.querySelector('#footerTotals');
         const worklogsWrap = root.querySelector('#worklogsWrap');
         const detailedBody = root.querySelector('#detailedWorklogsTable tbody');
+        const quarterWrap = root.querySelector('#quarterReportWrap');
+        const quarterBody = root.querySelector('#quarterReportTable tbody');
         const debug = root.querySelector('#debug');
         const saveBtn = root.querySelector('#save');
         const scanBtn = root.querySelector('#scan');
 
-        if (!baseUrl || !baseUrlWrap || !usernameSelect || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !worklogsWrap || !detailedBody || !saveBtn || !scanBtn) {
+        if (!baseUrl || !baseUrlWrap || !usernameSelect || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !worklogsWrap || !detailedBody || !quarterWrap || !quarterBody || !saveBtn || !scanBtn) {
             console.warn('Monthly report view missing required elements.');
             return;
         }
@@ -358,6 +360,36 @@
             worklogsWrap.style.display = 'block';
         }
 
+        function renderQuarter(quarter) {
+            if (!quarterWrap || !quarterBody) return;
+            quarterBody.innerHTML = '';
+            if (!quarter?.quarters?.length) {
+                quarterWrap.style.display = 'none';
+                return;
+            }
+
+            quarter.quarters.forEach((q, idx) => {
+                const monthsLabel = Array.isArray(q.monthsLabel) && q.monthsLabel.length
+                    ? q.monthsLabel.join('، ')
+                    : (Array.isArray(q.months) ? q.months.join(', ') : '—');
+                const delta = Number(q.deltaVsEnd || 0);
+                const deltaCls = delta >= 0 ? 'delta-pos' : 'delta-neg';
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+          <td>${idx + 1}</td>
+          <td><strong>${q.faLabel || q.label || ''}</strong>${q.label ? `<div class="muted">${q.label}</div>` : ''}</td>
+          <td>${monthsLabel}</td>
+          <td>${Number(q.totalHours || 0).toFixed(2)}</td>
+          <td>${Number(q.expectedByNowHours || 0).toFixed(2)}</td>
+          <td>${Number(q.expectedByEndQuarterHours || 0).toFixed(2)}</td>
+          <td class="${deltaCls}">${delta.toFixed(2)}</td>
+        `;
+                quarterBody.appendChild(tr);
+            });
+
+            quarterWrap.style.display = 'block';
+        }
+
         function render(res) {
             lastResult = res;
 
@@ -365,6 +397,7 @@
                 table.style.display = 'none';
                 tbody.innerHTML = '';
                 worklogsWrap.style.display = 'none';
+                if (quarterWrap) quarterWrap.style.display = 'none';
                 updateFooter();
                 return;
             }
@@ -391,6 +424,7 @@
             table.style.display = 'table';
 
             renderWorklogs(res);
+            renderQuarter(res.quarterReport);
             updateFooter();
         }
 
