@@ -2,6 +2,20 @@
     const $ = (selector, root = document) => root.querySelector(selector);
     const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
+    const USER_OPTIONS = [
+        { text: 'رضا محمدخان', value: 'r.mohammadkhan' },
+        { text: 'محمدمهدی زارعی', value: 'Momahdi.Zarei' },
+        { text: 'فرید ذوالقدر', value: 'zolghadr.farid' },
+        { text: 'نیلوفر صمدزادگان', value: 'n.samadzadegan' },
+        { text: 'یحیی کنگی', value: 'y.kangi' },
+        { text: 'امیرحسین فاطمی', value: 'a.fatemi' },
+        { text: 'ابراهیم علیپور', value: 'e.alipour' },
+        { text: 'ریحانه اخگری', value: 'r.akhgari' }
+    ];
+    const ADMIN_USERS = new Set(['Momahdi.Zarei', 'r.mohammadkhan']);
+    const PERSIAN_MONTHS = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
+    const routeHooks = new Map();
+
     const routeTitle = $('#viewTitle');
     const defaultTitle = routeTitle?.textContent || 'Alo Worklogs';
     const navItems = $$('[data-route]');
@@ -58,7 +72,7 @@
     });
 
     const initialActive = Array.from(viewNodes.entries()).find(([, el]) => el.classList.contains('is-active'));
-    const defaultRoute = initialActive ? initialActive[0] : (navItems[0]?.dataset.route || 'profile');
+    const defaultRoute = initialActive ? initialActive[0] : (navItems[0]?.dataset.route || 'monthly-summary');
     let activeRoute = null;
 
     function setRoute(route, { pushState = true } = {}) {
@@ -95,10 +109,20 @@
             document.body.dataset.route = route;
         }
 
+        const previousRoute = activeRoute;
         activeRoute = route;
 
         if (pushState) {
             window.location.hash = route;
+        }
+
+        const hook = routeHooks.get(route);
+        if (typeof hook === 'function') {
+            try {
+                hook({ route, previous: previousRoute });
+            } catch (err) {
+                console.error('Route activation hook failed', err);
+            }
         }
 
         return route;
@@ -130,315 +154,632 @@
         titleFor: (route) => routeLabels[route] || null
     });
 
-    const controllers = {
-        profile: initProfile,
-        'monthly-report': initMonthlyReport
-    };
+    const reportState = createReportState();
+    const userSelectContext = initUserSelect($('#sidebarUserSelect'), reportState);
 
-    const initTasks = [];
-    for (const [route, init] of Object.entries(controllers)) {
-        const node = viewNodes.get(route);
-        if (node && typeof init === 'function') {
-            initTasks.push(Promise.resolve(init(node)));
+    await Promise.all([
+        registerController('monthly-summary', (node) => initMonthlySummary(node, reportState, userSelectContext)),
+        registerController('detailed-worklogs', (node) => initDetailedWorklogs(node, reportState)),
+        registerController('due-issues', (node) => initDueIssues(node, reportState)),
+        registerController('quarter-report', (node) => initQuarterReport(node, reportState))
+    ]);
+
+    if (activeRoute && routeHooks.has(activeRoute)) {
+        try {
+            routeHooks.get(activeRoute)({ route: activeRoute, previous: null, reason: 'initial' });
+        } catch (err) {
+            console.error('Initial route activation failed', err);
         }
     }
-    await Promise.all(initTasks);
 
     const logoutBtn = $('#logout');
     if (logoutBtn) {
         logoutBtn.addEventListener('click', async () => {
-            await window.appApi.logout();
+            try {
+                await window.appApi.logout();
+            } catch (err) {
+                console.error('Failed to logout', err);
+            }
         });
     }
 
-    async function initProfile(root) {
-        if (!root || root.dataset.controllerReady === 'true') return;
-        root.dataset.controllerReady = 'true';
+    async function registerController(route, initFn) {
+        const node = viewNodes.get(route);
+        if (!node || typeof initFn !== 'function') return;
+        try {
+            const hooks = await Promise.resolve(initFn(node));
+            if (hooks && typeof hooks.onShow === 'function') {
+                routeHooks.set(route, hooks.onShow);
+            }
+        } catch (err) {
+            console.error(`Failed to initialise controller for route "${route}"`, err);
+        }
     }
 
-    async function initMonthlyReport(root) {
-        if (!root || root.dataset.controllerReady === 'true') return;
+    function createReportState() {
+        const listeners = new Set();
+        const state = {
+            selection: {
+                jYear: null,
+                jMonth: null,
+                username: null,
+                timeOffHours: 0
+            },
+            result: null,
+            isFetching: false,
+            lastError: null,
+            pendingRefresh: null,
+            subscribe(listener) {
+                if (typeof listener !== 'function') return () => {};
+                listeners.add(listener);
+                try {
+                    listener(snapshot());
+                } catch (err) {
+                    console.error('Listener execution failed', err);
+                }
+                return () => listeners.delete(listener);
+            },
+            notify() {
+                const snap = snapshot();
+                listeners.forEach((listener) => {
+                    try {
+                        listener(snap);
+                    } catch (err) {
+                        console.error('Listener execution failed', err);
+                    }
+                });
+            },
+            getSelection() {
+                return { ...state.selection };
+            },
+            async pushSelection() {
+                if (typeof window.appApi?.updateSelection !== 'function') return;
+                const { jYear, jMonth, username } = state.selection;
+                if (!Number.isFinite(jYear) || !Number.isFinite(jMonth) || !username) return;
+                try {
+                    await window.appApi.updateSelection({ jYear, jMonth, username });
+                } catch (err) {
+                    console.error('Failed to push selection', err);
+                }
+            },
+            setSelection(update, options = {}) {
+                const { pushSelection = false, refresh = false, silent = false } = options;
+                let changed = false;
+                if (update && typeof update === 'object') {
+                    for (const [key, value] of Object.entries(update)) {
+                        if (!(key in state.selection)) continue;
+                        if (value === undefined) continue;
+                        if (state.selection[key] !== value) {
+                            state.selection[key] = value;
+                            changed = true;
+                        }
+                    }
+                }
+                if (changed && !silent) {
+                    state.notify();
+                }
+                let chain = Promise.resolve();
+                if (pushSelection) {
+                    chain = chain.then(() => state.pushSelection());
+                }
+                if (refresh) {
+                    chain = chain.then(() => state.refresh());
+                }
+                return chain;
+            },
+            async refresh(options = {}) {
+                const { force = false } = options;
+                if (state.pendingRefresh && !force) {
+                    return state.pendingRefresh;
+                }
+                const { jYear, jMonth, username } = state.selection;
+                if (!Number.isFinite(jYear) || !Number.isFinite(jMonth) || !username) {
+                    return null;
+                }
+                if (typeof window.appApi?.scanNow !== 'function') {
+                    console.warn('scanNow API is not available.');
+                    return null;
+                }
+                const run = (async () => {
+                    state.isFetching = true;
+                    state.notify();
+                    try {
+                        await state.pushSelection();
+                        const res = await window.appApi.scanNow({ jYear, jMonth, username });
+                        state.result = res;
+                        state.lastError = res?.ok ? null : (res?.reason || null);
+                        return res;
+                    } catch (err) {
+                        console.error('Failed to refresh report', err);
+                        state.lastError = err;
+                        throw err;
+                    } finally {
+                        state.isFetching = false;
+                        state.notify();
+                    }
+                })();
+                state.pendingRefresh = run;
+                run.finally(() => {
+                    if (state.pendingRefresh === run) {
+                        state.pendingRefresh = null;
+                    }
+                });
+                return run;
+            }
+        };
+
+        if (typeof window.appApi?.onScanResult === 'function') {
+            window.appApi.onScanResult((res) => {
+                if (!res) return;
+                const { jYear, jMonth } = state.selection;
+                if (Number.parseInt(res.jYear, 10) === jYear && Number.parseInt(res.jMonth, 10) === jMonth) {
+                    state.result = res;
+                    state.lastError = res?.ok ? null : (res?.reason || null);
+                    state.notify();
+                }
+            });
+        }
+
+        function snapshot() {
+            return {
+                selection: { ...state.selection },
+                result: state.result,
+                isFetching: state.isFetching,
+                lastError: state.lastError
+            };
+        }
+
+        return state;
+    }
+
+    function initUserSelect(selectEl, reportStateInstance) {
+        if (!selectEl) {
+            return {
+                enforceUserVisibility: async () => {},
+                ready: Promise.resolve(),
+                selectEl: null
+            };
+        }
+
+        selectEl.innerHTML = USER_OPTIONS.map((u) => `<option value="${u.value}">${u.text}</option>`).join('');
+        const initialValue = selectEl.value || USER_OPTIONS[0]?.value || '';
+        if (initialValue) {
+            reportStateInstance.setSelection({ username: initialValue }, { silent: true });
+        }
+
+        selectEl.addEventListener('change', () => {
+            const username = selectEl.value;
+            reportStateInstance.setSelection({ username }, { pushSelection: true, refresh: true });
+        });
+
+        async function enforceUserVisibility() {
+            if (typeof window.appApi?.whoami !== 'function') return;
+            try {
+                const who = await window.appApi.whoami();
+                if (!who?.ok) {
+                    return;
+                }
+                const self = (who.username || '').trim();
+                if (!self) return;
+
+                if (![...selectEl.options].some((o) => o.value === self)) {
+                    const opt = document.createElement('option');
+                    opt.value = self;
+                    opt.textContent = who.raw?.displayName || self;
+                    selectEl.appendChild(opt);
+                }
+
+                if (ADMIN_USERS.has(self)) {
+                    selectEl.disabled = false;
+                } else {
+                    selectEl.value = self;
+                    selectEl.disabled = true;
+                }
+
+                await reportStateInstance.setSelection({ username: selectEl.value }, { pushSelection: true, refresh: true });
+            } catch (err) {
+                console.error('Failed to determine user visibility', err);
+            }
+        }
+
+        const ready = enforceUserVisibility();
+
+        return { enforceUserVisibility, ready, selectEl };
+    }
+
+    async function initMonthlySummary(root, reportStateInstance, userSelectCtx) {
+        if (!root || root.dataset.controllerReady === 'true') return {};
         root.dataset.controllerReady = 'true';
 
         const baseUrl = root.querySelector('#baseUrl');
         const baseUrlWrap = root.querySelector('#baseUrlWrap');
-        const usernameSelect = root.querySelector('#usernameSelect');
         const jYear = root.querySelector('#jYear');
         const jMonth = root.querySelector('#jMonth');
         const timeOffHours = root.querySelector('#timeOffHours');
         const table = root.querySelector('#results');
         const tbody = table?.querySelector('tbody');
         const footerTotals = root.querySelector('#footerTotals');
-        const worklogsWrap = root.querySelector('#worklogsWrap');
-        const detailedBody = root.querySelector('#detailedWorklogsTable tbody');
-        const dueThisMonthSection = root.querySelector('#dueThisMonthSection');
-        const dueThisMonthBody = root.querySelector('#dueThisMonthTable tbody');
-        const quarterSection = root.querySelector('#quarterReportSection');
-        const quarterTableBody = root.querySelector('#quarterReportTable tbody');
         const debug = root.querySelector('#debug');
         const saveBtn = root.querySelector('#save');
-        const scanBtn = root.querySelector('#scan');
 
-        if (!baseUrl || !baseUrlWrap || !usernameSelect || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !worklogsWrap || !detailedBody || !dueThisMonthSection || !dueThisMonthBody || !quarterSection || !quarterTableBody || !saveBtn || !scanBtn) {
-            console.warn('Monthly report view missing required elements.');
-            return;
+        if (!baseUrl || !baseUrlWrap || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !saveBtn) {
+            console.warn('Monthly summary view missing required elements.');
+            return {};
         }
 
-        const formatHours = (val) => {
-            const num = Number.parseFloat(val);
-            if (!Number.isFinite(num)) return '0.00';
-            return num.toFixed(2);
-        };
+        jMonth.innerHTML = PERSIAN_MONTHS.map((name, idx) => `<option value="${idx + 1}">${name}</option>`).join('');
 
-        const weekdayName = (w) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][w] || String(w);
-        const persianMonths = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
+        const settings = typeof window.appApi?.getSettings === 'function' ? await window.appApi.getSettings() : {};
+        baseUrl.value = settings?.baseUrl || '';
+        updateBaseUrlUI();
 
-        const userMap = [
-            { text: 'رضا محمدخان', value: 'r.mohammadkhan' },
-            { text: 'محمدمهدی زارعی', value: 'Momahdi.Zarei' },
-            { text: 'فرید ذوالقدر', value: 'zolghadr.farid' },
-            { text: 'نیلوفر صمدزادگان', value: 'n.samadzadegan' },
-            { text: 'یحیی کنگی', value: 'y.kangi' },
-            { text: 'امیرحسین فاطمی', value: 'a.fatemi' },
-            { text: 'ابراهیم علیپور', value: 'e.alipour' },
-            { text: 'ریحانه اخگری', value: 'r.akhgari' }
-        ];
-        usernameSelect.innerHTML = userMap.map((u) => `<option value="${u.value}">${u.text}</option>`).join('');
-        jMonth.innerHTML = persianMonths.map((name, idx) => `<option value="${idx + 1}">${name}</option>`).join('');
-
-        const ADMIN_USERS = new Set(['Momahdi.Zarei', 'r.mohammadkhan']);
-
-        async function enforceUserVisibility() {
-            const who = await window.appApi.whoami();
-            if (!who?.ok) {
-                return;
-            }
-            const self = (who.username || '').trim();
-            if (!self) return;
-
-            if (![...usernameSelect.options].some((o) => o.value === self)) {
-                const opt = document.createElement('option');
-                opt.value = self;
-                opt.textContent = (who.raw?.displayName || self);
-                usernameSelect.appendChild(opt);
-            }
-
-            if (ADMIN_USERS.has(self)) {
-                usernameSelect.disabled = false;
-            } else {
-                usernameSelect.value = self;
-                usernameSelect.disabled = true;
-            }
-
-            await window.appApi.updateSelection({
-                jYear: parseInt(toAsciiDigits(jYear.value), 10),
-                jMonth: parseInt(toAsciiDigits(jMonth.value), 10),
-                username: usernameSelect.value
-            });
-        }
-
-        function toAsciiDigits(val) {
-            if (val == null) return '';
-            const s = String(val);
-            const map = {
-                '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4', '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9',
-                '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9'
-            };
-            return s.replace(/[0-9\u06F0-\u06F9\u0660-\u0669]/g, (ch) => map[ch] ?? ch);
-        }
-
-        function sanitizeUrl(u) { return (u || '').trim(); }
-        function stripTrailingSlash(u) { return u.replace(/\/+$/, ''); }
-        function isLikelyUrl(u) { return /^https?:\/\/[^/\s]+\.[^/\s]+/i.test(u); }
-        function updateBaseUrlUI() {
-            const v = sanitizeUrl(baseUrl.value);
-            baseUrlWrap.classList.remove('is-valid', 'is-invalid');
-            if (!v) return;
-            if (isLikelyUrl(v)) baseUrlWrap.classList.add('is-valid');
-            else baseUrlWrap.classList.add('is-invalid');
-        }
         baseUrl.addEventListener('input', updateBaseUrlUI);
         baseUrl.addEventListener('blur', () => {
             baseUrl.value = stripTrailingSlash(sanitizeUrl(baseUrl.value));
             updateBaseUrlUI();
         });
 
-        const settings = await window.appApi.getSettings();
-        baseUrl.value = settings.baseUrl || '';
-        updateBaseUrlUI();
-        jYear.value = settings.defaultJYear || '';
-        jMonth.value = settings.defaultJMonth || 1;
-        usernameSelect.value = userMap[0].value;
-        await enforceUserVisibility();
-
-        async function pushSelection() {
-            await window.appApi.updateSelection({
-                jYear: parseInt(toAsciiDigits(jYear.value), 10),
-                jMonth: parseInt(toAsciiDigits(jMonth.value), 10),
-                username: usernameSelect.value
-            });
+        if (settings?.defaultJYear) {
+            jYear.value = toAsciiDigits(settings.defaultJYear).replace(/[^\d]/g, '');
         }
+        const defaultMonth = Number.parseInt(settings?.defaultJMonth, 10);
+        if (Number.isFinite(defaultMonth) && defaultMonth >= 1 && defaultMonth <= 12) {
+            jMonth.value = String(defaultMonth);
+        }
+
+        const initialTimeOff = Number.parseFloat(timeOffHours.value || '0') || 0;
+        timeOffHours.value = initialTimeOff ? String(initialTimeOff) : '0';
+
+        await reportStateInstance.setSelection({
+            jYear: parseJalaaliInt(jYear.value),
+            jMonth: parseJalaaliInt(jMonth.value),
+            timeOffHours: initialTimeOff
+        }, { silent: true });
 
         jYear.addEventListener('input', async () => {
             const caret = jYear.selectionStart;
             jYear.value = toAsciiDigits(jYear.value).replace(/[^\d]/g, '');
             try { jYear.setSelectionRange(caret, caret); } catch (err) { /* ignore */ }
-            await pushSelection();
-            updateFooter();
+            const parsed = parseJalaaliInt(jYear.value);
+            await reportStateInstance.setSelection({ jYear: parsed }, { pushSelection: true, refresh: true });
         });
-        jMonth.addEventListener('change', async () => { await pushSelection(); updateFooter(); });
-        usernameSelect.addEventListener('change', pushSelection);
+
+        jMonth.addEventListener('change', async () => {
+            const parsed = parseJalaaliInt(jMonth.value);
+            await reportStateInstance.setSelection({ jMonth: parsed }, { pushSelection: true, refresh: true });
+        });
+
+        timeOffHours.addEventListener('input', () => {
+            const parsed = Number.parseFloat(timeOffHours.value);
+            const clean = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+            reportStateInstance.setSelection({ timeOffHours: clean });
+        });
 
         saveBtn.addEventListener('click', async () => {
             baseUrl.value = stripTrailingSlash(sanitizeUrl(baseUrl.value));
             updateBaseUrlUI();
-            await window.appApi.saveSettings({ baseUrl: baseUrl.value });
-            await enforceUserVisibility();
+            if (typeof window.appApi?.saveSettings === 'function') {
+                try {
+                    await window.appApi.saveSettings({ baseUrl: baseUrl.value });
+                } catch (err) {
+                    console.error('Failed to save settings', err);
+                }
+            } else {
+                console.warn('saveSettings API is not available.');
+            }
+            if (userSelectCtx?.enforceUserVisibility) {
+                await userSelectCtx.enforceUserVisibility();
+            }
+            await reportStateInstance.refresh({ force: true });
         });
 
-        let lastResult = null;
+        reportStateInstance.subscribe((state) => {
+            syncInputs(state.selection);
+            renderSummary(state);
+        });
 
-        function updateFooter() {
-            if (!lastResult?.ok) {
-                footerTotals.innerHTML = `<div class="footer-grid"><span class="pill">Totals here…</span></div>`;
+        function syncInputs(selection) {
+            if (selection.jYear != null) {
+                const value = String(selection.jYear);
+                if (toAsciiDigits(jYear.value) !== value) {
+                    jYear.value = value;
+                }
+            }
+            if (selection.jMonth != null) {
+                const value = String(selection.jMonth);
+                if (jMonth.value !== value) {
+                    jMonth.value = value;
+                }
+            }
+            if (selection.timeOffHours != null) {
+                const current = Number.parseFloat(timeOffHours.value || '0');
+                if (!Number.isFinite(current) || Math.abs(current - selection.timeOffHours) > 1e-4) {
+                    timeOffHours.value = String(selection.timeOffHours);
+                }
+            }
+        }
+
+        function renderSummary(state) {
+            const res = state.result;
+            if (state.isFetching && !res) {
+                table.style.display = 'table';
+                setTableMessage(tbody, 5, 'Loading…');
+                updateFooter(null);
+                if (debug) debug.textContent = '';
                 return;
             }
-            const total = +(lastResult.totalHours ?? 0);
-            const expectedNow = +(lastResult.expectedByNowHours ?? 0);
-            const expectedEnd = +(lastResult.expectedByEndMonthHours ?? 0);
-            const timeOff = Math.max(0, parseFloat(timeOffHours.value || '0')) || 0;
-            const adjusted = +(total + timeOff);
-            const deltaEnd = +(adjusted - expectedEnd);
-            const deltaCls = deltaEnd >= 0 ? 'delta-pos' : 'delta-neg';
-            const deltaLabel = deltaEnd >= 0 ? 'Surplus vs end' : 'Shortfall vs end';
 
-            footerTotals.innerHTML = `
-      <div class="footer-grid">
-        <span class="pill"><strong>Month:</strong> ${lastResult.jMonthLabel}</span>
-        <span class="pill"><strong>Total:</strong> ${total.toFixed(2)} h</span>
-        <span class="pill"><strong>Time-off:</strong> ${timeOff.toFixed(2)} h</span>
-        <span class="pill"><strong>Adjusted:</strong> ${adjusted.toFixed(2)} h</span>
-        <span class="pill"><strong>Now:</strong> ${expectedNow.toFixed(2)} h</span>
-        <span class="pill"><strong>End:</strong> ${expectedEnd.toFixed(2)} h</span>
-        <span class="pill ${deltaCls}"><strong>${deltaLabel}:</strong> ${deltaEnd.toFixed(2)} h</span>
-      </div>
-    `;
+            if (!res || !res.ok) {
+                if (res) {
+                    table.style.display = 'table';
+                    setTableMessage(tbody, 5, res.reason || 'No data available.');
+                } else {
+                    table.style.display = 'none';
+                    tbody.innerHTML = '';
+                }
+                updateFooter(null);
+                if (debug) debug.textContent = '';
+                return;
+            }
+
+            const days = Array.isArray(res.days) ? res.days : [];
+            table.style.display = 'table';
+            tbody.innerHTML = '';
+            days.forEach((d, idx) => {
+                const tr = document.createElement('tr');
+                tr.className = d.color || '';
+                const flags = [
+                    d.isFuture ? 'future' : '',
+                    d.isThuFri ? 'Thu/Fri' : '',
+                    d.isHoliday ? 'holiday' : '',
+                    d.isWorkday === false ? 'non-workday' : ''
+                ].filter(Boolean).join(', ');
+                tr.innerHTML = `
+                    <td>${idx + 1}</td>
+                    <td><span class="tip" data-tip="${d.g}">${d.j}</span></td>
+                    <td>${weekdayName(d.weekday)}</td>
+                    <td><small>${flags}</small></td>
+                    <td>${Number(d.hours || 0).toFixed(2)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            updateFooter(state);
             if (debug) {
+                const selection = reportStateInstance.getSelection();
                 debug.textContent = JSON.stringify({
-                    username: usernameSelect.value,
-                    sent: { jYear: parseInt(toAsciiDigits(jYear.value), 10), jMonth: parseInt(toAsciiDigits(jMonth.value), 10) },
-                    jql: lastResult.jql,
-                    month: lastResult.jMonthLabel,
-                    timeOffHours: timeOff,
-                    totals: {
-                        totalHours: total,
-                        expectedByNowHours: expectedNow,
-                        expectedByEndMonthHours: expectedEnd,
-                        adjustedLoggedPlusTimeOff: adjusted,
-                        deltaVsEnd: deltaEnd
+                    username: selection.username,
+                    selection: {
+                        jYear: selection.jYear,
+                        jMonth: selection.jMonth
                     },
-                    worklogsRows: lastResult.worklogs?.length ?? 0,
-                    deficitsSample: lastResult.deficits.slice(0, 10)
+                    jql: res.jql,
+                    month: res.jMonthLabel,
+                    timeOffHours: selection.timeOffHours,
+                    totals: {
+                        totalHours: res.totalHours,
+                        expectedByNowHours: res.expectedByNowHours,
+                        expectedByEndMonthHours: res.expectedByEndMonthHours
+                    },
+                    worklogsRows: res.worklogs?.length ?? 0,
+                    deficitsSample: Array.isArray(res.deficits) ? res.deficits.slice(0, 10) : []
                 }, null, 2);
             }
         }
 
-        function renderWorklogs(res) {
-            detailedBody.innerHTML = '';
-            if (Array.isArray(res.worklogs) && res.worklogs.length) {
-                Array.from(new Set(res.worklogs)).forEach((w, idx) => {
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-          <td>${idx + 1}</td>
-          <td>${w.persianDate || ''}</td>
-          <td>${w.date || ''}</td>
-          <td>${w.issueKey || ''}</td>
-          <td>${(w.summary || '').toString().replace(/\n/g, ' ')}</td>
-          <td>${Number(w.hours).toFixed(2)}</td>
-          <td>${w.timeSpent || ''}</td>
-          <td>${(w.comment || '').toString().replace(/\n/g, ' ')}</td>
-        `;
-                    if (!w.dueDate) {
-                        tr.classList.add('no-due-date');
-                    }
-                    detailedBody.appendChild(tr);
-                });
+        function updateFooter(state) {
+            if (!state || !state.result || !state.result.ok) {
+                footerTotals.innerHTML = `<div class="footer-grid"><span class="pill">Totals here…</span></div>`;
+                return;
+            }
+            const res = state.result;
+            const selection = state.selection || {};
+            const total = +(res.totalHours ?? 0);
+            const expectedNow = +(res.expectedByNowHours ?? 0);
+            const expectedEnd = +(res.expectedByEndMonthHours ?? 0);
+            const timeOff = Math.max(0, Number.parseFloat(selection.timeOffHours ?? 0) || 0);
+            const adjusted = total + timeOff;
+            const deltaEnd = adjusted - expectedEnd;
+            const deltaCls = deltaEnd >= 0 ? 'delta-pos' : 'delta-neg';
+            const deltaLabel = deltaEnd >= 0 ? 'Surplus vs end' : 'Shortfall vs end';
+
+            footerTotals.innerHTML = `
+                <div class="footer-grid">
+                    <span class="pill"><strong>Month:</strong> ${res.jMonthLabel}</span>
+                    <span class="pill"><strong>Total:</strong> ${total.toFixed(2)} h</span>
+                    <span class="pill"><strong>Time-off:</strong> ${timeOff.toFixed(2)} h</span>
+                    <span class="pill"><strong>Adjusted:</strong> ${adjusted.toFixed(2)} h</span>
+                    <span class="pill"><strong>Now:</strong> ${expectedNow.toFixed(2)} h</span>
+                    <span class="pill"><strong>End:</strong> ${expectedEnd.toFixed(2)} h</span>
+                    <span class="pill ${deltaCls}"><strong>${deltaLabel}:</strong> ${deltaEnd.toFixed(2)} h</span>
+                </div>
+            `;
+        }
+
+        function updateBaseUrlUI() {
+            const value = sanitizeUrl(baseUrl.value);
+            baseUrlWrap.classList.remove('is-valid', 'is-invalid');
+            if (!value) return;
+            if (isLikelyUrl(value)) {
+                baseUrlWrap.classList.add('is-valid');
             } else {
-                const tr = document.createElement('tr');
-                tr.innerHTML = '<td colspan="8">—</td>';
-                detailedBody.appendChild(tr);
+                baseUrlWrap.classList.add('is-invalid');
             }
-            worklogsWrap.style.display = 'block';
         }
 
-        function renderDueIssues(res) {
-            if (!dueThisMonthSection || !dueThisMonthBody) return;
+        return {
+            onShow: () => reportStateInstance.refresh()
+        };
+    }
 
-            const issues = Array.isArray(res?.dueIssuesCurrentMonth) ? res.dueIssuesCurrentMonth : [];
-            if (!issues.length) {
-                dueThisMonthBody.innerHTML = '<tr><td colspan="8">—</td></tr>';
-                dueThisMonthSection.style.display = 'none';
+    function initDetailedWorklogs(root, reportStateInstance) {
+        if (!root || root.dataset.controllerReady === 'true') return {};
+        root.dataset.controllerReady = 'true';
+
+        const table = root.querySelector('#detailedWorklogsTable');
+        const tbody = table?.querySelector('tbody');
+        if (!table || !tbody) {
+            console.warn('Detailed worklogs view missing required elements.');
+            return {};
+        }
+
+        reportStateInstance.subscribe((state) => {
+            if (state.isFetching && !state.result) {
+                setTableMessage(tbody, 8, 'Loading…');
                 return;
             }
 
-            dueThisMonthBody.innerHTML = '';
-            issues.forEach((issue, idx) => {
+            const res = state.result;
+            if (!res || !res.ok) {
+                const message = res ? (res.reason || 'Unable to load worklogs.') : 'No data yet.';
+                setTableMessage(tbody, 8, message);
+                return;
+            }
+
+            const worklogs = Array.isArray(res.worklogs) ? res.worklogs : [];
+            if (!worklogs.length) {
+                setTableMessage(tbody, 8, 'No worklogs found.');
+                return;
+            }
+
+            tbody.innerHTML = '';
+            Array.from(new Set(worklogs)).forEach((w, idx) => {
                 const tr = document.createElement('tr');
-                const summary = (issue.summary || '').toString().replace(/\n/g, ' ');
                 tr.innerHTML = `
-          <td>${idx + 1}</td>
-          <td>${issue.dueDate || ''}</td>
-          <td>${issue.issueKey || ''}</td>
-          <td>${summary}</td>
-          <td>${issue.status || ''}</td>
-          <td>${Number(issue.estimateHours || 0).toFixed(2)}</td>
-          <td>${Number(issue.loggedHours || 0).toFixed(2)}</td>
-          <td>${Number(issue.remainingHours || 0).toFixed(2)}</td>
-        `;
-                dueThisMonthBody.appendChild(tr);
+                    <td>${idx + 1}</td>
+                    <td>${w.persianDate || ''}</td>
+                    <td>${w.date || ''}</td>
+                    <td>${w.issueKey || ''}</td>
+                    <td>${(w.summary || '').toString().replace(/\n/g, ' ')}</td>
+                    <td>${Number(w.hours || 0).toFixed(2)}</td>
+                    <td>${w.timeSpent || ''}</td>
+                    <td>${(w.comment || '').toString().replace(/\n/g, ' ')}</td>
+                `;
+                if (!w.dueDate) {
+                    tr.classList.add('no-due-date');
+                }
+                tbody.appendChild(tr);
             });
+        });
 
-            dueThisMonthSection.style.display = 'block';
+        return {
+            onShow: () => reportStateInstance.refresh()
+        };
+    }
+
+    function initDueIssues(root, reportStateInstance) {
+        if (!root || root.dataset.controllerReady === 'true') return {};
+        root.dataset.controllerReady = 'true';
+
+        const table = root.querySelector('#dueThisMonthTable');
+        const tbody = table?.querySelector('tbody');
+        if (!table || !tbody) {
+            console.warn('Due issues view missing required elements.');
+            return {};
         }
 
-        function renderQuarterReport(data) {
-            if (!quarterSection || !quarterTableBody) return;
-
-            if (!data?.ok || !Array.isArray(data.seasons) || data.seasons.length === 0) {
-                quarterTableBody.innerHTML = '<tr><td colspan="7">—</td></tr>';
-                quarterSection.style.display = 'none';
+        reportStateInstance.subscribe((state) => {
+            if (state.isFetching && !state.result) {
+                setTableMessage(tbody, 8, 'Loading…');
                 return;
             }
 
-            quarterTableBody.innerHTML = '';
+            const res = state.result;
+            if (!res || !res.ok) {
+                const message = res ? (res.reason || 'Unable to load due issues.') : 'No data yet.';
+                setTableMessage(tbody, 8, message);
+                return;
+            }
+
+            const issues = Array.isArray(res.dueIssuesCurrentMonth) ? res.dueIssuesCurrentMonth : [];
+            if (!issues.length) {
+                setTableMessage(tbody, 8, '—');
+                return;
+            }
+
+            tbody.innerHTML = '';
+            issues.forEach((issue, idx) => {
+                const summary = (issue.summary || '').toString().replace(/\n/g, ' ');
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${idx + 1}</td>
+                    <td>${issue.dueDate || ''}</td>
+                    <td>${issue.issueKey || ''}</td>
+                    <td>${summary}</td>
+                    <td>${issue.status || ''}</td>
+                    <td>${Number(issue.estimateHours || 0).toFixed(2)}</td>
+                    <td>${Number(issue.loggedHours || 0).toFixed(2)}</td>
+                    <td>${Number(issue.remainingHours || 0).toFixed(2)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        });
+
+        return {
+            onShow: () => reportStateInstance.refresh()
+        };
+    }
+
+    function initQuarterReport(root, reportStateInstance) {
+        if (!root || root.dataset.controllerReady === 'true') return {};
+        root.dataset.controllerReady = 'true';
+
+        const table = root.querySelector('#quarterReportTable');
+        const tbody = table?.querySelector('tbody');
+        if (!table || !tbody) {
+            console.warn('Quarter report view missing required elements.');
+            return {};
+        }
+
+        reportStateInstance.subscribe((state) => {
+            if (state.isFetching && !state.result) {
+                setTableMessage(tbody, 7, 'Loading…');
+                return;
+            }
+
+            const res = state.result;
+            if (!res || !res.ok) {
+                const message = res ? (res.reason || 'Unable to load quarter report.') : 'No data yet.';
+                setTableMessage(tbody, 7, message);
+                return;
+            }
+
+            const data = res.quarterReport;
+            if (!data?.ok || !Array.isArray(data.seasons) || data.seasons.length === 0) {
+                setTableMessage(tbody, 7, '—');
+                return;
+            }
+
+            tbody.innerHTML = '';
             data.seasons.forEach((season) => {
                 const tr = document.createElement('tr');
-                const monthsHtml = (season.months || []).map((month) => {
+                const months = Array.isArray(season.months) ? season.months.slice(0, 3) : [];
+                while (months.length < 3) {
+                    months.push(null);
+                }
+                const monthsHtml = months.map((month) => {
+                    if (!month) {
+                        return '<div class="quarter-month"><span class="muted">—</span></div>';
+                    }
                     const label = month.label || `Month ${month.jMonth}`;
                     if (!month.ok) {
-                        return `<div class="quarter-month"><strong>${label}</strong><span class="muted">${month.reason || 'No data'}</span></div>`;
+                        const reason = month.reason || 'No data';
+                        return `<div class="quarter-month"><strong>${label}</strong><span class="muted">${reason}</span></div>`;
                     }
-                    const delta = Number.parseFloat(month.delta || 0);
+                    const delta = Number.parseFloat(month.delta || 0) || 0;
                     const deltaCls = delta >= 0 ? 'delta-pos' : 'delta-neg';
-                    const deltaVal = `${delta.toFixed(2)} h`;
                     return `
                         <div class="quarter-month">
                             <strong>${label}</strong>
                             <div>${formatHours(month.totalHours)} h</div>
                             <div class="muted">Exp ${formatHours(month.expectedHours)} h</div>
-                            <div class="${deltaCls}">${deltaVal}</div>
+                            <div class="${deltaCls}">${delta.toFixed(2)} h</div>
                         </div>
                     `;
                 });
-
-                while (monthsHtml.length < 3) {
-                    monthsHtml.push('<div class="quarter-month"><span class="muted">—</span></div>');
-                }
-
                 const totals = season.totals || {};
-                const totalDelta = Number.parseFloat(totals.delta || 0);
+                const totalDelta = Number.parseFloat(totals.delta || 0) || 0;
                 const totalDeltaCls = totalDelta >= 0 ? 'delta-pos' : 'delta-neg';
-
                 tr.innerHTML = `
                     <td><strong>${season.label || 'Season'}</strong></td>
                     ${monthsHtml.map((html) => `<td>${html}</td>`).join('')}
@@ -446,70 +787,61 @@
                     <td>${formatHours(totals.expectedHours)} h</td>
                     <td class="${totalDeltaCls}">${totalDelta.toFixed(2)} h</td>
                 `;
-                quarterTableBody.appendChild(tr);
-            });
-
-            quarterSection.style.display = 'block';
-        }
-
-        function render(res) {
-            lastResult = res;
-
-            if (!res?.ok) {
-                table.style.display = 'none';
-                tbody.innerHTML = '';
-                worklogsWrap.style.display = 'none';
-                if (dueThisMonthSection) dueThisMonthSection.style.display = 'none';
-                if (dueThisMonthBody) dueThisMonthBody.innerHTML = '<tr><td colspan="8">—</td></tr>';
-                renderQuarterReport(null);
-                updateFooter();
-                return;
-            }
-
-            tbody.innerHTML = '';
-            res.days.forEach((d, idx) => {
-                const tr = document.createElement('tr');
-                tr.className = d.color;
-                const flags = [
-                    d.isFuture ? 'future' : '',
-                    d.isThuFri ? 'Thu/Fri' : '',
-                    d.isHoliday ? 'holiday' : '',
-                    !d.isWorkday ? 'non-workday' : ''
-                ].filter(Boolean).join(', ');
-                tr.innerHTML = `
-        <td>${idx + 1}</td>
-        <td><span class="tip" data-tip="${d.g}">${d.j}</span></td>
-        <td>${weekdayName(d.weekday)}</td>
-        <td><small>${flags}</small></td>
-        <td>${d.hours.toFixed(2)}</td>
-      `;
                 tbody.appendChild(tr);
             });
-            table.style.display = 'table';
-
-            renderWorklogs(res);
-            renderDueIssues(res);
-            renderQuarterReport(res.quarterReport);
-            updateFooter();
-        }
-
-        scanBtn.addEventListener('click', async () => {
-            const jy = Number.parseInt(toAsciiDigits(jYear.value), 10);
-            const jm = Number.parseInt(toAsciiDigits(jMonth.value), 10);
-            await pushSelection();
-            const res = await window.appApi.scanNow({ jYear: jy, jMonth: jm, username: usernameSelect.value });
-            render(res);
         });
 
-        timeOffHours.addEventListener('input', updateFooter);
+        return {
+            onShow: () => reportStateInstance.refresh()
+        };
+    }
 
-        window.appApi.onScanResult((res) => {
-            if (!res?.ok) return;
-            const curY = Number.parseInt(toAsciiDigits(jYear.value), 10);
-            const curM = Number.parseInt(toAsciiDigits(jMonth.value), 10);
-            if (res.jYear === curY && res.jMonth === curM) render(res);
-        });
+    function setTableMessage(tbody, columns, message) {
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = columns;
+        td.textContent = message;
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+    }
 
-        await pushSelection();
+    function parseJalaaliInt(val) {
+        const parsed = Number.parseInt(toAsciiDigits(val), 10);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    function toAsciiDigits(val) {
+        if (val == null) return '';
+        const s = String(val);
+        const map = {
+            '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4', '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9',
+            '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9'
+        };
+        return s.replace(/[0-9\u06F0-\u06F9\u0660-\u0669]/g, (ch) => map[ch] ?? ch);
+    }
+
+    function formatHours(val) {
+        const num = Number.parseFloat(val);
+        if (!Number.isFinite(num)) return '0.00';
+        return num.toFixed(2);
+    }
+
+    function weekdayName(w) {
+        const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        return names[w] || String(w ?? '');
+    }
+
+    function sanitizeUrl(u) {
+        return (u || '').trim();
+    }
+
+    function stripTrailingSlash(u) {
+        return u.replace(/\/+$/, '');
+    }
+
+    function isLikelyUrl(u) {
+        return /^https?:\/\/[^/\s]+\.[^/\s]+/i.test(u);
     }
 })();
