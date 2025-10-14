@@ -156,12 +156,16 @@
 
     const reportState = createReportState();
     const userSelectContext = initUserSelect($('#sidebarUserSelect'), reportState);
+    const sidebarFilters = initSidebarFilters(reportState);
+
+    await Promise.all([userSelectContext.ready, sidebarFilters.ready]);
 
     await Promise.all([
-        registerController('monthly-summary', (node) => initMonthlySummary(node, reportState, userSelectContext)),
+        registerController('monthly-summary', (node) => initMonthlySummary(node, reportState)),
         registerController('detailed-worklogs', (node) => initDetailedWorklogs(node, reportState)),
         registerController('due-issues', (node) => initDueIssues(node, reportState)),
-        registerController('quarter-report', (node) => initQuarterReport(node, reportState))
+        registerController('quarter-report', (node) => initQuarterReport(node, reportState)),
+        registerController('configurations', (node) => initConfigurations(node, reportState, userSelectContext))
     ]);
 
     if (activeRoute && routeHooks.has(activeRoute)) {
@@ -387,54 +391,42 @@
         return { enforceUserVisibility, ready, selectEl };
     }
 
-    async function initMonthlySummary(root, reportStateInstance, userSelectCtx) {
-        if (!root || root.dataset.controllerReady === 'true') return {};
-        root.dataset.controllerReady = 'true';
+    function initSidebarFilters(reportStateInstance) {
+        const jYear = $('#sidebarJYear');
+        const jMonth = $('#sidebarJMonth');
+        const timeOffHours = $('#sidebarTimeOffHours');
 
-        const baseUrl = root.querySelector('#baseUrl');
-        const baseUrlWrap = root.querySelector('#baseUrlWrap');
-        const jYear = root.querySelector('#jYear');
-        const jMonth = root.querySelector('#jMonth');
-        const timeOffHours = root.querySelector('#timeOffHours');
-        const table = root.querySelector('#results');
-        const tbody = table?.querySelector('tbody');
-        const footerTotals = root.querySelector('#footerTotals');
-        const debug = root.querySelector('#debug');
-        const saveBtn = root.querySelector('#save');
-
-        if (!baseUrl || !baseUrlWrap || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !saveBtn) {
-            console.warn('Monthly summary view missing required elements.');
-            return {};
+        if (!jYear || !jMonth || !timeOffHours) {
+            console.warn('Sidebar filters missing required elements.');
+            return {
+                ready: Promise.resolve(),
+                jYear: null,
+                jMonth: null,
+                timeOffHours: null
+            };
         }
 
         jMonth.innerHTML = PERSIAN_MONTHS.map((name, idx) => `<option value="${idx + 1}">${name}</option>`).join('');
 
-        const settings = typeof window.appApi?.getSettings === 'function' ? await window.appApi.getSettings() : {};
-        baseUrl.value = settings?.baseUrl || '';
-        updateBaseUrlUI();
+        const ready = (async () => {
+            const settings = typeof window.appApi?.getSettings === 'function' ? await window.appApi.getSettings() : {};
+            if (settings?.defaultJYear) {
+                jYear.value = toAsciiDigits(settings.defaultJYear).replace(/[^\d]/g, '');
+            }
+            const defaultMonth = Number.parseInt(settings?.defaultJMonth, 10);
+            if (Number.isFinite(defaultMonth) && defaultMonth >= 1 && defaultMonth <= 12) {
+                jMonth.value = String(defaultMonth);
+            }
 
-        baseUrl.addEventListener('input', updateBaseUrlUI);
-        baseUrl.addEventListener('blur', () => {
-            baseUrl.value = stripTrailingSlash(sanitizeUrl(baseUrl.value));
-            updateBaseUrlUI();
-        });
+            const initialTimeOff = Number.parseFloat(timeOffHours.value || '0') || 0;
+            timeOffHours.value = initialTimeOff ? String(initialTimeOff) : '0';
 
-        if (settings?.defaultJYear) {
-            jYear.value = toAsciiDigits(settings.defaultJYear).replace(/[^\d]/g, '');
-        }
-        const defaultMonth = Number.parseInt(settings?.defaultJMonth, 10);
-        if (Number.isFinite(defaultMonth) && defaultMonth >= 1 && defaultMonth <= 12) {
-            jMonth.value = String(defaultMonth);
-        }
-
-        const initialTimeOff = Number.parseFloat(timeOffHours.value || '0') || 0;
-        timeOffHours.value = initialTimeOff ? String(initialTimeOff) : '0';
-
-        await reportStateInstance.setSelection({
-            jYear: parseJalaaliInt(jYear.value),
-            jMonth: parseJalaaliInt(jMonth.value),
-            timeOffHours: initialTimeOff
-        }, { silent: true });
+            await reportStateInstance.setSelection({
+                jYear: parseJalaaliInt(jYear.value),
+                jMonth: parseJalaaliInt(jMonth.value),
+                timeOffHours: initialTimeOff
+            }, { silent: true });
+        })();
 
         jYear.addEventListener('input', async () => {
             const caret = jYear.selectionStart;
@@ -449,36 +441,15 @@
             await reportStateInstance.setSelection({ jMonth: parsed }, { pushSelection: true, refresh: true });
         });
 
-        timeOffHours.addEventListener('input', () => {
+        timeOffHours.addEventListener('input', async () => {
             const parsed = Number.parseFloat(timeOffHours.value);
             const clean = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-            reportStateInstance.setSelection({ timeOffHours: clean });
-        });
-
-        saveBtn.addEventListener('click', async () => {
-            baseUrl.value = stripTrailingSlash(sanitizeUrl(baseUrl.value));
-            updateBaseUrlUI();
-            if (typeof window.appApi?.saveSettings === 'function') {
-                try {
-                    await window.appApi.saveSettings({ baseUrl: baseUrl.value });
-                } catch (err) {
-                    console.error('Failed to save settings', err);
-                }
-            } else {
-                console.warn('saveSettings API is not available.');
-            }
-            if (userSelectCtx?.enforceUserVisibility) {
-                await userSelectCtx.enforceUserVisibility();
-            }
-            await reportStateInstance.refresh({ force: true });
+            timeOffHours.value = String(clean);
+            await reportStateInstance.setSelection({ timeOffHours: clean }, { refresh: true });
         });
 
         reportStateInstance.subscribe((state) => {
-            syncInputs(state.selection);
-            renderSummary(state);
-        });
-
-        function syncInputs(selection) {
+            const selection = state.selection || {};
             if (selection.jYear != null) {
                 const value = String(selection.jYear);
                 if (toAsciiDigits(jYear.value) !== value) {
@@ -497,7 +468,27 @@
                     timeOffHours.value = String(selection.timeOffHours);
                 }
             }
+        });
+
+        return { ready, jYear, jMonth, timeOffHours };
+    }
+
+    async function initMonthlySummary(root, reportStateInstance) {
+        if (!root || root.dataset.controllerReady === 'true') return {};
+        root.dataset.controllerReady = 'true';
+
+        const table = root.querySelector('#results');
+        const tbody = table?.querySelector('tbody');
+        const footerTotals = root.querySelector('#footerTotals');
+        const debug = root.querySelector('#debug');
+        if (!table || !tbody || !footerTotals) {
+            console.warn('Monthly summary view missing required elements.');
+            return {};
         }
+
+        reportStateInstance.subscribe((state) => {
+            renderSummary(state);
+        });
 
         function renderSummary(state) {
             const res = state.result;
@@ -596,6 +587,52 @@
             `;
         }
 
+        return {
+            onShow: () => reportStateInstance.refresh()
+        };
+    }
+
+    async function initConfigurations(root, reportStateInstance, userSelectCtx) {
+        if (!root || root.dataset.controllerReady === 'true') return {};
+        root.dataset.controllerReady = 'true';
+
+        const baseUrl = root.querySelector('#baseUrl');
+        const baseUrlWrap = root.querySelector('#baseUrlWrap');
+        const saveBtn = root.querySelector('#save');
+
+        if (!baseUrl || !baseUrlWrap || !saveBtn) {
+            console.warn('Configurations view missing required elements.');
+            return {};
+        }
+
+        const settings = typeof window.appApi?.getSettings === 'function' ? await window.appApi.getSettings() : {};
+        baseUrl.value = settings?.baseUrl || '';
+        updateBaseUrlUI();
+
+        baseUrl.addEventListener('input', updateBaseUrlUI);
+        baseUrl.addEventListener('blur', () => {
+            baseUrl.value = stripTrailingSlash(sanitizeUrl(baseUrl.value));
+            updateBaseUrlUI();
+        });
+
+        saveBtn.addEventListener('click', async () => {
+            baseUrl.value = stripTrailingSlash(sanitizeUrl(baseUrl.value));
+            updateBaseUrlUI();
+            if (typeof window.appApi?.saveSettings === 'function') {
+                try {
+                    await window.appApi.saveSettings({ baseUrl: baseUrl.value });
+                } catch (err) {
+                    console.error('Failed to save settings', err);
+                }
+            } else {
+                console.warn('saveSettings API is not available.');
+            }
+            if (userSelectCtx?.enforceUserVisibility) {
+                await userSelectCtx.enforceUserVisibility();
+            }
+            await reportStateInstance.refresh({ force: true });
+        });
+
         function updateBaseUrlUI() {
             const value = sanitizeUrl(baseUrl.value);
             baseUrlWrap.classList.remove('is-valid', 'is-invalid');
@@ -607,9 +644,7 @@
             }
         }
 
-        return {
-            onShow: () => reportStateInstance.refresh()
-        };
+        return {};
     }
 
     function initDetailedWorklogs(root, reportStateInstance) {
