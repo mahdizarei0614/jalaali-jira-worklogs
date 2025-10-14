@@ -178,6 +178,11 @@
 
         .table-wrap.small{ max-height:42vh; overflow:auto; }
 
+        #quarterReportTable td{ vertical-align: top; }
+        .quarter-month{ display:flex; flex-direction:column; gap:2px; }
+        .quarter-month strong{ font-size:13px; }
+        .quarter-month .muted{ font-size:12px; }
+
         .tip{ position:relative; cursor:help; border-bottom:1px dotted rgba(0,0,0,.2); }
         .tip[data-tip]::after{
             content:attr(data-tip);

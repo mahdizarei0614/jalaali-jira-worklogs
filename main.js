@@ -210,31 +210,6 @@
         return `fp:${issueKey}|${a}|${started}|${secs}`;
     }
 
-    function buildReportRows(issue, fullWorklogs, username, seen) {
-        const rows = [];
-        for (const log of fullWorklogs) {
-            if (!authorMatches(log.author, username)) continue;
-
-            // ---- DEDUPE ----
-            const k = worklogKey(issue.key, log);
-            if (seen.has(k)) continue;
-            seen.add(k);
-            // ----------------
-
-            const date = String(log.started).split('T')[0]; // 'YYYY-MM-DD'
-            rows.push({
-                worklogId: log.id || null, // keep for reference
-                issueKey: issue.key,
-                summary: issue?.fields?.summary,
-                date,
-                timeSpent: log.timeSpent,
-                hours: +(log.timeSpentSeconds / 3600).toFixed(2),
-                comment: log.comment || ''
-            });
-        }
-        return rows;
-    }
-
     function classifyDay({ isWorkday, isFuture, hours }) {
         if (!isWorkday || isFuture) return 'gray';
         if (hours === 0) return 'red';
@@ -259,66 +234,74 @@
         return { jYear, jMonth, source: 'current' };
     }
 
-    async function computeScan(opts) {
-        const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
-        const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
-        const username = (opts && opts.username) || lastUI.username;
-
-        if (!baseUrl || !token) return { ok: false, reason: 'Missing Jira base URL or token.' };
-        if (!username) return { ok: false, reason: 'No Jira username selected in UI.' };
-
-        const { jYear, jMonth, source } = resolveTargetMonth(opts);
+    async function buildMonthlyReport({ baseUrl, headers, username, jYear, jMonth, nowG, includeDetails = true }) {
         const { start, end } = jMonthRange(jYear, jMonth);
-        if (!start || !end) return { ok: false, reason: 'Failed to construct selected Jalaali month range.' };
+        if (!start || !end) {
+            return { ok: false, reason: 'Failed to construct selected Jalaali month range.' };
+        }
 
         const fromYMD = start.format('YYYY-MM-DD');
-        const toYMD   = end.format('YYYY-MM-DD');
-        const nowG    = mtNow();
-
-        const headers = buildHeaders(baseUrl, token);
+        const toYMD = end.format('YYYY-MM-DD');
         const jql = `worklogAuthor = "${username}" AND worklogDate >= "${fromYMD}" AND worklogDate <= "${toYMD}"`;
 
         const issues = await searchIssuesWithWorklogsPaged(baseUrl, headers, jql);
 
-        // ---- Build detailed report rows (like your script) ----
-        let report = [];
-        const seenWorklogKeys = new Set(); // <--- add this
+        const seenWorklogKeys = new Set();
+        const worklogs = [];
+        const dailyTotalsMap = {};
+        let totalWorklogs = 0;
+        let totalLoggedHours = 0;
 
         for (const issue of issues) {
             const initial = issue?.fields?.worklog ?? {};
             const fullWls = await getFullIssueWorklogs(baseUrl, headers, issue.key, initial);
-            report.push(...buildReportRows(issue, fullWls, username, seenWorklogKeys)); // pass set
+            for (const log of fullWls) {
+                if (!authorMatches(log.author, username)) continue;
+
+                const key = worklogKey(issue.key, log);
+                if (seenWorklogKeys.has(key)) continue;
+                seenWorklogKeys.add(key);
+
+                const startedRaw = typeof log.started === 'string' ? log.started : '';
+                const date = startedRaw.split('T')[0];
+                if (!date) continue;
+
+                const dateMoment = moment(date, 'YYYY-MM-DD', true);
+                if (!dateMoment.isValid()) continue;
+                if (dateMoment.isBefore(start, 'day') || dateMoment.isAfter(end, 'day')) continue;
+
+                const hoursRaw = log.timeSpentSeconds ?? log.timeSpentInSeconds ?? 0;
+                const hours = Number.isFinite(hoursRaw) ? hoursRaw / 3600 : 0;
+
+                totalWorklogs += 1;
+                totalLoggedHours += hours;
+                dailyTotalsMap[date] = (dailyTotalsMap[date] || 0) + hours;
+
+                if (includeDetails) {
+                    worklogs.push({
+                        worklogId: log.id || null,
+                        issueKey: issue.key,
+                        summary: issue?.fields?.summary,
+                        date,
+                        persianDate: dateMoment.format('jYYYY/jMM/jDD'),
+                        timeSpent: log.timeSpent,
+                        hours: +(hours).toFixed(2),
+                        comment: log.comment || ''
+                    });
+                }
+            }
         }
 
-        // Filter + sort + add Persian date (exactly like your approach)
-        report = report
-            .filter(r =>
-                moment(r.date, 'YYYY-MM-DD', true).isSameOrBefore(moment(toYMD, 'YYYY-MM-DD')) &&
-                moment(r.date, 'YYYY-MM-DD', true).isSameOrAfter(moment(fromYMD, 'YYYY-MM-DD'))
-            )
-            .sort((a, b) => moment(a.date, 'YYYY-MM-DD').diff(moment(b.date, 'YYYY-MM-DD')))
-            .map(r => ({
-                ...r,
-                persianDate: moment(r.date, 'YYYY-MM-DD', true).format('jYYYY/jMM/jDD')
-            }));
-
-        // ---- Summary (like your calculateSummary) ----
-        const totalWorklogs = report.length;
-        const totalLoggedHours = +report.reduce((sum, entry) => sum + Number(entry.hours), 0).toFixed(2);
-
-        const dailyTotalsMap = {};
-        for (const entry of report) {
-            dailyTotalsMap[entry.date] = (dailyTotalsMap[entry.date] || 0) + Number(entry.hours);
+        if (includeDetails) {
+            worklogs.sort((a, b) => moment(a.date, 'YYYY-MM-DD').diff(moment(b.date, 'YYYY-MM-DD')));
         }
+
         const dailySummary = Object.entries(dailyTotalsMap)
             .sort((a, b) => a[0].localeCompare(b[0]))
             .map(([date, hours]) => ({ date, hours: (+hours).toFixed(2) }));
 
-        // ---- Build calendar days (colors etc.) ----
         const holidayDays = buildHolidaysSetFromStatic(jYear, jMonth);
         const daysInMonth = mj(jYear, jMonth, 1).endOf('jMonth').jDate();
-
-        // daily totals for coloring
         const dailyTotalsForCalendar = { ...dailyTotalsMap };
 
         const days = [];
@@ -346,35 +329,155 @@
             });
         }
 
-        const totalHours = +days.reduce((s, d) => s + d.hours, 0).toFixed(2);
+        const totalHours = +days.reduce((sum, d) => sum + d.hours, 0).toFixed(2);
         const workdaysAll = days.filter(d => d.isWorkday).length;
         const workdaysUntilNow = days.filter(d => d.isWorkday && !d.isFuture).length;
         const expectedByNowHours = 6 * workdaysUntilNow;
         const expectedByEndMonthHours = 6 * workdaysAll;
 
-        const deficits = days.filter(d => d.isWorkday && !d.isFuture && d.hours < 6);
-
-        return {
+        const result = {
             ok: true,
             jYear,
             jMonth,
             jMonthLabel: mj(jYear, jMonth, 1).format('jYYYY/jMM'),
             jql,
-            days,
-            deficits,
             totalHours,
             expectedByNowHours,
             expectedByEndMonthHours,
-            // NEW: expose script-style objects
-            worklogs: report,
             summary: {
                 totalWorklogs,
-                totalHours: totalLoggedHours.toFixed(2),
+                totalHours: (+totalLoggedHours).toFixed(2),
                 dailySummary
             }
         };
+
+        if (includeDetails) {
+            const deficits = days.filter(d => d.isWorkday && !d.isFuture && d.hours < 6);
+            result.days = days;
+            result.deficits = deficits;
+            result.worklogs = worklogs;
+        }
+
+        return result;
     }
 
+    const SEASONS = [
+        { id: 'spring', label: 'Spring', months: [1, 2, 3] },
+        { id: 'summer', label: 'Summer', months: [4, 5, 6] },
+        { id: 'autumn', label: 'Autumn', months: [7, 8, 9] },
+        { id: 'winter', label: 'Winter', months: [10, 11, 12] }
+    ];
+
+    async function buildQuarterReport({ baseUrl, headers, username, jYear, nowG, monthCache }) {
+        const seasons = [];
+
+        for (const season of SEASONS) {
+            const months = [];
+            let quarterTotal = 0;
+            let quarterExpected = 0;
+
+            for (const jMonth of season.months) {
+                const cacheKey = `${jYear}-${jMonth}`;
+                let monthData = monthCache.get(cacheKey);
+                if (!monthData) {
+                    monthData = await buildMonthlyReport({
+                        baseUrl,
+                        headers,
+                        username,
+                        jYear,
+                        jMonth,
+                        nowG,
+                        includeDetails: false
+                    });
+                    monthCache.set(cacheKey, monthData);
+                }
+
+                if (!monthData?.ok) {
+                    months.push({
+                        ok: false,
+                        jYear,
+                        jMonth,
+                        label: mj(jYear, jMonth, 1).format('jMMMM'),
+                        totalHours: 0,
+                        expectedHours: 0,
+                        delta: 0,
+                        reason: monthData?.reason || 'No data'
+                    });
+                    continue;
+                }
+
+                const totalHours = +(monthData.totalHours ?? 0);
+                const expectedHours = +(monthData.expectedByEndMonthHours ?? 0);
+                quarterTotal += totalHours;
+                quarterExpected += expectedHours;
+
+                months.push({
+                    ok: true,
+                    jYear,
+                    jMonth,
+                    label: monthData.jMonthLabel,
+                    totalHours,
+                    expectedHours,
+                    delta: +(totalHours - expectedHours).toFixed(2)
+                });
+            }
+
+            const totalsRounded = {
+                totalHours: +quarterTotal.toFixed(2),
+                expectedHours: +quarterExpected.toFixed(2)
+            };
+            totalsRounded.delta = +(totalsRounded.totalHours - totalsRounded.expectedHours).toFixed(2);
+
+            seasons.push({
+                id: season.id,
+                label: `${season.label} ${jYear}`,
+                months,
+                totals: totalsRounded
+            });
+        }
+
+        return { ok: true, jYear, seasons };
+    }
+
+    async function computeScan(opts) {
+        const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
+        const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
+        const username = (opts && opts.username) || lastUI.username;
+
+        if (!baseUrl || !token) return { ok: false, reason: 'Missing Jira base URL or token.' };
+        if (!username) return { ok: false, reason: 'No Jira username selected in UI.' };
+
+        const { jYear, jMonth } = resolveTargetMonth(opts);
+        const nowG = mtNow();
+        const headers = buildHeaders(baseUrl, token);
+
+        const monthCache = new Map();
+        const monthResult = await buildMonthlyReport({
+            baseUrl,
+            headers,
+            username,
+            jYear,
+            jMonth,
+            nowG,
+            includeDetails: true
+        });
+
+        if (!monthResult?.ok) {
+            return monthResult;
+        }
+
+        monthCache.set(`${jYear}-${jMonth}`, monthResult);
+        const quarterReport = await buildQuarterReport({
+            baseUrl,
+            headers,
+            username,
+            jYear,
+            nowG,
+            monthCache
+        });
+
+        return { ...monthResult, quarterReport };
+    }
     // ===== Notifications / scheduling, auth, routing, IPC (unchanged from your last working version) =====
     // ... keep the rest of your file exactly as in your latest working build ...
     // (For brevity here, do not remove your existing login, logout, tray, and IPC handlers.)
