@@ -235,6 +235,14 @@
     });
 
     const reportState = createReportState();
+    const loadingOverlay = $('#loadingOverlay');
+    if (loadingOverlay) {
+        reportState.subscribe((state) => {
+            const visible = Boolean(state.isFetching);
+            loadingOverlay.classList.toggle('is-visible', visible);
+            loadingOverlay.setAttribute('aria-hidden', String(!visible));
+        });
+    }
     const settingsPromise = loadSettings();
     const userSelectContext = initUserSelect($('#sidebarUserSelect'), reportState);
 
@@ -284,7 +292,7 @@
         const listeners = new Set();
         const state = {
             selection: {
-                team: DEFAULT_TEAM,
+                team: null,
                 jYear: null,
                 jMonth: null,
                 username: null,
@@ -334,8 +342,12 @@
                     for (const [key, value] of Object.entries(update)) {
                         if (!(key in state.selection)) continue;
                         if (value === undefined) continue;
-                        if (state.selection[key] !== value) {
-                            state.selection[key] = value;
+                        let nextValue = value;
+                        if ((key === 'team' || key === 'username') && (nextValue === '' || nextValue == null)) {
+                            nextValue = null;
+                        }
+                        if (state.selection[key] !== nextValue) {
+                            state.selection[key] = nextValue;
                             changed = true;
                         }
                     }
@@ -373,6 +385,8 @@
                 }
                 const selectionSnapshot = { jYear, jMonth, username };
                 const run = (async () => {
+                    state.result = null;
+                    state.lastError = null;
                     state.isFetching = true;
                     state.notify();
                     const matchesSelection = () => (
@@ -474,35 +488,39 @@
             };
         }
 
-        teamSelectEl.innerHTML = TEAM_OPTIONS.map((team) => `<option value="${team.value}">${team.text}</option>`).join('');
+        const teamOptions = ['<option value="">Select a team…</option>'];
+        TEAM_OPTIONS.forEach((team) => {
+            teamOptions.push(`<option value="${team.value}">${team.text}</option>`);
+        });
+        teamSelectEl.innerHTML = teamOptions.join('');
 
         const initialSelection = reportStateInstance.getSelection();
-        let initialTeam = initialSelection.team && TEAM_USERS.has(initialSelection.team)
+        const knownInitialTeam = initialSelection.team && TEAM_USERS.has(initialSelection.team)
             ? initialSelection.team
-            : (findTeamForUser(initialSelection.username) || DEFAULT_TEAM || TEAM_OPTIONS[0]?.value || '');
-        if (!initialTeam && TEAM_OPTIONS.length) {
-            initialTeam = TEAM_OPTIONS[0].value;
-        }
-        if (initialTeam) {
-            teamSelectEl.value = initialTeam;
-            if (initialTeam !== initialSelection.team) {
-                reportStateInstance.setSelection({ team: initialTeam }, { silent: true });
-            }
+            : '';
+        const inferredTeam = !knownInitialTeam && initialSelection.username
+            ? findTeamForUser(initialSelection.username)
+            : '';
+        const initialTeam = knownInitialTeam || inferredTeam || '';
+        teamSelectEl.value = initialTeam;
+        if (initialTeam && initialTeam !== initialSelection.team) {
+            reportStateInstance.setSelection({ team: initialTeam }, { silent: true });
         }
 
-        let defaultUser = initialSelection.username;
-        if (!defaultUser || findTeamForUser(defaultUser) !== teamSelectEl.value) {
-            defaultUser = getTeamUsers(teamSelectEl.value)[0]?.value || '';
-        }
-        renderUserOptions(teamSelectEl.value, defaultUser);
-        if (defaultUser && defaultUser !== initialSelection.username) {
-            reportStateInstance.setSelection({ username: defaultUser }, { silent: true });
+        const activeTeam = teamSelectEl.value || '';
+        const availableUsers = getTeamUsers(activeTeam);
+        const initialUser = (initialSelection.username && availableUsers.some((u) => u.value === initialSelection.username))
+            ? initialSelection.username
+            : '';
+        renderUserOptions(activeTeam, initialUser);
+        if (initialUser && initialUser !== initialSelection.username) {
+            reportStateInstance.setSelection({ username: initialUser }, { silent: true });
         }
 
         teamSelectEl.addEventListener('change', async () => {
             const team = teamSelectEl.value;
             renderUserOptions(team, '');
-            await reportStateInstance.setSelection({ team, username: null }, { clearResult: true });
+            await reportStateInstance.setSelection({ team: team || null, username: null }, { clearResult: true });
         });
 
         selectEl.addEventListener('change', async () => {
@@ -517,19 +535,40 @@
         reportStateInstance.subscribe((state) => {
             const selection = state.selection || {};
             const { team, username } = selection;
-            if (team && TEAM_USERS.has(team) && teamSelectEl.value !== team) {
+            if (!team) {
+                if (teamSelectEl.value !== '') {
+                    teamSelectEl.value = '';
+                }
+                renderUserOptions('', '');
+                if (selectEl.value !== '') {
+                    selectEl.value = '';
+                }
+                return;
+            }
+
+            if (!TEAM_USERS.has(team)) {
+                const existingOption = Array.from(teamSelectEl.options).some((opt) => opt.value === team);
+                if (!existingOption) {
+                    const opt = document.createElement('option');
+                    opt.value = team;
+                    opt.textContent = team;
+                    teamSelectEl.appendChild(opt);
+                }
+            }
+
+            if (teamSelectEl.value !== team) {
                 teamSelectEl.value = team;
                 renderUserOptions(team, username || '');
                 return;
             }
-            if (team && TEAM_USERS.has(team)) {
-                const users = getTeamUsers(team);
-                if (username && !users.some((u) => u.value === username)) {
-                    ensureUserInTeamMap(team, { value: username, text: username });
-                    renderUserOptions(team, username);
-                    return;
-                }
+
+            const users = getTeamUsers(team);
+            if (username && !users.some((u) => u.value === username)) {
+                ensureUserInTeamMap(team, { value: username, text: username });
+                renderUserOptions(team, username);
+                return;
             }
+
             const desiredValue = username || '';
             if (selectEl.value !== desiredValue) {
                 selectEl.value = desiredValue;
@@ -547,39 +586,49 @@
                 if (!self) return;
                 const displayName = (who.raw?.displayName || '').trim() || self;
 
-                let teamForSelf = findTeamForUser(self) || teamSelectEl.value || DEFAULT_TEAM || TEAM_OPTIONS[0]?.value || '';
+                const isAdmin = ADMIN_USERS.has(self);
+                const teamForSelf = findTeamForUser(self) || '';
                 if (teamForSelf) {
                     ensureUserInTeamMap(teamForSelf, { value: self, text: displayName });
                 }
 
                 const currentSelection = reportStateInstance.getSelection();
-                if (!currentSelection.team && teamForSelf) {
-                    await reportStateInstance.setSelection({ team: teamForSelf }, { silent: true });
-                    teamSelectEl.value = teamForSelf;
-                }
 
-                const isAdmin = ADMIN_USERS.has(self);
                 if (!isAdmin) {
-                    const activeTeam = teamSelectEl.value || teamForSelf;
-                    if (activeTeam) {
-                        teamSelectEl.value = activeTeam;
-                        renderUserOptions(activeTeam, self);
+                    const fallbackTeam = teamForSelf || currentSelection.team || TEAM_OPTIONS[0]?.value || '';
+                    if (fallbackTeam) {
+                        const hasOption = Array.from(teamSelectEl.options).some((opt) => opt.value === fallbackTeam);
+                        if (!hasOption) {
+                            const opt = document.createElement('option');
+                            opt.value = fallbackTeam;
+                            const label = TEAM_OPTIONS.find((team) => team.value === fallbackTeam)?.text || fallbackTeam;
+                            opt.textContent = label;
+                            teamSelectEl.appendChild(opt);
+                        }
+                        teamSelectEl.value = fallbackTeam;
+                        renderUserOptions(fallbackTeam, self);
+                    } else {
+                        renderUserOptions('', '');
                     }
                     teamSelectEl.disabled = true;
                     selectEl.disabled = true;
-                    await reportStateInstance.setSelection({ team: teamSelectEl.value, username: self }, { pushSelection: true, refresh: true, clearResult: true });
+                    await reportStateInstance.setSelection({ team: fallbackTeam || null, username: self }, { pushSelection: true, refresh: true, clearResult: true });
                 } else {
                     teamSelectEl.disabled = false;
                     selectEl.disabled = false;
                     const activeTeam = currentSelection.team && TEAM_USERS.has(currentSelection.team)
                         ? currentSelection.team
-                        : (teamSelectEl.value || teamForSelf);
+                        : (teamSelectEl.value && TEAM_USERS.has(teamSelectEl.value) ? teamSelectEl.value : '');
                     if (activeTeam) {
                         if (teamSelectEl.value !== activeTeam) {
                             teamSelectEl.value = activeTeam;
-                            renderUserOptions(activeTeam, currentSelection.username || '');
-                        } else {
-                            renderUserOptions(activeTeam, currentSelection.username || selectEl.value || '');
+                        }
+                        renderUserOptions(activeTeam, currentSelection.username || selectEl.value || '');
+                    } else {
+                        teamSelectEl.value = '';
+                        renderUserOptions('', '');
+                        if (selectEl.value !== '') {
+                            selectEl.value = '';
                         }
                     }
                 }
