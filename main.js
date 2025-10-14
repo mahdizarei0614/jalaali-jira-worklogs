@@ -121,14 +121,29 @@
         return h;
     }
 
-    async function searchIssuesWithWorklogsPaged(baseUrl, headers, jql) {
+    const DEFAULT_SEARCH_FIELDS = [
+        'key',
+        'summary',
+        'worklog',
+        'duedate',
+        'status',
+        'timeoriginalestimate',
+        'timeestimate',
+        'timespent',
+        'aggregatetimeestimate',
+        'aggregatetimespent',
+        'aggregatetimeoriginalestimate',
+        'timetracking'
+    ].join(',');
+
+    async function searchIssuesPaged(baseUrl, headers, jql, fields = DEFAULT_SEARCH_FIELDS) {
         const issues = [];
         let startAt = 0;
         const maxResults = 100;
         while (true) {
             const { data } = await axios.get(`${baseUrl}/rest/api/latest/search`, {
                 headers,
-                params: { jql, startAt, maxResults, fields: 'key,summary,worklog' }
+                params: { jql, startAt, maxResults, fields }
             });
             if (Array.isArray(data?.issues)) issues.push(...data.issues);
             const total = data?.total ?? issues.length;
@@ -136,6 +151,96 @@
             if (startAt >= total) break;
         }
         return issues;
+    }
+
+    function pickNumber(...values) {
+        for (const val of values) {
+            if (val == null) continue;
+            const num = Number(val);
+            if (Number.isFinite(num)) return num;
+        }
+        return null;
+    }
+
+    function secsToHours(secs) {
+        if (!Number.isFinite(secs)) return 0;
+        return +(secs / 3600).toFixed(2);
+    }
+
+    function extractTimeTracking(issue) {
+        const fields = issue?.fields ?? {};
+        const tt = fields.timetracking ?? {};
+
+        let originalSeconds = pickNumber(
+            tt.originalEstimateSeconds,
+            fields.timeoriginalestimate,
+            fields.aggregatetimeoriginalestimate
+        );
+        const spentSeconds = pickNumber(
+            tt.timeSpentSeconds,
+            fields.timespent,
+            fields.aggregatetimespent
+        );
+        let remainingSeconds = pickNumber(
+            tt.remainingEstimateSeconds,
+            fields.timeestimate,
+            fields.aggregatetimeestimate
+        );
+
+        if (remainingSeconds == null && originalSeconds != null && spentSeconds != null) {
+            remainingSeconds = Math.max(0, originalSeconds - spentSeconds);
+        }
+
+        if (originalSeconds == null && spentSeconds != null && remainingSeconds != null) {
+            originalSeconds = spentSeconds + remainingSeconds;
+        }
+
+        return {
+            originalSeconds: originalSeconds ?? 0,
+            spentSeconds: spentSeconds ?? 0,
+            remainingSeconds: remainingSeconds ?? 0
+        };
+    }
+
+    async function fetchIssuesDueThisMonth({ baseUrl, headers, username, nowG }) {
+        const start = nowG.clone().startOf('month').format('YYYY-MM-DD');
+        const end = nowG.clone().endOf('month').format('YYYY-MM-DD');
+        const jql = `assignee = "${username}" AND duedate >= "${start}" AND duedate <= "${end}" ORDER BY duedate`;
+        const fields = [
+            'key',
+            'summary',
+            'duedate',
+            'status',
+            'timeoriginalestimate',
+            'timeestimate',
+            'timespent',
+            'aggregatetimeestimate',
+            'aggregatetimespent',
+            'aggregatetimeoriginalestimate',
+            'timetracking'
+        ].join(',');
+
+        const issues = await searchIssuesPaged(baseUrl, headers, jql, fields);
+
+        return issues
+            .map((issue) => {
+                const dueDate = issue?.fields?.duedate;
+                if (!dueDate) return null;
+
+                const times = extractTimeTracking(issue);
+
+                return {
+                    issueKey: issue.key,
+                    summary: issue?.fields?.summary || '',
+                    dueDate,
+                    status: issue?.fields?.status?.name || null,
+                    estimateHours: secsToHours(times.originalSeconds),
+                    loggedHours: secsToHours(times.spentSeconds),
+                    remainingHours: secsToHours(times.remainingSeconds)
+                };
+            })
+            .filter(Boolean)
+            .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
     }
 
     async function getFullIssueWorklogs(baseUrl, headers, issueKey, initialContainer) {
@@ -244,7 +349,7 @@
         const toYMD = end.format('YYYY-MM-DD');
         const jql = `worklogAuthor = "${username}" AND worklogDate >= "${fromYMD}" AND worklogDate <= "${toYMD}"`;
 
-        const issues = await searchIssuesWithWorklogsPaged(baseUrl, headers, jql);
+        const issues = await searchIssuesPaged(baseUrl, headers, jql);
 
         const seenWorklogKeys = new Set();
         const worklogs = [];
@@ -286,14 +391,24 @@
                         persianDate: dateMoment.format('jYYYY/jMM/jDD'),
                         timeSpent: log.timeSpent,
                         hours: +(hours).toFixed(2),
-                        comment: log.comment || ''
+                        comment: log.comment || '',
+                        dueDate: issue?.fields?.duedate || null,
+                        status: issue?.fields?.status?.name || null
                     });
                 }
             }
         }
 
+        let dueIssuesCurrentMonth = [];
+
         if (includeDetails) {
             worklogs.sort((a, b) => moment(a.date, 'YYYY-MM-DD').diff(moment(b.date, 'YYYY-MM-DD')));
+            try {
+                dueIssuesCurrentMonth = await fetchIssuesDueThisMonth({ baseUrl, headers, username, nowG });
+            } catch (err) {
+                console.error('Failed to fetch due issues for current month:', err);
+                dueIssuesCurrentMonth = [];
+            }
         }
 
         const dailySummary = Object.entries(dailyTotalsMap)
@@ -356,6 +471,7 @@
             result.days = days;
             result.deficits = deficits;
             result.worklogs = worklogs;
+            result.dueIssuesCurrentMonth = dueIssuesCurrentMonth;
         }
 
         return result;
