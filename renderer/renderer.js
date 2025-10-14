@@ -171,14 +171,22 @@
         const footerTotals = root.querySelector('#footerTotals');
         const worklogsWrap = root.querySelector('#worklogsWrap');
         const detailedBody = root.querySelector('#detailedWorklogsTable tbody');
+        const quarterSection = root.querySelector('#quarterReportSection');
+        const quarterTableBody = root.querySelector('#quarterReportTable tbody');
         const debug = root.querySelector('#debug');
         const saveBtn = root.querySelector('#save');
         const scanBtn = root.querySelector('#scan');
 
-        if (!baseUrl || !baseUrlWrap || !usernameSelect || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !worklogsWrap || !detailedBody || !saveBtn || !scanBtn) {
+        if (!baseUrl || !baseUrlWrap || !usernameSelect || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !worklogsWrap || !detailedBody || !quarterSection || !quarterTableBody || !saveBtn || !scanBtn) {
             console.warn('Monthly report view missing required elements.');
             return;
         }
+
+        const formatHours = (val) => {
+            const num = Number.parseFloat(val);
+            if (!Number.isFinite(num)) return '0.00';
+            return num.toFixed(2);
+        };
 
         const weekdayName = (w) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][w] || String(w);
         const persianMonths = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
@@ -358,6 +366,57 @@
             worklogsWrap.style.display = 'block';
         }
 
+        function renderQuarterReport(data) {
+            if (!quarterSection || !quarterTableBody) return;
+
+            if (!data?.ok || !Array.isArray(data.seasons) || data.seasons.length === 0) {
+                quarterTableBody.innerHTML = '<tr><td colspan="7">—</td></tr>';
+                quarterSection.style.display = 'none';
+                return;
+            }
+
+            quarterTableBody.innerHTML = '';
+            data.seasons.forEach((season) => {
+                const tr = document.createElement('tr');
+                const monthsHtml = (season.months || []).map((month) => {
+                    const label = month.label || `Month ${month.jMonth}`;
+                    if (!month.ok) {
+                        return `<div class="quarter-month"><strong>${label}</strong><span class="muted">${month.reason || 'No data'}</span></div>`;
+                    }
+                    const delta = Number.parseFloat(month.delta || 0);
+                    const deltaCls = delta >= 0 ? 'delta-pos' : 'delta-neg';
+                    const deltaVal = `${delta.toFixed(2)} h`;
+                    return `
+                        <div class="quarter-month">
+                            <strong>${label}</strong>
+                            <div>${formatHours(month.totalHours)} h</div>
+                            <div class="muted">Exp ${formatHours(month.expectedHours)} h</div>
+                            <div class="${deltaCls}">${deltaVal}</div>
+                        </div>
+                    `;
+                });
+
+                while (monthsHtml.length < 3) {
+                    monthsHtml.push('<div class="quarter-month"><span class="muted">—</span></div>');
+                }
+
+                const totals = season.totals || {};
+                const totalDelta = Number.parseFloat(totals.delta || 0);
+                const totalDeltaCls = totalDelta >= 0 ? 'delta-pos' : 'delta-neg';
+
+                tr.innerHTML = `
+                    <td><strong>${season.label || 'Season'}</strong></td>
+                    ${monthsHtml.map((html) => `<td>${html}</td>`).join('')}
+                    <td>${formatHours(totals.totalHours)} h</td>
+                    <td>${formatHours(totals.expectedHours)} h</td>
+                    <td class="${totalDeltaCls}">${totalDelta.toFixed(2)} h</td>
+                `;
+                quarterTableBody.appendChild(tr);
+            });
+
+            quarterSection.style.display = 'block';
+        }
+
         function render(res) {
             lastResult = res;
 
@@ -365,6 +424,7 @@
                 table.style.display = 'none';
                 tbody.innerHTML = '';
                 worklogsWrap.style.display = 'none';
+                renderQuarterReport(null);
                 updateFooter();
                 return;
             }
@@ -391,6 +451,7 @@
             table.style.display = 'table';
 
             renderWorklogs(res);
+            renderQuarterReport(res.quarterReport);
             updateFooter();
         }
 
