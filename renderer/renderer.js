@@ -171,11 +171,15 @@
         const footerTotals = root.querySelector('#footerTotals');
         const worklogsWrap = root.querySelector('#worklogsWrap');
         const detailedBody = root.querySelector('#detailedWorklogsTable tbody');
+        const quarterSection = root.querySelector('#quarterReport');
+        const quarterMeta = root.querySelector('#quarterMeta');
+        const quarterBody = root.querySelector('#quarterReportTable tbody');
+        const quarterTotalsCell = root.querySelector('#quarterTotalsCell');
         const debug = root.querySelector('#debug');
         const saveBtn = root.querySelector('#save');
         const scanBtn = root.querySelector('#scan');
 
-        if (!baseUrl || !baseUrlWrap || !usernameSelect || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !worklogsWrap || !detailedBody || !saveBtn || !scanBtn) {
+        if (!baseUrl || !baseUrlWrap || !usernameSelect || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !worklogsWrap || !detailedBody || !saveBtn || !scanBtn || !quarterSection || !quarterMeta || !quarterBody || !quarterTotalsCell) {
             console.warn('Monthly report view missing required elements.');
             return;
         }
@@ -365,6 +369,7 @@
                 table.style.display = 'none';
                 tbody.innerHTML = '';
                 worklogsWrap.style.display = 'none';
+                quarterSection.style.display = 'none';
                 updateFooter();
                 return;
             }
@@ -392,6 +397,50 @@
 
             renderWorklogs(res);
             updateFooter();
+            renderQuarter(res.quarterSummary);
+        }
+
+        function renderQuarter(summary) {
+            if (!summary) {
+                quarterSection.style.display = 'none';
+                quarterBody.innerHTML = '';
+                quarterTotalsCell.innerHTML = '';
+                quarterMeta.textContent = '';
+                return;
+            }
+
+            const monthNames = summary.months.map((m) => persianMonths[m.jMonth - 1] || m.label);
+            quarterMeta.textContent = `${summary.seasonLabelFa || summary.seasonLabel} ${summary.jYear} • ${monthNames.join('، ')}`;
+
+            quarterBody.innerHTML = summary.months
+                .map((m, idx) => {
+                    const deltaCls = m.delta >= 0 ? 'delta-pos' : 'delta-neg';
+                    const deltaLabel = m.delta >= 0 ? '+' : '';
+                    return `
+          <tr>
+            <td>${idx + 1}</td>
+            <td>${m.label}</td>
+            <td>${m.workdays}</td>
+            <td>${m.expectedHours.toFixed(2)}</td>
+            <td>${m.loggedHours.toFixed(2)}</td>
+            <td class="${deltaCls}">${deltaLabel}${m.delta.toFixed(2)}</td>
+          </tr>
+        `;
+                })
+                .join('');
+
+            const totalDeltaCls = summary.totals.delta >= 0 ? 'delta-pos' : 'delta-neg';
+            const totalDeltaLabel = summary.totals.delta >= 0 ? '+' : '';
+            quarterTotalsCell.innerHTML = `
+        <div class="footer-grid">
+            <span class="pill"><strong>Total Workdays:</strong> ${summary.totals.workdays}</span>
+            <span class="pill"><strong>Expected:</strong> ${summary.totals.expectedHours.toFixed(2)} h</span>
+            <span class="pill"><strong>Logged:</strong> ${summary.totals.loggedHours.toFixed(2)} h</span>
+            <span class="pill ${totalDeltaCls}"><strong>Delta:</strong> ${totalDeltaLabel}${summary.totals.delta.toFixed(2)} h</span>
+        </div>
+      `;
+
+            quarterSection.style.display = 'block';
         }
 
         scanBtn.addEventListener('click', async () => {

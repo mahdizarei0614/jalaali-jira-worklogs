@@ -267,42 +267,131 @@
         if (!baseUrl || !token) return { ok: false, reason: 'Missing Jira base URL or token.' };
         if (!username) return { ok: false, reason: 'No Jira username selected in UI.' };
 
-        const { jYear, jMonth, source } = resolveTargetMonth(opts);
+        const { jYear, jMonth } = resolveTargetMonth(opts);
         const { start, end } = jMonthRange(jYear, jMonth);
         if (!start || !end) return { ok: false, reason: 'Failed to construct selected Jalaali month range.' };
 
-        const fromYMD = start.format('YYYY-MM-DD');
-        const toYMD   = end.format('YYYY-MM-DD');
-        const nowG    = mtNow();
-
         const headers = buildHeaders(baseUrl, token);
+        const nowG = mtNow();
+
+        const monthReport = await buildMonthReport({
+            jYear,
+            jMonth,
+            username,
+            baseUrl,
+            headers,
+            nowG,
+        });
+
+        const quarterSummary = await buildQuarterSummary({
+            jYear,
+            jMonth,
+            username,
+            baseUrl,
+            headers,
+            nowG,
+            currentMonthReport: monthReport,
+        });
+
+        return {
+            ok: true,
+            ...monthReport,
+            quarterSummary,
+        };
+    }
+
+    const QUARTER_DEFINITIONS = [
+        { key: 'spring', label: 'Spring', labelFa: 'بهار', months: [1, 2, 3] },
+        { key: 'summer', label: 'Summer', labelFa: 'تابستان', months: [4, 5, 6] },
+        { key: 'autumn', label: 'Autumn', labelFa: 'پاییز', months: [7, 8, 9] },
+        { key: 'winter', label: 'Winter', labelFa: 'زمستان', months: [10, 11, 12] },
+    ];
+
+    async function buildQuarterSummary({ jYear, jMonth, username, baseUrl, headers, nowG, currentMonthReport }) {
+        const quarter = QUARTER_DEFINITIONS.find((q) => q.months.includes(jMonth));
+        if (!quarter) return null;
+
+        const reports = [];
+        for (const m of quarter.months) {
+            if (m === currentMonthReport?.jMonth) {
+                reports.push(currentMonthReport);
+            } else {
+                const otherReport = await buildMonthReport({
+                    jYear,
+                    jMonth: m,
+                    username,
+                    baseUrl,
+                    headers,
+                    nowG,
+                });
+                reports.push(otherReport);
+            }
+        }
+
+        const totals = reports.reduce(
+            (acc, rep) => {
+                acc.loggedHours += rep.totalHours;
+                acc.expectedHours += rep.expectedByEndMonthHours;
+                acc.workdays += rep.workdaysAll;
+                return acc;
+            },
+            { loggedHours: 0, expectedHours: 0, workdays: 0 }
+        );
+        totals.loggedHours = +totals.loggedHours.toFixed(2);
+        totals.expectedHours = +totals.expectedHours.toFixed(2);
+        totals.delta = +(totals.loggedHours - totals.expectedHours).toFixed(2);
+
+        return {
+            seasonKey: quarter.key,
+            seasonLabel: quarter.label,
+            seasonLabelFa: quarter.labelFa,
+            jYear,
+            months: reports.map((rep) => ({
+                jYear: rep.jYear,
+                jMonth: rep.jMonth,
+                label: rep.jMonthLabel,
+                workdays: rep.workdaysAll,
+                expectedHours: +rep.expectedByEndMonthHours.toFixed(2),
+                loggedHours: +rep.totalHours.toFixed(2),
+                delta: +(rep.totalHours - rep.expectedByEndMonthHours).toFixed(2),
+            })),
+            totals,
+        };
+    }
+
+    async function buildMonthReport({ jYear, jMonth, username, baseUrl, headers, nowG }) {
+        const { start, end } = jMonthRange(jYear, jMonth);
+        if (!start || !end) {
+            throw new Error('Invalid Jalaali month range');
+        }
+
+        const fromYMD = start.format('YYYY-MM-DD');
+        const toYMD = end.format('YYYY-MM-DD');
         const jql = `worklogAuthor = "${username}" AND worklogDate >= "${fromYMD}" AND worklogDate <= "${toYMD}"`;
 
         const issues = await searchIssuesWithWorklogsPaged(baseUrl, headers, jql);
 
-        // ---- Build detailed report rows (like your script) ----
         let report = [];
-        const seenWorklogKeys = new Set(); // <--- add this
+        const seenWorklogKeys = new Set();
 
         for (const issue of issues) {
             const initial = issue?.fields?.worklog ?? {};
             const fullWls = await getFullIssueWorklogs(baseUrl, headers, issue.key, initial);
-            report.push(...buildReportRows(issue, fullWls, username, seenWorklogKeys)); // pass set
+            report.push(...buildReportRows(issue, fullWls, username, seenWorklogKeys));
         }
 
-        // Filter + sort + add Persian date (exactly like your approach)
         report = report
-            .filter(r =>
-                moment(r.date, 'YYYY-MM-DD', true).isSameOrBefore(moment(toYMD, 'YYYY-MM-DD')) &&
-                moment(r.date, 'YYYY-MM-DD', true).isSameOrAfter(moment(fromYMD, 'YYYY-MM-DD'))
+            .filter(
+                (r) =>
+                    moment(r.date, 'YYYY-MM-DD', true).isSameOrBefore(moment(toYMD, 'YYYY-MM-DD')) &&
+                    moment(r.date, 'YYYY-MM-DD', true).isSameOrAfter(moment(fromYMD, 'YYYY-MM-DD'))
             )
             .sort((a, b) => moment(a.date, 'YYYY-MM-DD').diff(moment(b.date, 'YYYY-MM-DD')))
-            .map(r => ({
+            .map((r) => ({
                 ...r,
-                persianDate: moment(r.date, 'YYYY-MM-DD', true).format('jYYYY/jMM/jDD')
+                persianDate: moment(r.date, 'YYYY-MM-DD', true).format('jYYYY/jMM/jDD'),
             }));
 
-        // ---- Summary (like your calculateSummary) ----
         const totalWorklogs = report.length;
         const totalLoggedHours = +report.reduce((sum, entry) => sum + Number(entry.hours), 0).toFixed(2);
 
@@ -314,11 +403,9 @@
             .sort((a, b) => a[0].localeCompare(b[0]))
             .map(([date, hours]) => ({ date, hours: (+hours).toFixed(2) }));
 
-        // ---- Build calendar days (colors etc.) ----
         const holidayDays = buildHolidaysSetFromStatic(jYear, jMonth);
         const daysInMonth = mj(jYear, jMonth, 1).endOf('jMonth').jDate();
 
-        // daily totals for coloring
         const dailyTotalsForCalendar = { ...dailyTotalsMap };
 
         const days = [];
@@ -326,7 +413,7 @@
             const g = mj(jYear, jMonth, jDay);
             const gKey = g.format('YYYY-MM-DD');
             const weekday = g.weekday();
-            const isThuFri = (weekday === 4 || weekday === 5);
+            const isThuFri = weekday === 4 || weekday === 5;
             const isHoliday = holidayDays.has(jDay);
             const isFuture = g.isAfter(nowG, 'day');
             const isWorkday = !(isThuFri || isHoliday);
@@ -342,20 +429,19 @@
                 isFuture,
                 isWorkday,
                 hours: +hours.toFixed(2),
-                color
+                color,
             });
         }
 
         const totalHours = +days.reduce((s, d) => s + d.hours, 0).toFixed(2);
-        const workdaysAll = days.filter(d => d.isWorkday).length;
-        const workdaysUntilNow = days.filter(d => d.isWorkday && !d.isFuture).length;
+        const workdaysAll = days.filter((d) => d.isWorkday).length;
+        const workdaysUntilNow = days.filter((d) => d.isWorkday && !d.isFuture).length;
         const expectedByNowHours = 6 * workdaysUntilNow;
         const expectedByEndMonthHours = 6 * workdaysAll;
 
-        const deficits = days.filter(d => d.isWorkday && !d.isFuture && d.hours < 6);
+        const deficits = days.filter((d) => d.isWorkday && !d.isFuture && d.hours < 6);
 
         return {
-            ok: true,
             jYear,
             jMonth,
             jMonthLabel: mj(jYear, jMonth, 1).format('jYYYY/jMM'),
@@ -365,13 +451,14 @@
             totalHours,
             expectedByNowHours,
             expectedByEndMonthHours,
-            // NEW: expose script-style objects
+            workdaysAll,
+            workdaysUntilNow,
             worklogs: report,
             summary: {
                 totalWorklogs,
                 totalHours: totalLoggedHours.toFixed(2),
-                dailySummary
-            }
+                dailySummary,
+            },
         };
     }
 
