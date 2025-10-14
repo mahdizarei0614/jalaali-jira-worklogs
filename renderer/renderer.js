@@ -171,17 +171,32 @@
         const footerTotals = root.querySelector('#footerTotals');
         const worklogsWrap = root.querySelector('#worklogsWrap');
         const detailedBody = root.querySelector('#detailedWorklogsTable tbody');
+        const quarterCard = root.querySelector('#quarterReport');
+        const quarterMeta = root.querySelector('#quarterMeta');
+        const quarterStatus = root.querySelector('#quarterStatus');
+        const quarterTableBody = root.querySelector('#quarterTableBody');
+        const quarterTotalLogged = root.querySelector('#quarterTotalLogged');
+        const quarterTotalExpected = root.querySelector('#quarterTotalExpected');
+        const quarterTotalDelta = root.querySelector('#quarterTotalDelta');
+        const quarterTotalDeficits = root.querySelector('#quarterTotalDeficits');
         const debug = root.querySelector('#debug');
         const saveBtn = root.querySelector('#save');
         const scanBtn = root.querySelector('#scan');
 
-        if (!baseUrl || !baseUrlWrap || !usernameSelect || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !worklogsWrap || !detailedBody || !saveBtn || !scanBtn) {
+        if (!baseUrl || !baseUrlWrap || !usernameSelect || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !worklogsWrap || !detailedBody || !quarterCard || !quarterMeta || !quarterStatus || !quarterTableBody || !quarterTotalLogged || !quarterTotalExpected || !quarterTotalDelta || !quarterTotalDeficits || !saveBtn || !scanBtn) {
             console.warn('Monthly report view missing required elements.');
             return;
         }
 
         const weekdayName = (w) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][w] || String(w);
         const persianMonths = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
+        const persianSeasons = ['بهار', 'تابستان', 'پاییز', 'زمستان'];
+        const formatHours = (val) => `${(Number(val ?? 0)).toFixed(2)} h`;
+        const formatSignedHours = (val) => {
+            const num = Number(val ?? 0);
+            const sign = num > 0 ? '+' : '';
+            return `${sign}${num.toFixed(2)} h`;
+        };
 
         const userMap = [
             { text: 'رضا محمدخان', value: 'r.mohammadkhan' },
@@ -197,6 +212,19 @@
         jMonth.innerHTML = persianMonths.map((name, idx) => `<option value="${idx + 1}">${name}</option>`).join('');
 
         const ADMIN_USERS = new Set(['Momahdi.Zarei', 'r.mohammadkhan']);
+
+        function getQuarterInfo(jYearVal, jMonthVal) {
+            const y = Number(jYearVal);
+            const m = Number(jMonthVal);
+            if (!Number.isFinite(y) || !Number.isFinite(m)) return null;
+            const index = Math.max(0, Math.min(3, Math.floor((m - 1) / 3)));
+            const startMonth = index * 3 + 1;
+            const months = [0, 1, 2].map((offset) => startMonth + offset);
+            const rangeNames = months.map((monthNum) => persianMonths[(monthNum - 1 + 12) % 12]);
+            const label = `${persianSeasons[index] || 'Quarter'} ${y}`;
+            const rangeLabel = rangeNames.length ? `${rangeNames[0]} – ${rangeNames[2]}` : '';
+            return { index, startMonth, endMonth: startMonth + 2, label, rangeLabel };
+        }
 
         async function enforceUserVisibility() {
             const who = await window.appApi.whoami();
@@ -275,9 +303,17 @@
             try { jYear.setSelectionRange(caret, caret); } catch (err) { /* ignore */ }
             await pushSelection();
             updateFooter();
+            resetQuarter();
         });
-        jMonth.addEventListener('change', async () => { await pushSelection(); updateFooter(); });
-        usernameSelect.addEventListener('change', pushSelection);
+        jMonth.addEventListener('change', async () => {
+            await pushSelection();
+            updateFooter();
+            resetQuarter();
+        });
+        usernameSelect.addEventListener('change', async () => {
+            await pushSelection();
+            resetQuarter();
+        });
 
         saveBtn.addEventListener('click', async () => {
             baseUrl.value = stripTrailingSlash(sanitizeUrl(baseUrl.value));
@@ -287,6 +323,9 @@
         });
 
         let lastResult = null;
+        let quarterCacheKey = null;
+        let quarterCacheData = null;
+        let quarterRequestCounter = 0;
 
         function updateFooter() {
             if (!lastResult?.ok) {
@@ -358,6 +397,123 @@
             worklogsWrap.style.display = 'block';
         }
 
+        function resetQuarter(message = 'Quarter overview will appear after scanning.') {
+            quarterCacheKey = null;
+            quarterCacheData = null;
+            quarterRequestCounter += 1;
+            quarterTableBody.innerHTML = '';
+            quarterTotalLogged.textContent = '—';
+            quarterTotalExpected.textContent = '—';
+            quarterTotalDelta.textContent = '—';
+            quarterTotalDelta.classList.remove('delta-pos', 'delta-neg');
+            quarterTotalDeficits.textContent = '—';
+            quarterMeta.textContent = message;
+            quarterStatus.textContent = '';
+            quarterCard.style.display = 'none';
+        }
+
+        function setQuarterLoading(info) {
+            const metaParts = [];
+            if (info?.label) metaParts.push(info.label);
+            if (info?.rangeLabel) metaParts.push(info.rangeLabel);
+            quarterMeta.textContent = metaParts.join(' • ') || 'Quarter Report';
+            quarterStatus.textContent = 'Loading quarter report…';
+            quarterTableBody.innerHTML = '';
+            quarterTotalLogged.textContent = '—';
+            quarterTotalExpected.textContent = '—';
+            quarterTotalDelta.textContent = '—';
+            quarterTotalDelta.classList.remove('delta-pos', 'delta-neg');
+            quarterTotalDeficits.textContent = '—';
+            quarterCard.style.display = 'block';
+        }
+
+        function renderQuarterError(message, info) {
+            const metaParts = [];
+            if (info?.label) metaParts.push(info.label);
+            if (info?.rangeLabel) metaParts.push(info.rangeLabel);
+            quarterMeta.textContent = metaParts.join(' • ') || 'Quarter Report';
+            quarterStatus.textContent = message;
+            quarterTableBody.innerHTML = '';
+            quarterTotalLogged.textContent = '—';
+            quarterTotalExpected.textContent = '—';
+            quarterTotalDelta.textContent = '—';
+            quarterTotalDelta.classList.remove('delta-pos', 'delta-neg');
+            quarterTotalDeficits.textContent = '—';
+            quarterCard.style.display = 'block';
+        }
+
+        function renderQuarterReport(data) {
+            if (!data?.ok) return;
+            const metaParts = [];
+            if (data.quarter?.label) metaParts.push(data.quarter.label);
+            if (data.quarter?.rangeLabel) metaParts.push(data.quarter.rangeLabel);
+            quarterMeta.textContent = metaParts.join(' • ') || 'Quarter Report';
+            quarterStatus.textContent = '';
+            quarterTableBody.innerHTML = '';
+            data.months.forEach((month) => {
+                const tr = document.createElement('tr');
+                const deltaClass = Number(month.deltaHours) >= 0 ? 'delta-pos' : 'delta-neg';
+                tr.innerHTML = `
+          <td>${month.monthName || month.monthLabel}</td>
+          <td>${formatHours(month.totalHours)}</td>
+          <td>${formatHours(month.expectedHours)}</td>
+          <td class="${deltaClass}">${formatSignedHours(month.deltaHours)}</td>
+          <td>${Number(month.deficitDays ?? 0)}</td>
+        `;
+                quarterTableBody.appendChild(tr);
+            });
+            quarterTotalLogged.textContent = formatHours(data.totals?.totalHours);
+            quarterTotalExpected.textContent = formatHours(data.totals?.expectedHours);
+            const totalDeltaClass = Number(data.totals?.deltaHours) >= 0 ? 'delta-pos' : 'delta-neg';
+            quarterTotalDelta.textContent = formatSignedHours(data.totals?.deltaHours);
+            quarterTotalDelta.classList.remove('delta-pos', 'delta-neg');
+            quarterTotalDelta.classList.add(totalDeltaClass);
+            quarterTotalDeficits.textContent = `${Number(data.totals?.deficitDays ?? 0)}`;
+            quarterCard.style.display = 'block';
+            quarterCacheData = data;
+        }
+
+        async function loadQuarterForResult(res) {
+            if (!res?.ok) {
+                resetQuarter();
+                return;
+            }
+            const jy = Number(res.jYear);
+            const jm = Number(res.jMonth);
+            const username = usernameSelect.value;
+            const info = getQuarterInfo(jy, jm);
+            const totalKeyPart = Number.isFinite(Number(res.totalHours)) ? `::${Number(res.totalHours).toFixed(2)}` : '';
+            const expectedKeyPart = Number.isFinite(Number(res.expectedByEndMonthHours)) ? `::${Number(res.expectedByEndMonthHours).toFixed(2)}` : '';
+            const key = info
+                ? `${username}::${jy}::${info.index}${totalKeyPart}${expectedKeyPart}`
+                : `${username}::${jy}::${jm}${totalKeyPart}${expectedKeyPart}`;
+            if (quarterCacheKey === key && quarterCacheData) {
+                renderQuarterReport(quarterCacheData);
+                return;
+            }
+            const requestId = ++quarterRequestCounter;
+            setQuarterLoading(info);
+            try {
+                const qRes = await window.appApi.scanQuarter({ jYear: jy, jMonth: jm, username });
+                if (requestId !== quarterRequestCounter) return;
+                if (qRes?.ok) {
+                    quarterCacheKey = key;
+                    quarterCacheData = qRes;
+                    renderQuarterReport(qRes);
+                } else {
+                    quarterCacheKey = null;
+                    quarterCacheData = null;
+                    renderQuarterError(qRes?.reason || 'Unable to load quarter report.', qRes?.quarter || info);
+                }
+            } catch (err) {
+                if (requestId !== quarterRequestCounter) return;
+                quarterCacheKey = null;
+                quarterCacheData = null;
+                const msg = err?.message ? `Unable to load quarter report: ${err.message}` : 'Unable to load quarter report.';
+                renderQuarterError(msg, info);
+            }
+        }
+
         function render(res) {
             lastResult = res;
 
@@ -366,6 +522,7 @@
                 tbody.innerHTML = '';
                 worklogsWrap.style.display = 'none';
                 updateFooter();
+                resetQuarter();
                 return;
             }
 
@@ -392,11 +549,13 @@
 
             renderWorklogs(res);
             updateFooter();
+            loadQuarterForResult(res);
         }
 
         scanBtn.addEventListener('click', async () => {
             const jy = Number.parseInt(toAsciiDigits(jYear.value), 10);
             const jm = Number.parseInt(toAsciiDigits(jMonth.value), 10);
+            resetQuarter('Quarter overview will load after the monthly report completes.');
             await pushSelection();
             const res = await window.appApi.scanNow({ jYear: jy, jMonth: jm, username: usernameSelect.value });
             render(res);
@@ -411,6 +570,7 @@
             if (res.jYear === curY && res.jMonth === curM) render(res);
         });
 
+        resetQuarter();
         await pushSelection();
     }
 })();

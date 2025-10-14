@@ -242,15 +242,17 @@
         return 'green';
     }
 
-    function resolveTargetMonth(opts) {
+    function resolveTargetMonth(opts, { persistSelection = true } = {}) {
         const yStr = toAsciiDigits(opts?.jYear);
         const mStr = toAsciiDigits(opts?.jMonth);
         let y = Number.parseInt(yStr, 10);
         let m = Number.parseInt(mStr, 10);
         if (Number.isFinite(y) && m >= 1 && m <= 12) {
-            STORE.set('selectedJYear', y);
-            STORE.set('selectedJMonth', m);
-            return { jYear: y, jMonth: m, source: 'opts' };
+            if (persistSelection) {
+                STORE.set('selectedJYear', y);
+                STORE.set('selectedJMonth', m);
+            }
+            return { jYear: y, jMonth: m, source: persistSelection ? 'opts' : 'opts-transient' };
         }
         const ys = STORE.get('selectedJYear');
         const ms = STORE.get('selectedJMonth');
@@ -259,7 +261,7 @@
         return { jYear, jMonth, source: 'current' };
     }
 
-    async function computeScan(opts) {
+    async function computeScan(opts = {}) {
         const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
         const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
         const username = (opts && opts.username) || lastUI.username;
@@ -267,7 +269,8 @@
         if (!baseUrl || !token) return { ok: false, reason: 'Missing Jira base URL or token.' };
         if (!username) return { ok: false, reason: 'No Jira username selected in UI.' };
 
-        const { jYear, jMonth, source } = resolveTargetMonth(opts);
+        const persistSelection = !(opts && opts.suppressStore);
+        const { jYear, jMonth, source } = resolveTargetMonth(opts, { persistSelection });
         const { start, end } = jMonthRange(jYear, jMonth);
         if (!start || !end) return { ok: false, reason: 'Failed to construct selected Jalaali month range.' };
 
@@ -371,6 +374,118 @@
                 totalWorklogs,
                 totalHours: totalLoggedHours.toFixed(2),
                 dailySummary
+            }
+        };
+    }
+
+    function buildQuarterDefinition(jYear, jMonth) {
+        if (!Number.isFinite(jYear) || !Number.isFinite(jMonth)) {
+            return null;
+        }
+        const idx = Math.max(0, Math.min(3, Math.floor((jMonth - 1) / 3)));
+        const startMonth = idx * 3 + 1;
+        const seasonNamesFa = ['بهار', 'تابستان', 'پاییز', 'زمستان'];
+        const seasonNamesEn = ['Spring', 'Summer', 'Autumn', 'Winter'];
+        const months = [0, 1, 2].map((offset) => {
+            const monthNumber = startMonth + offset;
+            const anchor = mj(jYear, monthNumber, 1);
+            return {
+                jYear,
+                jMonth: monthNumber,
+                monthLabel: anchor.format('jYYYY/jMM'),
+                monthName: anchor.format('jMMMM')
+            };
+        });
+        const rangeLabel = months.length ? `${months[0].monthName} – ${months[2].monthName}` : '';
+        return {
+            index: idx,
+            startMonth,
+            endMonth: startMonth + 2,
+            seasonFa: seasonNamesFa[idx] || 'فصل',
+            seasonEn: seasonNamesEn[idx] || 'Quarter',
+            label: `${seasonNamesFa[idx] || 'Quarter'} ${jYear}`,
+            rangeLabel,
+            months
+        };
+    }
+
+    async function computeQuarter(opts = {}) {
+        const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
+        const tokenExists = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
+        const username = (opts && opts.username) || lastUI.username;
+
+        if (!baseUrl || !tokenExists) return { ok: false, reason: 'Missing Jira base URL or token.' };
+        if (!username) return { ok: false, reason: 'No Jira username selected in UI.' };
+
+        const { jYear, jMonth } = resolveTargetMonth(opts, { persistSelection: false });
+        if (!Number.isFinite(jYear) || !Number.isFinite(jMonth)) {
+            return { ok: false, reason: 'Failed to determine quarter for the requested month.' };
+        }
+
+        const quarterDef = buildQuarterDefinition(jYear, jMonth);
+        if (!quarterDef) {
+            return { ok: false, reason: 'Unable to resolve quarter definition.' };
+        }
+
+        const monthsSummaries = [];
+        let totalHours = 0;
+        let expectedHours = 0;
+        let deficitDays = 0;
+
+        for (const month of quarterDef.months) {
+            const res = await computeScan({
+                jYear: month.jYear,
+                jMonth: month.jMonth,
+                username,
+                suppressStore: true
+            });
+            if (!res?.ok) {
+                return {
+                    ok: false,
+                    reason: res?.reason || 'Failed to compute month inside the quarter.',
+                    failedMonth: { jYear: month.jYear, jMonth: month.jMonth },
+                    quarter: quarterDef,
+                    months: monthsSummaries
+                };
+            }
+
+            const monthTotal = +(res.totalHours ?? 0);
+            const monthExpected = +(res.expectedByEndMonthHours ?? 0);
+            const monthDelta = +(monthTotal - monthExpected).toFixed(2);
+            const monthDeficits = Array.isArray(res.deficits) ? res.deficits.length : 0;
+            const workdays = Array.isArray(res.days) ? res.days.filter((d) => d.isWorkday).length : 0;
+
+            monthsSummaries.push({
+                jYear: res.jYear,
+                jMonth: res.jMonth,
+                monthLabel: res.jMonthLabel,
+                monthName: mj(res.jYear, res.jMonth, 1).format('jMMMM'),
+                totalHours: +monthTotal.toFixed(2),
+                expectedHours: +monthExpected.toFixed(2),
+                deltaHours: monthDelta,
+                deficitDays: monthDeficits,
+                workdays
+            });
+
+            totalHours += monthTotal;
+            expectedHours += monthExpected;
+            deficitDays += monthDeficits;
+        }
+
+        const deltaHours = +(totalHours - expectedHours).toFixed(2);
+
+        return {
+            ok: true,
+            username,
+            jYear,
+            jMonth,
+            quarter: quarterDef,
+            months: monthsSummaries,
+            totals: {
+                totalHours: +totalHours.toFixed(2),
+                expectedHours: +expectedHours.toFixed(2),
+                deltaHours,
+                deficitDays
             }
         };
     }
@@ -502,5 +617,6 @@
         return { ok: true };
     });
 
+    ipcMain.handle('scan:quarter', (_evt, opts) => computeQuarter(opts || {}));
     ipcMain.handle('scan:now', (_evt, opts) => computeScan(opts || {}));
 })();

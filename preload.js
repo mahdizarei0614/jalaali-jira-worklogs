@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('appApi', {
     getSettings: () => ipcRenderer.invoke('settings:get'),
     saveSettings: (payload) => ipcRenderer.invoke('settings:save', payload),
     scanNow: (opts) => ipcRenderer.invoke('scan:now', opts),
+    scanQuarter: (opts) => ipcRenderer.invoke('scan:quarter', opts),
     updateSelection: (payload) => ipcRenderer.invoke('ui:update-selection', payload),
     loadViewTemplate: (relPath) => ipcRenderer.invoke('views:load', relPath),
     onScanResult: (cb) => ipcRenderer.on('scan-result', (_e, data) => cb(data)),
