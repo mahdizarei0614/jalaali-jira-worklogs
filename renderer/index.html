@@ -32,24 +32,35 @@
             display:flex;
             min-height:100vh;
         }
-        .sidebar{
-            width:240px;
-            background:var(--card);
-            border-right:1px solid var(--border);
-            display:flex;
-            flex-direction:column;
-            gap:24px;
-            padding:24px 20px;
-            box-shadow:8px 0 32px rgba(15,17,21,.06);
-        }
-        .sidebar-header{ display:flex; flex-direction:column; gap:4px; }
-        .sidebar-title{ font-size:20px; font-weight:700; letter-spacing:.2px; }
-        .sidebar-subtitle{ font-size:12px; color:var(--muted); }
-        .nav{ display:flex; flex-direction:column; gap:6px; }
-        .nav-item{
-            display:flex;
-            align-items:center;
-            gap:8px;
+        .sidebar{ 
+            width:240px; 
+            background:var(--card); 
+            border-right:1px solid var(--border); 
+            display:flex; 
+            flex-direction:column; 
+            gap:18px; 
+            padding:24px 20px; 
+            box-shadow:8px 0 32px rgba(15,17,21,.06); 
+        } 
+        .sidebar-header{ display:flex; flex-direction:column; gap:4px; } 
+        .sidebar-title{ font-size:20px; font-weight:700; letter-spacing:.2px; } 
+        .sidebar-subtitle{ font-size:12px; color:var(--muted); } 
+        .sidebar-control{ display:flex; flex-direction:column; gap:6px; } 
+        .sidebar-label{ font-size:12px; font-weight:600; color:var(--muted); padding-left:2px; } 
+        .sidebar-control select{ 
+            appearance:none; -webkit-appearance:none; 
+            width:100%; padding:10px 12px; border-radius:12px; 
+            border:1px solid var(--border); background:#fff; color:var(--text); 
+            font-weight:600; 
+            outline:none; transition:border-color .15s ease, box-shadow .15s ease; 
+        } 
+        .sidebar-control select:focus{ border-color:var(--accent); box-shadow:0 0 0 4px rgba(0,122,255,.12); } 
+        .sidebar-divider{ height:1px; border:none; background:var(--border); margin:6px 0 2px; } 
+        .nav{ display:flex; flex-direction:column; gap:6px; } 
+        .nav-item{ 
+            display:flex; 
+            align-items:center; 
+            gap:8px; 
             width:100%;
             padding:10px 14px;
             border-radius:12px;
@@ -207,31 +218,54 @@
             <div class="sidebar-title">Alo Worklogs</div>
             <div class="sidebar-subtitle">by SkyBlueDev</div>
         </div>
+        <div class="sidebar-control">
+            <label class="sidebar-label" for="sidebarUserSelect">User</label>
+            <select id="sidebarUserSelect"></select>
+        </div>
+        <hr class="sidebar-divider" />
         <nav class="nav" aria-label="Primary">
-            <button type="button" class="nav-item is-active" data-route="profile" aria-controls="profileView">Profile</button>
-            <button type="button" class="nav-item" data-route="monthly-report" aria-controls="monthlyReportView">Monthly Report</button>
+            <button type="button" class="nav-item is-active" data-route="monthly-summary" aria-controls="monthlySummaryView">Monthly Summary</button>
+            <button type="button" class="nav-item" data-route="detailed-worklogs" aria-controls="detailedWorklogsView">Detailed Worklogs</button>
+            <button type="button" class="nav-item" data-route="due-issues" aria-controls="dueIssuesView">Issues Due This Month</button>
+            <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView">Quarter Report</button>
         </nav>
     </aside>
     <main class="main">
         <header>
-            <h1 id="viewTitle">Profile</h1>
+            <h1 id="viewTitle">Monthly Summary</h1>
             <button class="btn btn-ghost" id="logout">Logout</button>
         </header>
 
         <section
-                id="profileView"
+                id="monthlySummaryView"
                 class="view is-active"
-                data-route-view="profile"
-                data-route-title="Profile"
-                data-template="./views/profile.html">
+                data-route-view="monthly-summary"
+                data-route-title="Monthly Summary"
+                data-template="./views/monthly-summary.html">
         </section>
 
         <section
-                id="monthlyReportView"
+                id="detailedWorklogsView"
                 class="view"
-                data-route-view="monthly-report"
-                data-route-title="Monthly Report"
-                data-template="./views/monthly-report.html">
+                data-route-view="detailed-worklogs"
+                data-route-title="Detailed Worklogs"
+                data-template="./views/detailed-worklogs.html">
+        </section>
+
+        <section
+                id="dueIssuesView"
+                class="view"
+                data-route-view="due-issues"
+                data-route-title="Issues Due This Month"
+                data-template="./views/due-issues.html">
+        </section>
+
+        <section
+                id="quarterReportView"
+                class="view"
+                data-route-view="quarter-report"
+                data-route-title="Quarter Report"
+                data-template="./views/quarter-report.html">
         </section>
     </main>
 </div>
