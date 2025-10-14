@@ -15,6 +15,16 @@
     const ADMIN_USERS = new Set(['Momahdi.Zarei', 'r.mohammadkhan']);
     const PERSIAN_MONTHS = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
     const routeHooks = new Map();
+    const settingsPromise = (async () => {
+        if (typeof window.appApi?.getSettings === 'function') {
+            try {
+                return await window.appApi.getSettings();
+            } catch (err) {
+                console.error('Failed to load settings', err);
+            }
+        }
+        return {};
+    })();
 
     const routeTitle = $('#viewTitle');
     const defaultTitle = routeTitle?.textContent || 'Alo Worklogs';
@@ -156,12 +166,24 @@
 
     const reportState = createReportState();
     const userSelectContext = initUserSelect($('#sidebarUserSelect'), reportState);
+    const selectionControlsContext = initSelectionControls({
+        jYearInput: $('#sidebarJYear'),
+        jMonthSelect: $('#sidebarJMonth'),
+        timeOffInput: $('#sidebarTimeOff')
+    }, reportState, { settingsPromise });
+
+    try {
+        await selectionControlsContext.ready;
+    } catch (err) {
+        console.error('Failed to initialise selection controls', err);
+    }
 
     await Promise.all([
-        registerController('monthly-summary', (node) => initMonthlySummary(node, reportState, userSelectContext)),
+        registerController('monthly-summary', (node) => initMonthlySummary(node, reportState)),
         registerController('detailed-worklogs', (node) => initDetailedWorklogs(node, reportState)),
         registerController('due-issues', (node) => initDueIssues(node, reportState)),
-        registerController('quarter-report', (node) => initQuarterReport(node, reportState))
+        registerController('quarter-report', (node) => initQuarterReport(node, reportState)),
+        registerController('configurations', (node) => initConfigurations(node, reportState, userSelectContext, settingsPromise))
     ]);
 
     if (activeRoute && routeHooks.has(activeRoute)) {
@@ -387,117 +409,134 @@
         return { enforceUserVisibility, ready, selectEl };
     }
 
-    async function initMonthlySummary(root, reportStateInstance, userSelectCtx) {
-        if (!root || root.dataset.controllerReady === 'true') return {};
-        root.dataset.controllerReady = 'true';
+    function initSelectionControls(elements, reportStateInstance, { settingsPromise: settingsPromiseArg } = {}) {
+        const { jYearInput, jMonthSelect, timeOffInput } = elements || {};
+        const effectiveSettingsPromise = settingsPromiseArg || Promise.resolve({});
 
-        const baseUrl = root.querySelector('#baseUrl');
-        const baseUrlWrap = root.querySelector('#baseUrlWrap');
-        const jYear = root.querySelector('#jYear');
-        const jMonth = root.querySelector('#jMonth');
-        const timeOffHours = root.querySelector('#timeOffHours');
-        const table = root.querySelector('#results');
-        const tbody = table?.querySelector('tbody');
-        const footerTotals = root.querySelector('#footerTotals');
-        const debug = root.querySelector('#debug');
-        const saveBtn = root.querySelector('#save');
-
-        if (!baseUrl || !baseUrlWrap || !jYear || !jMonth || !timeOffHours || !table || !tbody || !footerTotals || !saveBtn) {
-            console.warn('Monthly summary view missing required elements.');
-            return {};
+        if (!jYearInput || !jMonthSelect || !timeOffInput) {
+            return { ready: effectiveSettingsPromise.then(() => {}) };
         }
 
-        jMonth.innerHTML = PERSIAN_MONTHS.map((name, idx) => `<option value="${idx + 1}">${name}</option>`).join('');
+        jMonthSelect.innerHTML = PERSIAN_MONTHS.map((name, idx) => `<option value="${idx + 1}">${name}</option>`).join('');
 
-        const settings = typeof window.appApi?.getSettings === 'function' ? await window.appApi.getSettings() : {};
-        baseUrl.value = settings?.baseUrl || '';
-        updateBaseUrlUI();
+        const parseTimeOffValue = (value) => {
+            const ascii = toAsciiDigits(value ?? '');
+            const parsed = Number.parseFloat(ascii);
+            return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+        };
 
-        baseUrl.addEventListener('input', updateBaseUrlUI);
-        baseUrl.addEventListener('blur', () => {
-            baseUrl.value = stripTrailingSlash(sanitizeUrl(baseUrl.value));
-            updateBaseUrlUI();
-        });
+        const ready = (async () => {
+            const settings = await effectiveSettingsPromise;
+            if (settings?.defaultJYear) {
+                jYearInput.value = toAsciiDigits(settings.defaultJYear).replace(/[^\d]/g, '');
+            }
+            const defaultMonth = Number.parseInt(settings?.defaultJMonth, 10);
+            if (Number.isFinite(defaultMonth) && defaultMonth >= 1 && defaultMonth <= 12) {
+                jMonthSelect.value = String(defaultMonth);
+            }
 
-        if (settings?.defaultJYear) {
-            jYear.value = toAsciiDigits(settings.defaultJYear).replace(/[^\d]/g, '');
-        }
-        const defaultMonth = Number.parseInt(settings?.defaultJMonth, 10);
-        if (Number.isFinite(defaultMonth) && defaultMonth >= 1 && defaultMonth <= 12) {
-            jMonth.value = String(defaultMonth);
-        }
+            const initialTimeOff = parseTimeOffValue(timeOffInput.value || '0');
+            timeOffInput.value = String(initialTimeOff);
 
-        const initialTimeOff = Number.parseFloat(timeOffHours.value || '0') || 0;
-        timeOffHours.value = initialTimeOff ? String(initialTimeOff) : '0';
+            await reportStateInstance.setSelection({
+                jYear: parseJalaaliInt(jYearInput.value),
+                jMonth: parseJalaaliInt(jMonthSelect.value),
+                timeOffHours: initialTimeOff
+            });
+        })();
 
-        await reportStateInstance.setSelection({
-            jYear: parseJalaaliInt(jYear.value),
-            jMonth: parseJalaaliInt(jMonth.value),
-            timeOffHours: initialTimeOff
-        }, { silent: true });
-
-        jYear.addEventListener('input', async () => {
-            const caret = jYear.selectionStart;
-            jYear.value = toAsciiDigits(jYear.value).replace(/[^\d]/g, '');
-            try { jYear.setSelectionRange(caret, caret); } catch (err) { /* ignore */ }
-            const parsed = parseJalaaliInt(jYear.value);
+        jYearInput.addEventListener('input', async () => {
+            const caret = jYearInput.selectionStart;
+            jYearInput.value = toAsciiDigits(jYearInput.value).replace(/[^\d]/g, '');
+            try { jYearInput.setSelectionRange(caret, caret); } catch (err) { /* ignore */ }
+            const parsed = parseJalaaliInt(jYearInput.value);
+            const current = reportStateInstance.getSelection();
+            if (current.jYear === parsed) {
+                return;
+            }
             await reportStateInstance.setSelection({ jYear: parsed }, { pushSelection: true, refresh: true });
         });
 
-        jMonth.addEventListener('change', async () => {
-            const parsed = parseJalaaliInt(jMonth.value);
+        jMonthSelect.addEventListener('change', async () => {
+            const parsed = parseJalaaliInt(jMonthSelect.value);
+            const current = reportStateInstance.getSelection();
+            if (current.jMonth === parsed) {
+                return;
+            }
             await reportStateInstance.setSelection({ jMonth: parsed }, { pushSelection: true, refresh: true });
         });
 
-        timeOffHours.addEventListener('input', () => {
-            const parsed = Number.parseFloat(timeOffHours.value);
-            const clean = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-            reportStateInstance.setSelection({ timeOffHours: clean });
-        });
+        const syncTimeOffDisplay = (value) => {
+            const currentVal = Number.parseFloat(timeOffInput.value);
+            if (!Number.isFinite(currentVal) || Math.abs(currentVal - value) > 1e-4) {
+                timeOffInput.value = String(value);
+            }
+        };
 
-        saveBtn.addEventListener('click', async () => {
-            baseUrl.value = stripTrailingSlash(sanitizeUrl(baseUrl.value));
-            updateBaseUrlUI();
-            if (typeof window.appApi?.saveSettings === 'function') {
-                try {
-                    await window.appApi.saveSettings({ baseUrl: baseUrl.value });
-                } catch (err) {
-                    console.error('Failed to save settings', err);
-                }
-            } else {
-                console.warn('saveSettings API is not available.');
+        const commitTimeOff = async () => {
+            const clean = parseTimeOffValue(timeOffInput.value);
+            syncTimeOffDisplay(clean);
+            const current = reportStateInstance.getSelection();
+            if (Math.abs((current.timeOffHours ?? 0) - clean) < 1e-4) {
+                return;
             }
-            if (userSelectCtx?.enforceUserVisibility) {
-                await userSelectCtx.enforceUserVisibility();
+            await reportStateInstance.setSelection({ timeOffHours: clean }, { refresh: true });
+        };
+
+        timeOffInput.addEventListener('input', () => {
+            const ascii = toAsciiDigits(timeOffInput.value);
+            const parsed = Number.parseFloat(ascii);
+            if (!Number.isFinite(parsed) || parsed < 0) {
+                return;
             }
-            await reportStateInstance.refresh({ force: true });
+            const current = reportStateInstance.getSelection();
+            if (Math.abs((current.timeOffHours ?? 0) - parsed) < 1e-4) {
+                return;
+            }
+            reportStateInstance.setSelection({ timeOffHours: parsed }, { refresh: true });
         });
+        timeOffInput.addEventListener('change', commitTimeOff);
+        timeOffInput.addEventListener('blur', commitTimeOff);
 
         reportStateInstance.subscribe((state) => {
-            syncInputs(state.selection);
-            renderSummary(state);
-        });
-
-        function syncInputs(selection) {
+            const selection = state.selection || {};
             if (selection.jYear != null) {
                 const value = String(selection.jYear);
-                if (toAsciiDigits(jYear.value) !== value) {
-                    jYear.value = value;
+                if (toAsciiDigits(jYearInput.value) !== value) {
+                    jYearInput.value = value;
                 }
             }
             if (selection.jMonth != null) {
                 const value = String(selection.jMonth);
-                if (jMonth.value !== value) {
-                    jMonth.value = value;
+                if (jMonthSelect.value !== value) {
+                    jMonthSelect.value = value;
                 }
             }
             if (selection.timeOffHours != null) {
-                const current = Number.parseFloat(timeOffHours.value || '0');
-                if (!Number.isFinite(current) || Math.abs(current - selection.timeOffHours) > 1e-4) {
-                    timeOffHours.value = String(selection.timeOffHours);
-                }
+                syncTimeOffDisplay(selection.timeOffHours);
             }
+        });
+
+        return { ready };
+    }
+
+    async function initMonthlySummary(root, reportStateInstance) {
+        if (!root || root.dataset.controllerReady === 'true') return {};
+        root.dataset.controllerReady = 'true';
+
+        const table = root.querySelector('#results');
+        const tbody = table?.querySelector('tbody');
+        const footerTotals = root.querySelector('#footerTotals');
+        const debug = root.querySelector('#debug');
+
+        if (!table || !tbody || !footerTotals) {
+            console.warn('Monthly summary view missing required elements.');
+            return {};
         }
+
+        reportStateInstance.subscribe((state) => {
+            renderSummary(state);
+        });
 
         function renderSummary(state) {
             const res = state.result;
@@ -596,8 +635,61 @@
             `;
         }
 
+        return {
+            onShow: () => reportStateInstance.refresh()
+        };
+    }
+
+    async function initConfigurations(root, reportStateInstance, userSelectCtx, settingsPromiseArg) {
+        if (!root || root.dataset.controllerReady === 'true') return {};
+        root.dataset.controllerReady = 'true';
+
+        const baseUrlInput = root.querySelector('#configBaseUrl');
+        const baseUrlWrap = root.querySelector('#configBaseUrlWrap');
+        const saveBtn = root.querySelector('#configSave');
+
+        if (!baseUrlInput || !baseUrlWrap || !saveBtn) {
+            console.warn('Configurations view missing required elements.');
+            return {};
+        }
+
+        const settings = await (settingsPromiseArg || Promise.resolve({}));
+        baseUrlInput.value = settings?.baseUrl || '';
+        updateBaseUrlUI();
+
+        baseUrlInput.addEventListener('input', updateBaseUrlUI);
+        baseUrlInput.addEventListener('blur', () => {
+            baseUrlInput.value = stripTrailingSlash(sanitizeUrl(baseUrlInput.value));
+            updateBaseUrlUI();
+        });
+
+        saveBtn.addEventListener('click', async () => {
+            baseUrlInput.value = stripTrailingSlash(sanitizeUrl(baseUrlInput.value));
+            updateBaseUrlUI();
+
+            if (typeof window.appApi?.saveSettings === 'function') {
+                try {
+                    await window.appApi.saveSettings({ baseUrl: baseUrlInput.value });
+                } catch (err) {
+                    console.error('Failed to save settings', err);
+                }
+            } else {
+                console.warn('saveSettings API is not available.');
+            }
+
+            if (userSelectCtx?.enforceUserVisibility) {
+                try {
+                    await userSelectCtx.enforceUserVisibility();
+                } catch (err) {
+                    console.error('Failed to enforce user visibility after saving settings', err);
+                }
+            }
+
+            await reportStateInstance.refresh({ force: true });
+        });
+
         function updateBaseUrlUI() {
-            const value = sanitizeUrl(baseUrl.value);
+            const value = sanitizeUrl(baseUrlInput.value);
             baseUrlWrap.classList.remove('is-valid', 'is-invalid');
             if (!value) return;
             if (isLikelyUrl(value)) {
@@ -607,9 +699,7 @@
             }
         }
 
-        return {
-            onShow: () => reportStateInstance.refresh()
-        };
+        return {};
     }
 
     function initDetailedWorklogs(root, reportStateInstance) {
