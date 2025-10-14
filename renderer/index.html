@@ -4,20 +4,81 @@
     <meta charset="utf-8" />
     <title>Alo Worklogs</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+        (function () {
+            try {
+                var stored = localStorage.getItem('alo-theme');
+                var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                var theme = stored === 'dark' || stored === 'light' ? stored : (prefersDark ? 'dark' : 'light');
+                document.documentElement.dataset.theme = theme;
+                document.documentElement.style.colorScheme = theme === 'dark' ? 'dark' : 'light';
+            } catch (err) {
+                console.warn('Unable to resolve stored theme', err);
+            }
+        })();
+    </script>
     <style>
         :root{
+            color-scheme:light;
             --bg:#f7f8fb;
             --card:#ffffff;
             --text:#0f1115;
+            --text-on-accent:#ffffff;
             --muted:#6b7280;
+            --label-text:#2a2a2a;
             --border:#e9e9ef;
             --accent:#007aff;
             --accent-press:#0063cc;
             --soft:#f2f4f8;
+            --pill-bg:var(--soft);
             --row-alt:#fafbff;
+            --row-gray:#f5f6f8;
+            --row-green:#eaf9ef;
+            --row-yellow:#fff8e1;
+            --row-red:#ffeef0;
+            --row-gray-text:#6b7280;
             --red:#ff3b30;
             --green:#34c759;
             --yellow:#ffcc00;
+            --input-bg:#ffffff;
+            --status-neutral:#c9ccd4;
+            --status-valid-border:#cfe9d6;
+            --status-invalid-border:#ffd0d0;
+            --table-head:#fafafa;
+            --table-head-text:#444444;
+            --tooltip-bg:#111111;
+            --tooltip-text:#ffffff;
+        }
+        :root[data-theme="dark"]{
+            color-scheme:dark;
+            --bg:#0f1115;
+            --card:#171a21;
+            --text:#f5f7ff;
+            --text-on-accent:#0f1115;
+            --muted:#a3adc2;
+            --label-text:#d3d7e3;
+            --border:#2a2f3b;
+            --accent:#4c8dff;
+            --accent-press:#3a74d8;
+            --soft:#1f2533;
+            --pill-bg:#202838;
+            --row-alt:#1b202c;
+            --row-gray:#1a212d;
+            --row-green:#1f3a2d;
+            --row-yellow:#3a3318;
+            --row-red:#3a1f27;
+            --row-gray-text:#8b94a9;
+            --red:#ff5d62;
+            --green:#4dd080;
+            --yellow:#ffd479;
+            --input-bg:#1b202c;
+            --status-neutral:#4c5569;
+            --status-valid-border:#3b5d46;
+            --status-invalid-border:#6b3030;
+            --table-head:#1d2533;
+            --table-head-text:#e0e6f5;
+            --tooltip-bg:#e0e6f5;
+            --tooltip-text:#05060a;
         }
         *{box-sizing:border-box; margin: 0; padding: 0}
         html,body{height:100%}
@@ -47,13 +108,13 @@
         .sidebar-subtitle{ font-size:12px; color:var(--muted); } 
         .sidebar-control{ display:flex; flex-direction:column; gap:6px; } 
         .sidebar-label{ font-size:12px; font-weight:600; color:var(--muted); padding-left:2px; } 
-        .sidebar-control select{ 
-            appearance:none; -webkit-appearance:none; 
-            width:100%; padding:10px 12px; border-radius:12px; 
-            border:1px solid var(--border); background:#fff; color:var(--text); 
-            font-weight:600; 
-            outline:none; transition:border-color .15s ease, box-shadow .15s ease; 
-        } 
+        .sidebar-control select{
+            appearance:none; -webkit-appearance:none;
+            width:100%; padding:10px 12px; border-radius:12px;
+            border:1px solid var(--border); background:var(--input-bg); color:var(--text);
+            font-weight:600;
+            outline:none; transition:border-color .15s ease, box-shadow .15s ease;
+        }
         .sidebar-control select:focus{ border-color:var(--accent); box-shadow:0 0 0 4px rgba(0,122,255,.12); } 
         .sidebar-divider{ height:1px; border:none; background:var(--border); margin:6px 0 2px; } 
         .nav{ display:flex; flex-direction:column; gap:6px; } 
@@ -76,7 +137,7 @@
         .nav-item.is-active{
             background:var(--accent);
             border-color:var(--accent);
-            color:#fff;
+            color:var(--text-on-accent);
             box-shadow:0 10px 30px rgba(0,122,255,.18);
         }
         .nav-item.is-active:hover{ background:var(--accent-press); border-color:var(--accent-press); }
@@ -89,9 +150,11 @@
             gap:24px;
             overflow-y:auto;
         }
-        header{ display:flex; align-items:center; justify-content:space-between; }
+        header{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
         h1{ font-size:20px; margin:0; letter-spacing:.2px; }
         .muted{ color:var(--muted); font-size:13px }
+
+        .header-actions{ display:flex; align-items:center; gap:8px; }
 
         .view{ display:none; }
         .view.is-active{ display:block; }
@@ -100,7 +163,7 @@
         .profile-heading{ font-size:18px; font-weight:700; margin-bottom:8px; }
         .profile-body{ color:var(--muted); line-height:1.6; }
         .profile-actions{ margin-top:16px; display:flex; gap:10px; flex-wrap:wrap; }
-        .profile-pill{ display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; background:var(--soft); border:1px solid var(--border); font-size:12px; color:var(--muted); }
+        .profile-pill{ display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; background:var(--pill-bg); border:1px solid var(--border); font-size:12px; color:var(--muted); }
 
         .app{ max-width:1240px; margin:0 auto; }
         .card{
@@ -113,12 +176,12 @@
             align-items:end;
         }
         .field{ display:flex; flex-direction:column; gap:6px; }
-        .label{ font-size:12px; font-weight:600; color:#2a2a2a; padding-left:2px; }
+        .label{ font-size:12px; font-weight:600; color:var(--label-text); padding-left:2px; }
 
         .input-wrap{ position:relative; display:flex; align-items:center; }
         .input-wrap input{
             width:100%; padding:10px 32px 10px 36px; border-radius:12px;
-            border:1px solid var(--border); background:#fff; color:var(--text);
+            border:1px solid var(--border); background:var(--input-bg); color:var(--text);
             outline:none; transition:border-color .15s ease, box-shadow .15s ease;
         }
         .input-wrap input:focus{ border-color:var(--accent) }
@@ -126,31 +189,31 @@
             position:absolute; left:10px; width:16px; height:16px; color:var(--muted); opacity:.9;
         }
         .status-dot{
-            position:absolute; right:10px; width:10px; height:10px; border-radius:50%; background:#c9ccd4;
+            position:absolute; right:10px; width:10px; height:10px; border-radius:50%; background:var(--status-neutral);
         }
-        .input-wrap.is-valid input{ border-color:#cfe9d6; }
+        .input-wrap.is-valid input{ border-color:var(--status-valid-border); }
         .input-wrap.is-valid .status-dot{ background:var(--green); }
-        .input-wrap.is-invalid input{ border-color:#ffd0d0; }
+        .input-wrap.is-invalid input{ border-color:var(--status-invalid-border); }
         .input-wrap.is-invalid .status-dot{ background:var(--red); }
         .help{ font-size:12px; color:var(--muted); margin-top:4px; padding-left:2px; }
 
         input[type="text"], input[type="number"], select{
             appearance:none; -webkit-appearance:none;
             width:100%; padding:10px 12px; border-radius:12px;
-            border:1px solid var(--border); background:#fff; color:var(--text);
+            border:1px solid var(--border); background:var(--input-bg); color:var(--text);
             outline:none; transition:border-color .15s ease;
         }
         input[type="text"]:focus, input[type="number"]:focus, select:focus{ border-color:var(--accent) }
         .actions{ display:flex; gap:8px; justify-content:flex-end; align-items:center; }
 
         .btn{
-            border:1px solid var(--border); background:#fff; color:var(--text);
+            border:1px solid var(--border); background:var(--card); color:var(--text);
             border-radius:12px; padding:10px 14px; font-weight:600; cursor:pointer;
             transition: background .15s ease, border-color .15s ease, transform .02s ease;
         }
         .btn:hover{ background:var(--soft) }
         .btn:active{ transform:translateY(1px) }
-        .btn-primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
+        .btn-primary{ background:var(--accent); border-color:var(--accent); color:var(--text-on-accent); }
         .btn-primary:hover{ background:var(--accent-press); border-color:var(--accent-press) }
         .btn-ghost{ background:transparent; border-color:transparent; color:var(--muted); }
         .btn-ghost:hover{ background:var(--soft); color:var(--text) }
@@ -164,8 +227,8 @@
         }
         table{ width:100%; border-collapse:separate; border-spacing:0 }
         thead th{
-            position:sticky; top:0; background:#fafafa; z-index:1;
-            font-size:12px; text-transform:uppercase; letter-spacing:.02em; color:#444;
+            position:sticky; top:0; background:var(--table-head); z-index:1;
+            font-size:12px; text-transform:uppercase; letter-spacing:.02em; color:var(--table-head-text);
             border-bottom:1px solid var(--border); padding:10px 12px; text-align:left;
         }
         tbody td{ padding:10px 12px; border-bottom:1px solid var(--border) }
@@ -174,16 +237,16 @@
 
         .no-due-date{ box-shadow: inset 4px 0 0 0 var(--red); }
 
-        tfoot td{ position:sticky; bottom:0; background:#fff; border-top:1px solid var(--border); padding:10px 12px; }
+        tfoot td{ position:sticky; bottom:0; background:var(--card); border-top:1px solid var(--border); padding:10px 12px; }
 
-        tr.gray   { background:#f5f6f8; color:#aaa; }
-        tr.green  { background:#eaf9ef; }
-        tr.yellow { background:#fff8e1; }
-        tr.red    { background:#ffeef0; }
+        tr.gray   { background:var(--row-gray); color:var(--row-gray-text); }
+        tr.green  { background:var(--row-green); }
+        tr.yellow { background:var(--row-yellow); }
+        tr.red    { background:var(--row-red); }
 
         .footer-grid{ display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; line-height:1.5 }
         .pill{ display:inline-flex; gap:6px; align-items:center; padding:6px 10px; border-radius:999px;
-            background:var(--soft); border:1px solid var(--border); font-size:13px; }
+            background:var(--pill-bg); border:1px solid var(--border); font-size:13px; }
         .pill strong{ font-weight:700 }
         .delta-pos{ color:var(--green) }
         .delta-neg{ color:var(--red) }
@@ -202,13 +265,13 @@
             content:attr(data-tip);
             position:absolute; left:0; top:100%;
             transform:translateY(8px);
-            background:#111; color:#fff; font-size:12px; padding:6px 8px; border-radius:8px; white-space:nowrap;
+            background:var(--tooltip-bg); color:var(--tooltip-text); font-size:12px; padding:6px 8px; border-radius:8px; white-space:nowrap;
             opacity:0; pointer-events:none; transition:opacity .12s ease, transform .12s ease;
         }
         .tip[data-tip]:hover::after{ opacity:1; transform:translateY(6px); }
         .tip[data-tip]{ max-width:100%; overflow:visible }
 
-        pre{ white-space:pre-wrap; background:#fff; border:1px solid var(--border); border-radius:12px; padding:10px; color:#374151 }
+        pre{ white-space:pre-wrap; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px; color:var(--text) }
     </style>
 </head>
 <body>
@@ -246,7 +309,10 @@
     <main class="main">
         <header>
             <h1 id="viewTitle">Monthly Summary</h1>
-            <button class="btn btn-ghost" id="logout">Logout</button>
+            <div class="header-actions">
+                <button class="btn" id="themeToggle" data-theme-toggle aria-pressed="false">Dark Mode</button>
+                <button class="btn btn-ghost" id="logout">Logout</button>
+            </div>
         </header>
 
         <section
@@ -291,6 +357,7 @@
     </main>
 </div>
 
-<script src="./renderer.js"></script>
+<script src="./theme.js" defer></script>
+<script src="./renderer.js" defer></script>
 </body>
 </html>

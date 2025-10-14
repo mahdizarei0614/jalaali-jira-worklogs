@@ -4,10 +4,31 @@
     <meta charset="utf-8" />
     <title>Login — Alo Worklogs</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+        (function () {
+            try {
+                var stored = localStorage.getItem('alo-theme');
+                var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                var theme = stored === 'dark' || stored === 'light' ? stored : (prefersDark ? 'dark' : 'light');
+                document.documentElement.dataset.theme = theme;
+                document.documentElement.style.colorScheme = theme === 'dark' ? 'dark' : 'light';
+            } catch (err) {
+                console.warn('Unable to resolve stored theme', err);
+            }
+        })();
+    </script>
     <style>
         :root{
-            --bg:#f7f8fb; --card:#ffffff; --text:#0f1115; --muted:#6b7280; --border:#e9e9ef;
-            --accent:#007aff; --accent-press:#0063cc; --soft:#f2f4f8;
+            color-scheme:light;
+            --bg:#f7f8fb; --card:#ffffff; --text:#0f1115; --text-on-accent:#ffffff;
+            --muted:#6b7280; --border:#e9e9ef; --accent:#007aff; --accent-press:#0063cc;
+            --soft:#f2f4f8; --input-bg:#ffffff; --error:#b00020;
+        }
+        :root[data-theme="dark"]{
+            color-scheme:dark;
+            --bg:#0f1115; --card:#171a21; --text:#f5f7ff; --text-on-accent:#0f1115;
+            --muted:#a3adc2; --border:#2a2f3b; --accent:#4c8dff; --accent-press:#3a74d8;
+            --soft:#1f2533; --input-bg:#1b202c; --error:#ff5d62;
         }
         *{box-sizing:border-box}
         html,body{height:100%; display: flex; justify-content: center; align-items: center; gap: 1rem; flex-direction: column;}
@@ -17,6 +38,20 @@
             font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Inter,system-ui,Arial,sans-serif;
             padding:16px;
         }
+        .theme-toggle{
+            align-self:flex-end;
+            width:auto;
+            margin-top:0;
+            border:1px solid var(--border);
+            background:var(--card);
+            color:var(--text);
+            border-radius:999px;
+            padding:8px 14px;
+            font-weight:600;
+            cursor:pointer;
+            transition:background .15s ease, border-color .15s ease;
+        }
+        .theme-toggle:hover{ background:var(--soft); }
         .card{
             width:min(520px, 92vw); background:var(--card); border:1px solid var(--border);
             border-radius:20px; padding:24px; box-shadow:0 12px 30px rgba(0,0,0,.06);
@@ -26,19 +61,21 @@
         label{display:block; font-weight:600; margin-top:8px; font-size:13px}
         input{
             width:100%; padding:12px 14px; margin-top:8px; border-radius:14px; border:1px solid var(--border);
-            outline:none; background:#fff; color:var(--text);
+            outline:none; background:var(--input-bg); color:var(--text);
         }
         input:focus{border-color:var(--accent)}
-        button{
+        .card button{
             width:100%; padding:12px 16px; margin-top:16px; border:0; border-radius:14px;
-            background:var(--accent); color:#fff; font-weight:700; cursor:pointer;
+            background:var(--accent); color:var(--text-on-accent); font-weight:700; cursor:pointer;
         }
-        button:hover{background:var(--accent-press)}
+        .card button:hover{background:var(--accent-press)}
         .hint{font-size:12px; color:var(--muted); margin-top:8px}
-        .error{color:#b00020; margin-top:8px}
+        .error{color:var(--error); margin-top:8px}
+        small{color:var(--muted);}
     </style>
 </head>
 <body>
+<button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false">Dark Mode</button>
 <div class="card">
     <h2>Authorize</h2>
     <p>Paste your Jira Access Token.</p>
@@ -50,8 +87,9 @@
     <div id="msg" class="error" style="display:none;"></div>
     <div class="hint">Stored securely in your system keychain.</div>
 </div>
-<small style="font-size: 10px; color: #aaa">by SkyBlueDev</small>
+<small style="font-size: 10px;">by SkyBlueDev</small>
 
-<script src="./login.js"></script>
+<script src="./theme.js" defer></script>
+<script src="./login.js" defer></script>
 </body>
 </html>
