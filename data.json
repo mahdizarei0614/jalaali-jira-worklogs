@@ -1,0 +1,34 @@
+{
+  "teams": [
+    {
+      "value": "frontend",
+      "label": "Frontend Team",
+      "users": [
+        { "text": "رضا محمدخان", "value": "r.mohammadkhan" },
+        { "text": "محمدمهدی زارعی", "value": "Momahdi.Zarei" },
+        { "text": "فرید ذوالقدر", "value": "zolghadr.farid" },
+        { "text": "ابراهیم علیپور", "value": "e.alipour" },
+        { "text": "نیلوفر صمدزادگان", "value": "n.samadzadegan" },
+        { "text": "یحیی کنگی", "value": "y.kangi" },
+        { "text": "امیرحسین فاطمی", "value": "a.fatemi" },
+        { "text": "ریحانه اخگری", "value": "r.akhgari" }
+      ]
+    },
+    {
+      "value": "design",
+      "label": "Design Team",
+      "users": [
+        { "text": "فاطمه بهزادی", "value": "f.behzadi" },
+        { "text": "حسین خلیلی", "value": "khalili.hossein" },
+        { "text": "عرفان اسماعیلیان", "value": "e.esmaeilian" },
+        { "text": "نگار میررسولی", "value": "n.mirrasouli" },
+        { "text": "سمیرا میکال", "value": "s.mikal" },
+        { "text": "زینب نیکو", "value": "z.nikoo" }
+      ]
+    }
+  ],
+  "adminTeamAccess": {
+    "Momahdi.Zarei": ["frontend", "design"],
+    "r.mohammadkhan": ["frontend", "design"]
+  }
+}
