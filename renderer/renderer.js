@@ -2,7 +2,7 @@
     const $ = (selector, root = document) => root.querySelector(selector);
     const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
-    const GITHUB_USER = 'SkyBlueDev';
+    const GITHUB_USER = 'mahdizarei0614';
     const GITHUB_REPO = 'jira-worklogs-electron';
 
     async function loadRemoteData() {
