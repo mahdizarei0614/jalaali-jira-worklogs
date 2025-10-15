@@ -10,20 +10,25 @@
                 { text: 'رضا محمدخان', value: 'r.mohammadkhan' },
                 { text: 'محمدمهدی زارعی', value: 'Momahdi.Zarei' },
                 { text: 'فرید ذوالقدر', value: 'zolghadr.farid' },
+                { text: 'ابراهیم علیپور', value: 'e.alipour' },
                 { text: 'نیلوفر صمدزادگان', value: 'n.samadzadegan' },
                 { text: 'یحیی کنگی', value: 'y.kangi' },
                 { text: 'امیرحسین فاطمی', value: 'a.fatemi' },
-                { text: 'ابراهیم علیپور', value: 'e.alipour' },
                 { text: 'ریحانه اخگری', value: 'r.akhgari' }
             ]
         },
         {
-            value: 'backend',
-            label: 'Backend Team',
+            value: 'design',
+            label: 'Design Team',
             users: [
-                { text: 'John Doe', value: 'john.doe' }
+                { text: 'فاطمه بهزادی', value: 'f.behzadi' },
+                { text: 'حسین خلیلی', value: 'khalili.hossein' },
+                { text: 'عرفان اسماعیلیان', value: 'e.esmaeilian' },
+                { text: 'نگار میررسولی', value: 'n.mirrasouli' },
+                { text: 'سمیرا میکال', value: 's.mikal' },
+                { text: 'زینب نیکو', value: 'z.nikoo' },
             ]
-        }
+        },
     ];
     const TEAM_OPTIONS = TEAM_DATA.map(({ value, label }) => ({ value, text: label }));
     const TEAM_USERS = new Map();
