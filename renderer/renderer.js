@@ -2,34 +2,28 @@
     const $ = (selector, root = document) => root.querySelector(selector);
     const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
-    const TEAM_DATA = [
-        {
-            value: 'frontend',
-            label: 'Frontend Team',
-            users: [
-                { text: 'رضا محمدخان', value: 'r.mohammadkhan' },
-                { text: 'محمدمهدی زارعی', value: 'Momahdi.Zarei' },
-                { text: 'فرید ذوالقدر', value: 'zolghadr.farid' },
-                { text: 'ابراهیم علیپور', value: 'e.alipour' },
-                { text: 'نیلوفر صمدزادگان', value: 'n.samadzadegan' },
-                { text: 'یحیی کنگی', value: 'y.kangi' },
-                { text: 'امیرحسین فاطمی', value: 'a.fatemi' },
-                { text: 'ریحانه اخگری', value: 'r.akhgari' }
-            ]
-        },
-        {
-            value: 'design',
-            label: 'Design Team',
-            users: [
-                { text: 'فاطمه بهزادی', value: 'f.behzadi' },
-                { text: 'حسین خلیلی', value: 'khalili.hossein' },
-                { text: 'عرفان اسماعیلیان', value: 'e.esmaeilian' },
-                { text: 'نگار میررسولی', value: 'n.mirrasouli' },
-                { text: 'سمیرا میکال', value: 's.mikal' },
-                { text: 'زینب نیکو', value: 'z.nikoo' },
-            ]
-        },
-    ];
+    const GITHUB_USER = 'SkyBlueDev';
+    const GITHUB_REPO = 'jira-worklogs-electron';
+
+    async function loadRemoteData() {
+        const url = `https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/main/data.json?cache-bust=${Date.now()}`;
+        try {
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`Failed to fetch data.json (${response.status})`);
+            }
+            return await response.json();
+        } catch (error) {
+            console.error('Unable to load data.json', error);
+            return {};
+        }
+    }
+
+    const remoteData = await loadRemoteData();
+    const TEAM_DATA = Array.isArray(remoteData?.teams) ? remoteData.teams : [];
+    if (TEAM_DATA.length === 0) {
+        console.warn('Team data is empty. Please ensure data.json is populated correctly.');
+    }
     const TEAM_OPTIONS = TEAM_DATA.map(({ value, label }) => ({ value, text: label }));
     const TEAM_VALUES = TEAM_OPTIONS.map((option) => option.value);
     const TEAM_USERS = new Map();
@@ -45,10 +39,7 @@
     });
     const TEAM_VALUE_SET = new Set(TEAM_VALUES);
     const DEFAULT_TEAM = TEAM_OPTIONS[0]?.value || null;
-    const ADMIN_TEAM_ACCESS = new Map([
-        ['Momahdi.Zarei', ['frontend', 'design']],
-        ['r.mohammadkhan', ['frontend', 'design']]
-    ].map(([username, teams]) => {
+    const ADMIN_TEAM_ACCESS = new Map(Object.entries(remoteData?.adminTeamAccess || {}).map(([username, teams]) => {
         const normalizedUser = (username || '').trim();
         if (!normalizedUser) {
             return null;
