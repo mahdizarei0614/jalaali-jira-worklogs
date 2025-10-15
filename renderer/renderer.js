@@ -31,6 +31,7 @@
         },
     ];
     const TEAM_OPTIONS = TEAM_DATA.map(({ value, label }) => ({ value, text: label }));
+    const TEAM_VALUES = TEAM_OPTIONS.map((option) => option.value);
     const TEAM_USERS = new Map();
     const USER_TEAM = new Map();
     TEAM_DATA.forEach(({ value, users }) => {
@@ -42,10 +43,54 @@
             USER_TEAM.set(user.value, value);
         });
     });
+    const TEAM_VALUE_SET = new Set(TEAM_VALUES);
     const DEFAULT_TEAM = TEAM_OPTIONS[0]?.value || null;
-    const ADMIN_USERS = new Set(['Momahdi.Zarei', 'r.mohammadkhan']);
+    const ADMIN_TEAM_ACCESS = new Map([
+        ['Momahdi.Zarei', ['frontend', 'design']],
+        ['r.mohammadkhan', ['frontend', 'design']]
+    ].map(([username, teams]) => {
+        const normalizedUser = (username || '').trim();
+        if (!normalizedUser) {
+            return null;
+        }
+        const normalizedTeams = Array.isArray(teams)
+            ? teams.map((team) => (team || '').trim()).filter(Boolean)
+            : [];
+        return [normalizedUser, normalizedTeams];
+    }).filter(Boolean));
     const PERSIAN_MONTHS = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
     const routeHooks = new Map();
+
+    function getAdminTeamsForUser(username) {
+        const key = (username || '').trim();
+        if (!key) return [];
+        const teams = ADMIN_TEAM_ACCESS.get(key);
+        if (!teams || teams.length === 0) {
+            return [];
+        }
+        let allowAll = false;
+        const requested = new Set();
+        teams.forEach((team) => {
+            const value = (team || '').trim();
+            if (!value) {
+                return;
+            }
+            if (value === '*' || value.toLowerCase() === 'all') {
+                allowAll = true;
+                return;
+            }
+            if (TEAM_VALUE_SET.has(value)) {
+                requested.add(value);
+            }
+        });
+        if (allowAll) {
+            return TEAM_VALUES.slice();
+        }
+        if (requested.size === 0) {
+            return [];
+        }
+        return TEAM_VALUES.filter((value) => requested.has(value));
+    }
 
     function normalizeUserOption(user) {
         if (!user) return null;
@@ -482,11 +527,38 @@
             };
         }
 
-        const teamOptions = ['<option value="">Select a team…</option>'];
-        TEAM_OPTIONS.forEach((team) => {
-            teamOptions.push(`<option value="${team.value}">${team.text}</option>`);
-        });
-        teamSelectEl.innerHTML = teamOptions.join('');
+        let lastTeamOptionsKey = null;
+        function renderTeamSelectOptions(allowedTeams = null) {
+            let values = Array.isArray(allowedTeams) ? allowedTeams.filter(Boolean) : null;
+            let key;
+            if (!values) {
+                key = '__ALL__';
+            } else if (values.length === 0) {
+                key = '__EMPTY__';
+            } else {
+                key = values.join('|');
+            }
+            if (key === lastTeamOptionsKey) {
+                return;
+            }
+            const options = ['<option value="">Select a team…</option>'];
+            if (!values) {
+                TEAM_OPTIONS.forEach((team) => {
+                    options.push(`<option value="${team.value}">${team.text}</option>`);
+                });
+            } else {
+                const allowedSet = new Set(values);
+                TEAM_OPTIONS.forEach((team) => {
+                    if (allowedSet.has(team.value)) {
+                        options.push(`<option value="${team.value}">${team.text}</option>`);
+                    }
+                });
+            }
+            teamSelectEl.innerHTML = options.join('');
+            lastTeamOptionsKey = key;
+        }
+
+        renderTeamSelectOptions();
 
         const initialSelection = reportStateInstance.getSelection();
         const initialTeam = (initialSelection.team && TEAM_USERS.has(initialSelection.team))
@@ -549,13 +621,15 @@
                 const displayName = (who.raw?.displayName || '').trim() || self;
 
                 const currentSelection = reportStateInstance.getSelection();
-                const isAdmin = ADMIN_USERS.has(self);
+                const adminTeams = getAdminTeamsForUser(self);
+                const isAdmin = adminTeams.length > 0;
                 let teamForSelf = findTeamForUser(self) || '';
                 if (teamForSelf) {
                     ensureUserInTeamMap(teamForSelf, { value: self, text: displayName });
                 }
 
                 if (!isAdmin) {
+                    renderTeamSelectOptions();
                     if (!teamForSelf) {
                         teamForSelf = teamSelectEl.value || DEFAULT_TEAM || TEAM_OPTIONS[0]?.value || '';
                         if (teamForSelf) {
@@ -573,13 +647,38 @@
                         );
                     }
                 } else {
+                    renderTeamSelectOptions(adminTeams);
                     teamSelectEl.disabled = false;
                     selectEl.disabled = false;
-                    const activeTeam = currentSelection.team && TEAM_USERS.has(currentSelection.team)
+                    let activeTeam = currentSelection.team && adminTeams.includes(currentSelection.team)
                         ? currentSelection.team
                         : '';
-                    teamSelectEl.value = activeTeam;
-                    renderUserOptions(activeTeam, currentSelection.username || selectEl.value || '');
+                    if (!activeTeam && adminTeams.length > 0) {
+                        activeTeam = adminTeams[0];
+                    }
+                    if (teamSelectEl.value !== activeTeam) {
+                        teamSelectEl.value = activeTeam;
+                    }
+                    const selectedUser = currentSelection.username || selectEl.value || '';
+                    const isUserInTeam = activeTeam
+                        ? getTeamUsers(activeTeam).some((user) => user.value === selectedUser)
+                        : false;
+                    renderUserOptions(activeTeam, isUserInTeam ? selectedUser : '');
+                    const shouldUpdateSelection = (currentSelection.team || '') !== (activeTeam || '')
+                        || (selectedUser && !isUserInTeam);
+                    if (shouldUpdateSelection) {
+                        await reportStateInstance.setSelection(
+                            {
+                                team: activeTeam || null,
+                                username: isUserInTeam ? selectedUser : null
+                            },
+                            {
+                                pushSelection: true,
+                                refresh: Boolean(isUserInTeam && selectedUser),
+                                clearResult: !isUserInTeam
+                            }
+                        );
+                    }
                 }
             } catch (err) {
                 console.error('Failed to determine user visibility', err);
