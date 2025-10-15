@@ -6,9 +6,14 @@
     const GITHUB_REPO = 'jira-worklogs-electron';
 
     async function loadRemoteData() {
-        const url = `https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/main/data.json?cache-bust=${Date.now()}`;
+        const url = `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/contents/data.json?ref=main&_=${Date.now()}`;
         try {
-            const response = await fetch(url);
+            const response = await fetch(url, {
+                headers: {
+                    Accept: 'application/vnd.github.v3.raw',
+                },
+                cache: 'no-store',
+            });
             if (!response.ok) {
                 throw new Error(`Failed to fetch data.json (${response.status})`);
             }

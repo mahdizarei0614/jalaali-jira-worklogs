@@ -5,7 +5,7 @@
       "label": "Frontend Team",
       "users": [
         { "text": "رضا محمدخان", "value": "r.mohammadkhan" },
-        { "text": "محمدمهدی زارعی اه", "value": "Momahdi.Zarei" },
+        { "text": "محمدمهدی زارعی", "value": "Momahdi.Zarei" },
         { "text": "فرید ذوالقدر", "value": "zolghadr.farid" },
         { "text": "ابراهیم علیپور", "value": "e.alipour" },
         { "text": "نیلوفر صمدزادگان", "value": "n.samadzadegan" },
@@ -28,7 +28,8 @@
     }
   ],
   "adminTeamAccess": {
+    "r.mohammadkhan": ["frontend", "design"],
     "Momahdi.Zarei": ["frontend", "design"],
-    "r.mohammadkhan": ["frontend", "design"]
+    "f.behzadi": ["design"]
   }
 }
