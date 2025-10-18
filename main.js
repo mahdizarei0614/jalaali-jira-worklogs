@@ -1,7 +1,7 @@
 (async () => {
     const Store = (await import('electron-store')).default;
 
-    const { app, BrowserWindow, ipcMain, Notification, Tray, Menu, nativeImage } = require('electron');
+    const { app, BrowserWindow, ipcMain, Notification, Tray, Menu, nativeImage, shell } = require('electron');
     const path = require('path');
     const fs = require('fs/promises');
     const axios = require('axios');
@@ -474,6 +474,8 @@
             result.dueIssuesCurrentMonth = dueIssuesCurrentMonth;
         }
 
+        result.baseUrl = baseUrl;
+
         return result;
     }
 
@@ -622,6 +624,19 @@
             mainWindow?.webContents.send('scan-result', res);
         }
     }
+
+    function sanitizeExternalUrl(url) {
+        if (!url || typeof url !== 'string') return null;
+        const trimmed = url.trim();
+        if (!trimmed) return null;
+        try {
+            const parsed = new URL(trimmed);
+            if (!/^https?:$/i.test(parsed.protocol)) return null;
+            return parsed.toString();
+        } catch (err) {
+            return null;
+        }
+    }
     function scheduleDailyReminders() {
         DAILY_REMINDER_TIMES.forEach(t => {
             const [hh, mm] = t.split(':').map(Number);
@@ -719,6 +734,22 @@
         lastUI.username = null;
         await (async () => mainWindow.loadFile(path.join(__dirname, 'renderer', 'login.html')))();
         return { ok: true };
+    });
+
+    ipcMain.handle('app:open-external', async (_evt, payload) => {
+        const rawUrl = typeof payload === 'string' ? payload : payload?.url;
+        const safeUrl = sanitizeExternalUrl(rawUrl);
+        if (!safeUrl) {
+            return { ok: false, reason: 'Invalid URL' };
+        }
+
+        try {
+            await shell.openExternal(safeUrl);
+            return { ok: true };
+        } catch (err) {
+            console.error('Failed to open external URL', err);
+            return { ok: false, reason: err?.message || 'Unable to open URL' };
+        }
     });
 
     ipcMain.handle('scan:now', (_evt, opts) => computeScan(opts || {}));
