@@ -134,10 +134,19 @@
         .sidebar-divider--spaced{ margin-top:12px; }
         .nav{ display:flex; flex-direction:column; gap:6px; }
         .nav-secondary{ margin-top:2px; }
-        .nav-item{ 
-            display:flex; 
-            align-items:center; 
-            gap:8px; 
+        .nav-group{ display:flex; flex-direction:column; gap:6px; margin-top:10px; }
+        .nav-group-label{
+            font-size:11px;
+            font-weight:700;
+            text-transform:uppercase;
+            letter-spacing:.4px;
+            color:var(--muted);
+            padding:2px;
+        }
+        .nav-item{
+            display:flex;
+            align-items:center;
+            gap:8px;
             width:100%;
             padding:10px 14px;
             border-radius:12px;
@@ -417,11 +426,17 @@
         </div>
         <hr class="sidebar-divider" />
         <nav class="nav" aria-label="Primary">
-            <button type="button" class="nav-item is-active" data-route="monthly-summary" aria-controls="monthlySummaryView">Monthly Summary</button>
-            <button type="button" class="nav-item" data-route="detailed-worklogs" aria-controls="detailedWorklogsView">Detailed Worklogs</button>
-            <button type="button" class="nav-item" data-route="due-issues" aria-controls="dueIssuesView">Issues Due This Month</button>
             <button type="button" class="nav-item" data-route="issues" aria-controls="issuesView">Issues</button>
-            <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView">Quarter Report</button>
+            <div class="nav-group" role="group" aria-labelledby="navGroupMonthlyReportsLabel">
+                <div id="navGroupMonthlyReportsLabel" class="nav-group-label">Monthly Reports</div>
+                <button type="button" class="nav-item is-active" data-route="monthly-summary" aria-controls="monthlySummaryView">Monthly Summary</button>
+                <button type="button" class="nav-item" data-route="detailed-worklogs" aria-controls="detailedWorklogsView">Detailed Worklogs</button>
+                <button type="button" class="nav-item" data-route="due-issues" aria-controls="dueIssuesView">Issues Due This Month</button>
+            </div>
+            <div class="nav-group" role="group" aria-labelledby="navGroupQuarterReportsLabel">
+                <div id="navGroupQuarterReportsLabel" class="nav-group-label">Quarter Reports</div>
+                <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView">Quarter Report</button>
+            </div>
             <button type="button" class="nav-item" data-route="configurations" aria-controls="configurationsView">Configurations</button>
         </nav>
         <hr class="sidebar-divider sidebar-divider--spaced" />
