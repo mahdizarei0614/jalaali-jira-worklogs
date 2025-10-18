@@ -203,6 +203,36 @@
         };
     }
 
+    function extractSprintNames(issue) {
+        const sprintField = issue?.fields?.customfield_10020;
+        if (!sprintField) return [];
+
+        const seen = new Set();
+        const normalize = (entry) => {
+            if (!entry) return null;
+            if (typeof entry === 'string') {
+                const match = entry.match(/name=([^,]+),/);
+                return match ? match[1].trim() : entry.trim();
+            }
+            if (typeof entry === 'object') {
+                if (entry.name) return String(entry.name).trim();
+                if (entry.value) return String(entry.value).trim();
+            }
+            return null;
+        };
+
+        const values = Array.isArray(sprintField) ? sprintField : [sprintField];
+        const names = [];
+        for (const value of values) {
+            const name = normalize(value);
+            if (!name) continue;
+            if (seen.has(name)) continue;
+            seen.add(name);
+            names.push(name);
+        }
+        return names;
+    }
+
     async function fetchIssuesDueThisMonth({ baseUrl, headers, username, nowG }) {
         const start = nowG.clone().startOf('jMonth').format('YYYY-MM-DD');
         const end = nowG.clone().endOf('jMonth').format('YYYY-MM-DD');
@@ -219,7 +249,8 @@
             'aggregatetimeestimate',
             'aggregatetimespent',
             'aggregatetimeoriginalestimate',
-            'timetracking'
+            'timetracking',
+            'customfield_10020'
         ].join(',');
 
         const issues = await searchIssuesPaged(baseUrl, headers, jql, fields);
@@ -244,7 +275,8 @@
                     status: issue?.fields?.status?.name || null,
                     estimateHours: secsToHours(times.originalSeconds),
                     loggedHours: secsToHours(times.spentSeconds),
-                    remainingHours: secsToHours(times.remainingSeconds)
+                    remainingHours: secsToHours(times.remainingSeconds),
+                    sprintNames: extractSprintNames(issue)
                 };
             })
             .filter(Boolean)
