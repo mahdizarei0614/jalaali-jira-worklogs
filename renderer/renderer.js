@@ -1075,6 +1075,34 @@
 
         const table = root.querySelector('#dueThisMonthTable');
         const tbody = table?.querySelector('tbody');
+        const tfoot = table?.querySelector('tfoot');
+        const footerCells = {
+            estimate: tfoot?.querySelector('[data-footer-field="estimate"]') || null,
+            logged: tfoot?.querySelector('[data-footer-field="logged"]') || null,
+            remaining: tfoot?.querySelector('[data-footer-field="remaining"]') || null,
+        };
+
+        function resetFooter() {
+            if (!tfoot) return;
+            Array.from(tfoot.querySelectorAll('td')).forEach((cell) => {
+                if (!cell.dataset.footerField) {
+                    cell.textContent = '—';
+                }
+            });
+            Object.values(footerCells).forEach((cell) => {
+                if (cell) cell.textContent = '—';
+            });
+        }
+
+        function updateFooter(totals) {
+            if (!tfoot) return;
+            resetFooter();
+            if (!totals) return;
+            if (footerCells.estimate) footerCells.estimate.textContent = totals.estimate;
+            if (footerCells.logged) footerCells.logged.textContent = totals.logged;
+            if (footerCells.remaining) footerCells.remaining.textContent = totals.remaining;
+        }
+
         if (!table || !tbody) {
             console.warn('Due issues view missing required elements.');
             return {};
@@ -1085,6 +1113,7 @@
         reportStateInstance.subscribe((state) => {
             if (state.isFetching && !state.result) {
                 setTableMessage(tbody, 10, 'Loading…');
+                resetFooter();
                 return;
             }
 
@@ -1092,16 +1121,23 @@
             if (!res || !res.ok) {
                 const message = res ? (res.reason || 'Unable to load due issues.') : 'No data yet.';
                 setTableMessage(tbody, 10, message);
+                resetFooter();
                 return;
             }
 
             const issues = Array.isArray(res.dueIssuesCurrentMonth) ? res.dueIssuesCurrentMonth : [];
             if (!issues.length) {
                 setTableMessage(tbody, 10, '—');
+                resetFooter();
                 return;
             }
 
             tbody.innerHTML = '';
+            let totals = {
+                estimate: 0,
+                logged: 0,
+                remaining: 0,
+            };
             issues.forEach((issue, idx) => {
                 const summary = (issue.summary || '').toString().replace(/\n/g, ' ');
                 const tr = document.createElement('tr');
@@ -1112,6 +1148,12 @@
                 const issueType = escapeHtml(issue.issueType || '');
                 const sprints = Array.isArray(issue.sprints) ? issue.sprints.filter(Boolean) : [];
                 const sprintText = escapeHtml(sprints.length ? sprints.join(', ') : '—');
+                const estimateHours = Number(issue.estimateHours || 0);
+                const loggedHours = Number(issue.loggedHours || 0);
+                const remainingHours = Number(issue.remainingHours || 0);
+                totals.estimate += estimateHours;
+                totals.logged += loggedHours;
+                totals.remaining += remainingHours;
                 tr.innerHTML = `
                     <td>${idx + 1}</td>
                     <td><span class="tip" data-tip="${dueGregorian}">${dueJalaali}</span></td>
@@ -1120,11 +1162,17 @@
                     <td>${summary}</td>
                     <td>${sprintText}</td>
                     <td>${issue.status || ''}</td>
-                    <td>${Number(issue.estimateHours || 0).toFixed(2)}</td>
-                    <td>${Number(issue.loggedHours || 0).toFixed(2)}</td>
-                    <td>${Number(issue.remainingHours || 0).toFixed(2)}</td>
+                    <td>${estimateHours.toFixed(2)}</td>
+                    <td>${loggedHours.toFixed(2)}</td>
+                    <td>${remainingHours.toFixed(2)}</td>
                 `;
                 tbody.appendChild(tr);
+            });
+
+            updateFooter({
+                estimate: totals.estimate.toFixed(2),
+                logged: totals.logged.toFixed(2),
+                remaining: totals.remaining.toFixed(2),
             });
         });
 
