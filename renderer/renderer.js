@@ -1292,8 +1292,8 @@
                     <td>${issueType || '—'}</td>
                     <td>${issueCell || '—'}</td>
                     <td>${summary}</td>
-                    <td>${formatList(issue.experience)}</td>
-                    <td>${formatList(issue.ports)}</td>
+                    <td>${formatList(issue.sprint)}</td>
+                    <td>${formatList(issue.boards)}</td>
                     <td>${formatList(issue.projects)}</td>
                     <td>${status || '—'}</td>
                     <td>${estimate}</td>

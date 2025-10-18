@@ -340,8 +340,8 @@
         });
 
         const fieldKeys = {
-            experience: findFieldKeyByName(names, 'Experience'),
-            ports: findFieldKeyByName(names, 'Ports'),
+            sprint: findFieldKeyByName(names, 'Sprint'),
+            boards: findFieldKeyByName(names, 'Board'),
             projects: findFieldKeyByName(names, 'Projects')
         };
 
@@ -381,12 +381,8 @@
                 }
             }
 
-            const experienceValues = fieldKeys.experience ? normaliseFieldValues(fields[fieldKeys.experience]) : [];
-            const portsValues = (() => {
-                const customPorts = fieldKeys.ports ? normaliseFieldValues(fields[fieldKeys.ports]) : [];
-                if (customPorts.length) return customPorts;
-                return normaliseFieldValues(fields.components);
-            })();
+            const sprintValues = fieldKeys.sprint ? normaliseFieldValues(fields[fieldKeys.sprint]) : [];
+            const boardValues = fieldKeys.boards ? normaliseFieldValues(fields[fieldKeys.boards]) : [];
             const projectValues = (() => {
                 const customProjects = fieldKeys.projects ? normaliseFieldValues(fields[fieldKeys.projects]) : [];
                 if (customProjects.length) return customProjects;
@@ -407,8 +403,8 @@
                 dueDate: dueRaw,
                 dueDateGregorian: dueGregorian || null,
                 dueDateJalaali: dueJalaali || null,
-                experience: experienceValues,
-                ports: portsValues,
+                sprint: sprintValues,
+                boards: boardValues,
                 projects: projectValues,
                 estimateHours,
                 loggedHours,
