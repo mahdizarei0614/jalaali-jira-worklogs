@@ -137,6 +137,8 @@
         'timetracking'
     ].join(',');
 
+    const SPRINT_FIELD_KEYS = ['customfield_10020', 'closedSprints', 'sprint'];
+
     async function searchIssuesPaged(baseUrl, headers, jql, fields = DEFAULT_SEARCH_FIELDS) {
         const issues = [];
         let startAt = 0;
@@ -161,6 +163,78 @@
             if (Number.isFinite(num)) return num;
         }
         return null;
+    }
+
+    function addSprintName(name, seen, acc) {
+        if (typeof name !== 'string') return;
+        const trimmed = name.trim();
+        if (!trimmed || seen.has(trimmed)) return;
+        seen.add(trimmed);
+        acc.push(trimmed);
+    }
+
+    function collectSprintNames(raw, seen, acc) {
+        if (raw == null) return;
+        if (Array.isArray(raw)) {
+            raw.forEach((entry) => collectSprintNames(entry, seen, acc));
+            return;
+        }
+
+        if (typeof raw === 'string') {
+            const trimmed = raw.trim();
+            if (!trimmed) return;
+
+            const nameMatches = [...trimmed.matchAll(/name=([^,\]]+)/g)];
+            if (nameMatches.length) {
+                nameMatches.forEach((match) => addSprintName(match[1], seen, acc));
+                return;
+            }
+
+            if ((trimmed.startsWith('{') || trimmed.startsWith('['))) {
+                try {
+                    const parsed = JSON.parse(trimmed);
+                    collectSprintNames(parsed, seen, acc);
+                    return;
+                } catch (err) {
+                    // Ignore JSON parse errors and fall back to treating the raw string as the name.
+                }
+            }
+
+            addSprintName(trimmed, seen, acc);
+            return;
+        }
+
+        if (typeof raw === 'object') {
+            const candidate = raw.name || raw.displayName || raw.value || raw.label;
+            if (typeof candidate === 'string') {
+                addSprintName(candidate, seen, acc);
+            }
+            if (Array.isArray(raw.values)) {
+                collectSprintNames(raw.values, seen, acc);
+            }
+        }
+    }
+
+    function extractIssueSprints(issue) {
+        const fields = issue?.fields;
+        if (!fields || typeof fields !== 'object') return [];
+
+        const seen = new Set();
+        const acc = [];
+
+        for (const key of SPRINT_FIELD_KEYS) {
+            if (fields[key] != null) {
+                collectSprintNames(fields[key], seen, acc);
+            }
+        }
+
+        if (!acc.length) {
+            Object.keys(fields)
+                .filter((key) => /sprint/i.test(key) && !SPRINT_FIELD_KEYS.includes(key))
+                .forEach((key) => collectSprintNames(fields[key], seen, acc));
+        }
+
+        return acc;
     }
 
     function secsToHours(secs) {
@@ -219,7 +293,10 @@
             'aggregatetimeestimate',
             'aggregatetimespent',
             'aggregatetimeoriginalestimate',
-            'timetracking'
+            'timetracking',
+            'customfield_10020',
+            'closedSprints',
+            'sprint'
         ].join(',');
 
         const issues = await searchIssuesPaged(baseUrl, headers, jql, fields);
@@ -233,6 +310,7 @@
                 const dueMoment = moment(dueDate, 'YYYY-MM-DD', true);
                 const dueDateGregorian = dueMoment.isValid() ? dueMoment.format('YYYY-MM-DD') : dueDate;
                 const dueDateJalaali = dueMoment.isValid() ? dueMoment.format('jYYYY/jMM/jDD') : dueDate;
+                const sprints = extractIssueSprints(issue);
 
                 return {
                     issueKey: issue.key,
@@ -244,7 +322,8 @@
                     status: issue?.fields?.status?.name || null,
                     estimateHours: secsToHours(times.originalSeconds),
                     loggedHours: secsToHours(times.spentSeconds),
-                    remainingHours: secsToHours(times.remainingSeconds)
+                    remainingHours: secsToHours(times.remainingSeconds),
+                    sprints
                 };
             })
             .filter(Boolean)

@@ -1084,20 +1084,20 @@
 
         reportStateInstance.subscribe((state) => {
             if (state.isFetching && !state.result) {
-                setTableMessage(tbody, 9, 'Loading…');
+                setTableMessage(tbody, 10, 'Loading…');
                 return;
             }
 
             const res = state.result;
             if (!res || !res.ok) {
                 const message = res ? (res.reason || 'Unable to load due issues.') : 'No data yet.';
-                setTableMessage(tbody, 9, message);
+                setTableMessage(tbody, 10, message);
                 return;
             }
 
             const issues = Array.isArray(res.dueIssuesCurrentMonth) ? res.dueIssuesCurrentMonth : [];
             if (!issues.length) {
-                setTableMessage(tbody, 9, '—');
+                setTableMessage(tbody, 10, '—');
                 return;
             }
 
@@ -1110,12 +1110,16 @@
                 const dueJalaali = escapeHtml(issue.dueDateJalaali || issue.dueDate || '');
                 const dueGregorian = escapeHtml(issue.dueDateGregorian || issue.dueDate || '');
                 const issueType = escapeHtml(issue.issueType || '');
+                const sprintsHtml = Array.isArray(issue.sprints) && issue.sprints.length
+                    ? issue.sprints.map((name) => `<span class="pill">${escapeHtml(name)}</span>`).join(' ')
+                    : '<span class="muted">—</span>';
                 tr.innerHTML = `
                     <td>${idx + 1}</td>
                     <td><span class="tip" data-tip="${dueGregorian}">${dueJalaali}</span></td>
                     <td>${issueType}</td>
                     <td>${issueCell}</td>
                     <td>${summary}</td>
+                    <td>${sprintsHtml}</td>
                     <td>${issue.status || ''}</td>
                     <td>${Number(issue.estimateHours || 0).toFixed(2)}</td>
                     <td>${Number(issue.loggedHours || 0).toFixed(2)}</td>
