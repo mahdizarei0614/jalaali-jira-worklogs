@@ -592,7 +592,7 @@
             monthCache
         });
 
-        return { ...monthResult, quarterReport };
+        return { ...monthResult, quarterReport, baseUrl };
     }
     // ===== Notifications / scheduling, auth, routing, IPC (unchanged from your last working version) =====
     // ... keep the rest of your file exactly as in your latest working build ...

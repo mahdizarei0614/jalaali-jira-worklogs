@@ -1032,6 +1032,7 @@
             }
 
             const worklogs = Array.isArray(res.worklogs) ? res.worklogs : [];
+            const jiraBaseUrl = res.baseUrl || '';
             if (!worklogs.length) {
                 setTableMessage(tbody, 8, 'No worklogs found.');
                 return;
@@ -1040,11 +1041,16 @@
             tbody.innerHTML = '';
             Array.from(new Set(worklogs)).forEach((w, idx) => {
                 const tr = document.createElement('tr');
+                const issueKey = w.issueKey || '';
+                const issueLink = buildJiraIssueUrl(jiraBaseUrl, issueKey);
+                const issueCell = issueLink
+                    ? `<a href="${issueLink}" target="_blank" rel="noopener noreferrer">${issueKey}</a>`
+                    : issueKey;
                 tr.innerHTML = `
                     <td>${idx + 1}</td>
                     <td>${w.persianDate || ''}</td>
                     <td>${w.date || ''}</td>
-                    <td>${w.issueKey || ''}</td>
+                    <td>${issueCell}</td>
                     <td>${(w.summary || '').toString().replace(/\n/g, ' ')}</td>
                     <td>${Number(w.hours || 0).toFixed(2)}</td>
                     <td>${w.timeSpent || ''}</td>
@@ -1087,6 +1093,7 @@
             }
 
             const issues = Array.isArray(res.dueIssuesCurrentMonth) ? res.dueIssuesCurrentMonth : [];
+            const jiraBaseUrl = res.baseUrl || '';
             if (!issues.length) {
                 setTableMessage(tbody, 8, '—');
                 return;
@@ -1095,11 +1102,16 @@
             tbody.innerHTML = '';
             issues.forEach((issue, idx) => {
                 const summary = (issue.summary || '').toString().replace(/\n/g, ' ');
+                const issueKey = issue.issueKey || '';
+                const issueLink = buildJiraIssueUrl(jiraBaseUrl, issueKey);
+                const issueCell = issueLink
+                    ? `<a href="${issueLink}" target="_blank" rel="noopener noreferrer">${issueKey}</a>`
+                    : issueKey;
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td>${idx + 1}</td>
                     <td>${issue.dueDate || ''}</td>
-                    <td>${issue.issueKey || ''}</td>
+                    <td>${issueCell}</td>
                     <td>${summary}</td>
                     <td>${issue.status || ''}</td>
                     <td>${Number(issue.estimateHours || 0).toFixed(2)}</td>
@@ -1293,6 +1305,13 @@
     function weekdayName(w) {
         const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
         return names[w] || String(w ?? '');
+    }
+
+    function buildJiraIssueUrl(baseUrl, issueKey) {
+        const cleanBase = stripTrailingSlash(sanitizeUrl(baseUrl));
+        const key = (issueKey || '').trim();
+        if (!cleanBase || !key) return null;
+        return `${cleanBase}/browse/${encodeURIComponent(key)}`;
     }
 
     function sanitizeUrl(u) {
