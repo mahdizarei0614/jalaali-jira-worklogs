@@ -459,6 +459,7 @@
             totalHours,
             expectedByNowHours,
             expectedByEndMonthHours,
+            issueBaseUrl: baseUrl,
             summary: {
                 totalWorklogs,
                 totalHours: (+totalLoggedHours).toFixed(2),
