@@ -1022,20 +1022,20 @@
 
         reportStateInstance.subscribe((state) => {
             if (state.isFetching && !state.result) {
-                setTableMessage(tbody, 7, 'Loading…');
+                setTableMessage(tbody, 8, 'Loading…');
                 return;
             }
 
             const res = state.result;
             if (!res || !res.ok) {
                 const message = res ? (res.reason || 'Unable to load worklogs.') : 'No data yet.';
-                setTableMessage(tbody, 7, message);
+                setTableMessage(tbody, 8, message);
                 return;
             }
 
             const worklogs = Array.isArray(res.worklogs) ? res.worklogs : [];
             if (!worklogs.length) {
-                setTableMessage(tbody, 7, 'No worklogs found.');
+                setTableMessage(tbody, 8, 'No worklogs found.');
                 return;
             }
 
@@ -1046,9 +1046,11 @@
                 const issueCell = renderIssueLink(w.issueKey, issueUrl);
                 const jalaliDate = escapeHtml(w.persianDate || '');
                 const gregorianDate = escapeHtml(w.date || '');
+                const issueType = escapeHtml(w.issueType || '');
                 tr.innerHTML = `
                     <td>${idx + 1}</td>
                     <td><span class="tip" data-tip="${gregorianDate}">${jalaliDate}</span></td>
+                    <td>${issueType}</td>
                     <td>${issueCell}</td>
                     <td>${(w.summary || '').toString().replace(/\n/g, ' ')}</td>
                     <td>${Number(w.hours || 0).toFixed(2)}</td>
@@ -1082,20 +1084,20 @@
 
         reportStateInstance.subscribe((state) => {
             if (state.isFetching && !state.result) {
-                setTableMessage(tbody, 8, 'Loading…');
+                setTableMessage(tbody, 9, 'Loading…');
                 return;
             }
 
             const res = state.result;
             if (!res || !res.ok) {
                 const message = res ? (res.reason || 'Unable to load due issues.') : 'No data yet.';
-                setTableMessage(tbody, 8, message);
+                setTableMessage(tbody, 9, message);
                 return;
             }
 
             const issues = Array.isArray(res.dueIssuesCurrentMonth) ? res.dueIssuesCurrentMonth : [];
             if (!issues.length) {
-                setTableMessage(tbody, 8, '—');
+                setTableMessage(tbody, 9, '—');
                 return;
             }
 
@@ -1107,9 +1109,11 @@
                 const issueCell = renderIssueLink(issue.issueKey, issueUrl);
                 const dueJalaali = escapeHtml(issue.dueDateJalaali || issue.dueDate || '');
                 const dueGregorian = escapeHtml(issue.dueDateGregorian || issue.dueDate || '');
+                const issueType = escapeHtml(issue.issueType || '');
                 tr.innerHTML = `
                     <td>${idx + 1}</td>
                     <td><span class="tip" data-tip="${dueGregorian}">${dueJalaali}</span></td>
+                    <td>${issueType}</td>
                     <td>${issueCell}</td>
                     <td>${summary}</td>
                     <td>${issue.status || ''}</td>

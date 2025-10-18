@@ -127,6 +127,7 @@
         'worklog',
         'duedate',
         'status',
+        'issuetype',
         'timeoriginalestimate',
         'timeestimate',
         'timespent',
@@ -211,6 +212,7 @@
             'summary',
             'duedate',
             'status',
+            'issuetype',
             'timeoriginalestimate',
             'timeestimate',
             'timespent',
@@ -234,6 +236,7 @@
 
                 return {
                     issueKey: issue.key,
+                    issueType: issue?.fields?.issuetype?.name || null,
                     summary: issue?.fields?.summary || '',
                     dueDate,
                     dueDateGregorian,
@@ -391,6 +394,7 @@
                     worklogs.push({
                         worklogId: log.id || null,
                         issueKey: issue.key,
+                        issueType: issue?.fields?.issuetype?.name || null,
                         summary: issue?.fields?.summary,
                         date,
                         persianDate: dateMoment.format('jYYYY/jMM/jDD'),
