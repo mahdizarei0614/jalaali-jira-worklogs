@@ -203,8 +203,8 @@
     }
 
     async function fetchIssuesDueThisMonth({ baseUrl, headers, username, nowG }) {
-        const start = nowG.clone().startOf('month').format('YYYY-MM-DD');
-        const end = nowG.clone().endOf('month').format('YYYY-MM-DD');
+        const start = nowG.clone().startOf('jMonth').format('YYYY-MM-DD');
+        const end = nowG.clone().endOf('jMonth').format('YYYY-MM-DD');
         const jql = `assignee = "${username}" AND duedate >= "${start}" AND duedate <= "${end}" ORDER BY duedate`;
         const fields = [
             'key',
