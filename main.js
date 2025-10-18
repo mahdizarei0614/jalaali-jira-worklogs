@@ -229,10 +229,14 @@
 
                 const times = extractTimeTracking(issue);
 
+                const dueMoment = moment(dueDate, 'YYYY-MM-DD', true);
+                const dueDatePersian = dueMoment.isValid() ? dueMoment.format('jYYYY/jMM/jDD') : null;
+
                 return {
                     issueKey: issue.key,
                     summary: issue?.fields?.summary || '',
                     dueDate,
+                    dueDatePersian,
                     status: issue?.fields?.status?.name || null,
                     estimateHours: secsToHours(times.originalSeconds),
                     loggedHours: secsToHours(times.spentSeconds),
