@@ -137,20 +137,39 @@
         'timetracking'
     ].join(',');
 
-    async function searchIssuesPaged(baseUrl, headers, jql, fields = DEFAULT_SEARCH_FIELDS) {
+    async function searchIssuesPaged(baseUrl, headers, jql, fields = DEFAULT_SEARCH_FIELDS, opts = {}) {
+        if (fields && typeof fields === 'object' && !Array.isArray(fields)) {
+            opts = fields;
+            fields = DEFAULT_SEARCH_FIELDS;
+        }
+
+        const options = opts || {};
         const issues = [];
+        const names = {};
         let startAt = 0;
         const maxResults = 100;
         while (true) {
+            const params = { jql, startAt, maxResults, fields };
+            if (options.expand) {
+                params.expand = options.expand;
+            }
             const { data } = await axios.get(`${baseUrl}/rest/api/latest/search`, {
                 headers,
-                params: { jql, startAt, maxResults, fields }
+                params
             });
             if (Array.isArray(data?.issues)) issues.push(...data.issues);
+            if (options.collectNames && data?.names) {
+                Object.assign(names, data.names);
+            }
             const total = data?.total ?? issues.length;
             startAt += data?.maxResults ?? maxResults;
             if (startAt >= total) break;
         }
+
+        if (options.returnMeta) {
+            return { issues, names };
+        }
+
         return issues;
     }
 
@@ -251,6 +270,166 @@
         }
 
         return Array.from(names);
+    }
+
+    function findFieldKeyByName(namesMap, targetName) {
+        if (!namesMap || !targetName) return null;
+        const target = targetName.trim().toLowerCase();
+        if (!target) return null;
+        for (const [key, label] of Object.entries(namesMap)) {
+            if (typeof label !== 'string') continue;
+            if (label.trim().toLowerCase() === target) {
+                return key;
+            }
+        }
+        return null;
+    }
+
+    function normaliseFieldValues(raw) {
+        if (raw == null) return [];
+        const values = Array.isArray(raw) ? raw : [raw];
+        const result = new Set();
+        const push = (val) => {
+            if (val == null) return;
+            const str = String(val).trim();
+            if (str) result.add(str);
+        };
+        for (const item of values) {
+            if (item == null) continue;
+            if (Array.isArray(item)) {
+                item.forEach(push);
+                continue;
+            }
+            if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') {
+                push(item);
+                continue;
+            }
+            if (typeof item === 'object') {
+                const candidates = [
+                    item.displayName,
+                    item.value,
+                    item.name,
+                    item.text,
+                    item.label,
+                    item.title,
+                    item.key
+                ];
+                for (const candidate of candidates) {
+                    if (candidate && typeof candidate === 'string') {
+                        push(candidate);
+                        break;
+                    }
+                }
+                if (item.project) {
+                    const projectName = item.project.name || item.project.key;
+                    if (projectName) push(projectName);
+                }
+                continue;
+            }
+            push(item);
+        }
+        return Array.from(result);
+    }
+
+    async function fetchAssignedIssues({ baseUrl, headers, username }) {
+        const jql = `assignee = "${username}" ORDER BY updated DESC`;
+        const { issues, names } = await searchIssuesPaged(baseUrl, headers, jql, '*navigable', {
+            expand: 'names',
+            collectNames: true,
+            returnMeta: true
+        });
+
+        const fieldKeys = {
+            sprint: findFieldKeyByName(names, 'Sprint'),
+            board: findFieldKeyByName(names, 'Board'),
+            projects: findFieldKeyByName(names, 'Projects')
+        };
+
+        const collected = [];
+        let estimateTotal = 0;
+        let loggedTotal = 0;
+        let remainingTotal = 0;
+
+        for (const issue of issues) {
+            const fields = issue?.fields ?? {};
+            const times = extractTimeTracking(issue);
+            const estimateHours = secsToHours(times.originalSeconds);
+            const loggedHours = secsToHours(times.spentSeconds);
+            const remainingHours = secsToHours(times.remainingSeconds);
+
+            estimateTotal += estimateHours;
+            loggedTotal += loggedHours;
+            remainingTotal += remainingHours;
+
+            const updatedRaw = fields.updated || issue?.fields?.updated || issue?.updated;
+            const updatedMoment = updatedRaw ? moment(updatedRaw) : null;
+            const updatedGregorian = updatedMoment?.isValid() ? updatedMoment.format('YYYY-MM-DD HH:mm') : (updatedRaw || '');
+            const updatedJalaali = updatedMoment?.isValid() ? updatedMoment.format('jYYYY/jMM/jDD HH:mm') : (updatedRaw || '');
+            const updatedSort = updatedMoment?.isValid() ? updatedMoment.valueOf() : 0;
+
+            const dueRaw = fields.duedate || issue?.fields?.duedate || null;
+            let dueGregorian = '';
+            let dueJalaali = '';
+            if (dueRaw) {
+                const dueMoment = moment(dueRaw, 'YYYY-MM-DD', true);
+                if (dueMoment.isValid()) {
+                    dueGregorian = dueMoment.format('YYYY-MM-DD');
+                    dueJalaali = dueMoment.format('jYYYY/jMM/jDD');
+                } else {
+                    dueGregorian = dueRaw;
+                    dueJalaali = dueRaw;
+                }
+            }
+
+            const sprintValues = fieldKeys.sprint ? normaliseFieldValues(fields[fieldKeys.sprint]) : [];
+            const boardValues = (() => {
+                const customBoards = fieldKeys.board ? normaliseFieldValues(fields[fieldKeys.board]) : [];
+                if (customBoards.length) return customBoards;
+                return normaliseFieldValues(fields.components);
+            })();
+            const projectValues = (() => {
+                const customProjects = fieldKeys.projects ? normaliseFieldValues(fields[fieldKeys.projects]) : [];
+                if (customProjects.length) return customProjects;
+                if (fields.project) {
+                    return normaliseFieldValues([fields.project.name || fields.project.key].filter(Boolean));
+                }
+                return [];
+            })();
+
+            collected.push({
+                issueKey: issue.key,
+                summary: fields.summary || '',
+                issueType: fields.issuetype?.name || null,
+                status: fields.status?.name || null,
+                updated: updatedRaw || null,
+                updatedGregorian,
+                updatedJalaali,
+                dueDate: dueRaw,
+                dueDateGregorian: dueGregorian || null,
+                dueDateJalaali: dueJalaali || null,
+                sprint: sprintValues,
+                board: boardValues,
+                projects: projectValues,
+                estimateHours,
+                loggedHours,
+                remainingHours,
+                sortKey: updatedSort
+            });
+        }
+
+        collected.sort((a, b) => (b.sortKey ?? 0) - (a.sortKey ?? 0));
+        collected.forEach((item) => delete item.sortKey);
+
+        return {
+            ok: true,
+            issues: collected,
+            totals: {
+                estimate: +estimateTotal.toFixed(2),
+                logged: +loggedTotal.toFixed(2),
+                remaining: +remainingTotal.toFixed(2)
+            },
+            fieldKeys
+        };
     }
 
     async function fetchIssuesDueThisMonth({ baseUrl, headers, username, start, end }) {
@@ -486,6 +665,7 @@
         }
 
         let dueIssuesCurrentMonth = [];
+        let assignedIssuesReport = null;
 
         if (includeDetails) {
             worklogs.sort((a, b) => moment(a.date, 'YYYY-MM-DD').diff(moment(b.date, 'YYYY-MM-DD')));
@@ -500,6 +680,19 @@
             } catch (err) {
                 console.error('Failed to fetch due issues for selected month:', err);
                 dueIssuesCurrentMonth = [];
+            }
+            try {
+                assignedIssuesReport = await fetchAssignedIssues({
+                    baseUrl,
+                    headers,
+                    username
+                });
+            } catch (err) {
+                console.error('Failed to fetch assigned issues for user:', err);
+                assignedIssuesReport = {
+                    ok: false,
+                    reason: 'Unable to load issues.'
+                };
             }
         }
 
@@ -564,6 +757,7 @@
             result.deficits = deficits;
             result.worklogs = worklogs;
             result.dueIssuesCurrentMonth = dueIssuesCurrentMonth;
+            result.assignedIssuesReport = assignedIssuesReport;
         }
 
         result.baseUrl = baseUrl;

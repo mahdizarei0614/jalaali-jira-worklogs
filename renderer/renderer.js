@@ -291,6 +291,7 @@
         registerController('monthly-summary', (node) => initMonthlySummary(node, reportState)),
         registerController('detailed-worklogs', (node) => initDetailedWorklogs(node, reportState)),
         registerController('due-issues', (node) => initDueIssues(node, reportState)),
+        registerController('issues', (node) => initIssues(node, reportState)),
         registerController('quarter-report', (node) => initQuarterReport(node, reportState)),
         registerController('configurations', (node) => initConfigurations(node, reportState, userSelectContext, settingsPromise))
     ]);
@@ -1139,7 +1140,8 @@
                 remaining: 0,
             };
             issues.forEach((issue, idx) => {
-                const summary = (issue.summary || '').toString().replace(/\n/g, ' ');
+                const rawSummary = (issue.summary || '').toString().replace(/\n/g, ' ');
+                const summary = rawSummary ? escapeHtml(rawSummary) : '—';
                 const tr = document.createElement('tr');
                 const issueUrl = buildIssueUrl(res.baseUrl, issue.issueKey);
                 const issueCell = renderIssueLink(issue.issueKey, issueUrl);
@@ -1173,6 +1175,139 @@
                 estimate: totals.estimate.toFixed(2),
                 logged: totals.logged.toFixed(2),
                 remaining: totals.remaining.toFixed(2),
+            });
+        });
+
+        return {
+            onShow: () => reportStateInstance.refresh()
+        };
+    }
+
+    function initIssues(root, reportStateInstance) {
+        if (!root || root.dataset.controllerReady === 'true') return {};
+        root.dataset.controllerReady = 'true';
+
+        const table = root.querySelector('#assignedIssuesTable');
+        const tbody = table?.querySelector('tbody');
+        const tfoot = table?.querySelector('tfoot');
+        const footerCells = {
+            estimate: tfoot?.querySelector('[data-footer-field="estimate"]') || null,
+            logged: tfoot?.querySelector('[data-footer-field="logged"]') || null,
+            remaining: tfoot?.querySelector('[data-footer-field="remaining"]') || null,
+        };
+
+        function resetFooter() {
+            if (!tfoot) return;
+            Array.from(tfoot.querySelectorAll('td')).forEach((cell) => {
+                if (!cell.dataset.footerField) {
+                    cell.textContent = '—';
+                }
+            });
+            Object.values(footerCells).forEach((cell) => {
+                if (cell) cell.textContent = '—';
+            });
+        }
+
+        function updateFooter(totals) {
+            if (!tfoot) return;
+            resetFooter();
+            if (!totals) return;
+            if (footerCells.estimate) footerCells.estimate.textContent = totals.estimate;
+            if (footerCells.logged) footerCells.logged.textContent = totals.logged;
+            if (footerCells.remaining) footerCells.remaining.textContent = totals.remaining;
+        }
+
+        function formatList(value) {
+            if (!value) return '—';
+            const items = Array.isArray(value) ? value : [value];
+            const cleaned = items
+                .map((item) => escapeHtml(item ?? ''))
+                .filter((item) => item.trim().length > 0);
+            return cleaned.length ? cleaned.join(', ') : '—';
+        }
+
+        if (!table || !tbody) {
+            console.warn('Issues view missing required elements.');
+            return {};
+        }
+
+        setupIssueLinkHandler(root);
+
+        reportStateInstance.subscribe((state) => {
+            if (state.isFetching && !state.result) {
+                setTableMessage(tbody, 13, 'Loading…');
+                resetFooter();
+                return;
+            }
+
+            const res = state.result;
+            if (!res || !res.ok) {
+                const message = res ? (res.reason || 'Unable to load issues.') : 'No data yet.';
+                setTableMessage(tbody, 13, message);
+                resetFooter();
+                return;
+            }
+
+            const report = res.assignedIssuesReport;
+            if (!report || report.ok === false) {
+                const message = report ? (report.reason || 'Unable to load issues.') : 'No issues available.';
+                setTableMessage(tbody, 13, message);
+                resetFooter();
+                return;
+            }
+
+            const issues = Array.isArray(report.issues) ? report.issues : [];
+            if (!issues.length) {
+                setTableMessage(tbody, 13, 'No issues found.');
+                updateFooter({ estimate: '0.00', logged: '0.00', remaining: '0.00' });
+                return;
+            }
+
+            tbody.innerHTML = '';
+            issues.forEach((issue, idx) => {
+                const tr = document.createElement('tr');
+                const issueUrl = buildIssueUrl(res.baseUrl, issue.issueKey);
+                const issueCell = renderIssueLink(issue.issueKey, issueUrl);
+                const summary = (issue.summary || '').toString().replace(/\n/g, ' ');
+                const updatedDisplayRaw = issue.updatedJalaali || issue.updatedGregorian || '—';
+                const updatedTooltipRaw = issue.updatedGregorian || issue.updated || '';
+                const updatedCell = updatedDisplayRaw !== '—'
+                    ? `<span class="tip" data-tip="${escapeHtml(updatedTooltipRaw || updatedDisplayRaw)}">${escapeHtml(updatedDisplayRaw)}</span>`
+                    : '—';
+                const dueDisplayRaw = issue.dueDateJalaali || issue.dueDateGregorian || issue.dueDate || '—';
+                const dueTooltipRaw = issue.dueDateGregorian || issue.dueDate || '';
+                const dueCell = dueDisplayRaw !== '—'
+                    ? `<span class="tip" data-tip="${escapeHtml(dueTooltipRaw || dueDisplayRaw)}">${escapeHtml(dueDisplayRaw)}</span>`
+                    : '—';
+                const issueType = escapeHtml(issue.issueType || '');
+                const status = escapeHtml(issue.status || '');
+                const estimate = Number(issue.estimateHours ?? 0).toFixed(2);
+                const logged = Number(issue.loggedHours ?? 0).toFixed(2);
+                const remaining = Number(issue.remainingHours ?? 0).toFixed(2);
+
+                tr.innerHTML = `
+                    <td>${idx + 1}</td>
+                    <td>${updatedCell}</td>
+                    <td>${dueCell}</td>
+                    <td>${issueType || '—'}</td>
+                    <td>${issueCell || '—'}</td>
+                    <td>${summary}</td>
+                    <td>${formatList(issue.sprint)}</td>
+                    <td>${formatList(issue.board)}</td>
+                    <td>${formatList(issue.projects)}</td>
+                    <td>${status || '—'}</td>
+                    <td>${estimate}</td>
+                    <td>${logged}</td>
+                    <td>${remaining}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            const totals = report.totals || {};
+            updateFooter({
+                estimate: Number.isFinite(totals.estimate) ? totals.estimate.toFixed(2) : '0.00',
+                logged: Number.isFinite(totals.logged) ? totals.logged.toFixed(2) : '0.00',
+                remaining: Number.isFinite(totals.remaining) ? totals.remaining.toFixed(2) : '0.00',
             });
         });
 
