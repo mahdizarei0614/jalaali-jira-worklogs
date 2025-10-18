@@ -108,7 +108,6 @@
             border-right:1px solid var(--border);
             display:flex;
             flex-direction:column;
-            gap:18px;
             padding:24px 20px;
             box-shadow:8px 0 32px rgba(15,17,21,.06);
             position:sticky;
@@ -117,10 +116,10 @@
             height:100vh;
             overflow-y:auto;
         }
-        .sidebar-header{ display:flex; flex-direction:column; gap:4px; } 
+        .sidebar-header{ display:flex; flex-direction:column; gap:4px; margin-bottom: 18px; }
         .sidebar-title{ font-size:20px; font-weight:700; letter-spacing:.2px; } 
         .sidebar-subtitle{ font-size:12px; color:var(--muted); } 
-        .sidebar-control{ display:flex; flex-direction:column; gap:6px; } 
+        .sidebar-control{ display:flex; flex-direction:column; gap:6px; margin-bottom: 12px; }
         .sidebar-label{ font-size:12px; font-weight:600; color:var(--muted); padding-left:2px; } 
         .sidebar-control select{
             appearance:none; -webkit-appearance:none;
@@ -130,11 +129,9 @@
             outline:none; transition:border-color .15s ease, box-shadow .15s ease;
         }
         .sidebar-control select:focus{ border-color:var(--accent); box-shadow:0 0 0 4px var(--focus-ring); }
-        .sidebar-divider{ height:1px; border:none; background:var(--border); margin:6px 0 2px; }
-        .sidebar-divider--spaced{ margin-top:12px; }
-        .nav{ display:flex; flex-direction:column; gap:6px; }
-        .nav-secondary{ margin-top:2px; }
-        .nav-group{ display:flex; flex-direction:column; gap:6px; margin-top:10px; }
+        .sidebar-divider{ height:1px; border:none; background:var(--border); margin: 12px 0; }
+        .nav{ display:flex; flex-direction:column; gap:16px; }
+        .nav-group{ display:flex; flex-direction:column; gap:8px; }
         .nav-group-label{
             font-size:11px;
             font-weight:700;
@@ -426,22 +423,27 @@
         </div>
         <hr class="sidebar-divider" />
         <nav class="nav" aria-label="Primary">
-            <button type="button" class="nav-item" data-route="issues" aria-controls="issuesView">Issues</button>
+            <div class="nav-group" role="group" aria-labelledby="navGroupGeneralLabel">
+                <div id="navGroupGeneralLabel" class="nav-group-label">General</div>
+                <button type="button" class="nav-item" data-route="issues" aria-controls="issuesView">Issues</button>
+            </div>
             <div class="nav-group" role="group" aria-labelledby="navGroupMonthlyReportsLabel">
                 <div id="navGroupMonthlyReportsLabel" class="nav-group-label">Monthly Reports</div>
-                <button type="button" class="nav-item is-active" data-route="monthly-summary" aria-controls="monthlySummaryView">Monthly Summary</button>
+                <button type="button" class="nav-item is-active" data-route="monthly-summary" aria-controls="monthlySummaryView">Summary</button>
                 <button type="button" class="nav-item" data-route="detailed-worklogs" aria-controls="detailedWorklogsView">Detailed Worklogs</button>
-                <button type="button" class="nav-item" data-route="due-issues" aria-controls="dueIssuesView">Issues Due This Month</button>
+                <button type="button" class="nav-item" data-route="due-issues" aria-controls="dueIssuesView">Due This Month</button>
             </div>
             <div class="nav-group" role="group" aria-labelledby="navGroupQuarterReportsLabel">
                 <div id="navGroupQuarterReportsLabel" class="nav-group-label">Quarter Reports</div>
-                <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView">Quarter Report</button>
+                <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView">Summary</button>
             </div>
-            <button type="button" class="nav-item" data-route="configurations" aria-controls="configurationsView">Configurations</button>
         </nav>
-        <hr class="sidebar-divider sidebar-divider--spaced" />
-        <nav class="nav nav-secondary" aria-label="Settings">
-            <button type="button" class="nav-item" data-route="settings" aria-controls="settingsView">Settings</button>
+        <hr class="sidebar-divider" />
+        <nav class="nav" aria-label="Settings">
+            <div class="nav-group" role="group" aria-labelledby="navGroupSettingsLabel">
+                <button type="button" class="nav-item" data-route="configurations" aria-controls="configurationsView">Configurations</button>
+                <button type="button" class="nav-item" data-route="settings" aria-controls="settingsView">Settings</button>
+            </div>
         </nav>
     </aside>
     <main class="main">

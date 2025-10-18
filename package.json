@@ -1,6 +1,6 @@
 {
   "name": "alo-worklog",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Jira worklog checker with Jalaali calendar",
   "license": "ISC",
   "author": "SkyBlueDev (Mohammad Mahdi Zarei)",
