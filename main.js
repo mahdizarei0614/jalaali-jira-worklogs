@@ -203,6 +203,56 @@
         };
     }
 
+    function parseSprintName(value) {
+        if (!value) return null;
+        if (typeof value === 'string') {
+            const trimmed = value.trim();
+            if (!trimmed) return null;
+            const match = trimmed.match(/name=([^,\]]+)/i);
+            return (match ? match[1] : trimmed).trim() || null;
+        }
+
+        if (typeof value === 'object') {
+            if (typeof value.name === 'string' && value.name.trim()) {
+                return value.name.trim();
+            }
+            const str = String(value);
+            if (str && str !== '[object Object]') {
+                const match = str.match(/name=([^,\]]+)/i);
+                if (match && match[1].trim()) {
+                    return match[1].trim();
+                }
+            }
+        }
+
+        return null;
+    }
+
+    function extractSprintNames(issue) {
+        const fields = issue?.fields ?? {};
+        const candidates = [
+            fields.customfield_10020,
+            fields.customfield_10016,
+            fields.customfield_10007,
+            fields.sprint,
+            fields.sprints
+        ];
+
+        const names = new Set();
+        for (const candidate of candidates) {
+            if (!candidate) continue;
+            const items = Array.isArray(candidate) ? candidate : [candidate];
+            for (const item of items) {
+                const name = parseSprintName(item);
+                if (name) {
+                    names.add(name);
+                }
+            }
+        }
+
+        return Array.from(names);
+    }
+
     async function fetchIssuesDueThisMonth({ baseUrl, headers, username, nowG }) {
         const start = nowG.clone().startOf('jMonth').format('YYYY-MM-DD');
         const end = nowG.clone().endOf('jMonth').format('YYYY-MM-DD');
@@ -219,7 +269,12 @@
             'aggregatetimeestimate',
             'aggregatetimespent',
             'aggregatetimeoriginalestimate',
-            'timetracking'
+            'timetracking',
+            'customfield_10020',
+            'customfield_10016',
+            'customfield_10007',
+            'sprint',
+            'sprints'
         ].join(',');
 
         const issues = await searchIssuesPaged(baseUrl, headers, jql, fields);
@@ -244,7 +299,8 @@
                     status: issue?.fields?.status?.name || null,
                     estimateHours: secsToHours(times.originalSeconds),
                     loggedHours: secsToHours(times.spentSeconds),
-                    remainingHours: secsToHours(times.remainingSeconds)
+                    remainingHours: secsToHours(times.remainingSeconds),
+                    sprints: extractSprintNames(issue)
                 };
             })
             .filter(Boolean)
