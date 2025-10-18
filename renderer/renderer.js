@@ -1022,20 +1022,20 @@
 
         reportStateInstance.subscribe((state) => {
             if (state.isFetching && !state.result) {
-                setTableMessage(tbody, 8, 'Loading…');
+                setTableMessage(tbody, 7, 'Loading…');
                 return;
             }
 
             const res = state.result;
             if (!res || !res.ok) {
                 const message = res ? (res.reason || 'Unable to load worklogs.') : 'No data yet.';
-                setTableMessage(tbody, 8, message);
+                setTableMessage(tbody, 7, message);
                 return;
             }
 
             const worklogs = Array.isArray(res.worklogs) ? res.worklogs : [];
             if (!worklogs.length) {
-                setTableMessage(tbody, 8, 'No worklogs found.');
+                setTableMessage(tbody, 7, 'No worklogs found.');
                 return;
             }
 
@@ -1044,10 +1044,11 @@
                 const tr = document.createElement('tr');
                 const issueUrl = buildIssueUrl(res.baseUrl, w.issueKey);
                 const issueCell = renderIssueLink(w.issueKey, issueUrl);
+                const jalaliDate = escapeHtml(w.persianDate || '');
+                const gregorianDate = escapeHtml(w.date || '');
                 tr.innerHTML = `
                     <td>${idx + 1}</td>
-                    <td>${w.persianDate || ''}</td>
-                    <td>${w.date || ''}</td>
+                    <td><span class="tip" data-tip="${gregorianDate}">${jalaliDate}</span></td>
                     <td>${issueCell}</td>
                     <td>${(w.summary || '').toString().replace(/\n/g, ' ')}</td>
                     <td>${Number(w.hours || 0).toFixed(2)}</td>
@@ -1104,9 +1105,11 @@
                 const tr = document.createElement('tr');
                 const issueUrl = buildIssueUrl(res.baseUrl, issue.issueKey);
                 const issueCell = renderIssueLink(issue.issueKey, issueUrl);
+                const dueJalaali = escapeHtml(issue.dueDateJalaali || issue.dueDate || '');
+                const dueGregorian = escapeHtml(issue.dueDateGregorian || issue.dueDate || '');
                 tr.innerHTML = `
                     <td>${idx + 1}</td>
-                    <td>${issue.dueDate || ''}</td>
+                    <td><span class="tip" data-tip="${dueGregorian}">${dueJalaali}</span></td>
                     <td>${issueCell}</td>
                     <td>${summary}</td>
                     <td>${issue.status || ''}</td>
