@@ -75,6 +75,7 @@
     let mainWindow;
     let tray;
     const lastUI = { jYear: null, jMonth: null, username: null };
+    const PROJECT_BOARD_CACHE = new Map();
 
     const mtNow = () => moment().utcOffset(TEHRAN_OFFSET_MIN);
     const mj = (jYear, jMonth, jDay) =>
@@ -251,6 +252,171 @@
         }
 
         return Array.from(names);
+    }
+
+    async function fetchBoardsForProject({ baseUrl, headers, projectKey }) {
+        if (!baseUrl || !projectKey) return [];
+        const cacheKey = `${baseUrl}::${projectKey}`;
+        const cached = PROJECT_BOARD_CACHE.get(cacheKey);
+        if (Array.isArray(cached)) {
+            return cached;
+        }
+        if (cached && typeof cached.then === 'function') {
+            try {
+                return await cached;
+            } catch (err) {
+                return [];
+            }
+        }
+
+        const promise = (async () => {
+            try {
+                const names = [];
+                let startAt = 0;
+                const maxResults = 50;
+                while (true) {
+                    const { data } = await axios.get(`${baseUrl}/rest/agile/1.0/board`, {
+                        headers,
+                        params: { projectKeyOrId: projectKey, startAt, maxResults }
+                    });
+                    const values = Array.isArray(data?.values) ? data.values : [];
+                    for (const board of values) {
+                        const name = typeof board?.name === 'string' ? board.name.trim() : '';
+                        if (name) names.push(name);
+                    }
+                    const total = Number.isFinite(data?.total) ? data.total : null;
+                    startAt += values.length;
+                    if (values.length === 0) {
+                        break;
+                    }
+                    if (total != null && startAt >= total) {
+                        break;
+                    }
+                    if (total == null && values.length < maxResults) {
+                        break;
+                    }
+                }
+                const unique = Array.from(new Set(names));
+                PROJECT_BOARD_CACHE.set(cacheKey, unique);
+                return unique;
+            } catch (err) {
+                const reason = err?.response?.status
+                    ? `${err.response.status} ${err.response.statusText}`
+                    : (err?.message || err);
+                console.error(`Failed to fetch boards for project ${projectKey}:`, reason);
+                PROJECT_BOARD_CACHE.set(cacheKey, []);
+                return [];
+            }
+        })();
+
+        PROJECT_BOARD_CACHE.set(cacheKey, promise);
+
+        const result = await promise;
+        if (Array.isArray(result)) {
+            return result;
+        }
+        return [];
+    }
+
+    async function fetchAssignedIssues({ baseUrl, headers, username }) {
+        if (!baseUrl || !username) return [];
+
+        const fields = [
+            'key',
+            'summary',
+            'duedate',
+            'status',
+            'issuetype',
+            'project',
+            'updated',
+            'timeoriginalestimate',
+            'timeestimate',
+            'timespent',
+            'aggregatetimeestimate',
+            'aggregatetimespent',
+            'aggregatetimeoriginalestimate',
+            'timetracking',
+            'customfield_10020',
+            'customfield_10016',
+            'customfield_10007',
+            'sprint',
+            'sprints'
+        ].join(',');
+
+        const jql = `assignee = "${username}" ORDER BY updated DESC`;
+        const issues = await searchIssuesPaged(baseUrl, headers, jql, fields);
+
+        const projectKeys = new Set();
+        for (const issue of issues) {
+            const key = issue?.fields?.project?.key;
+            if (key) projectKeys.add(key);
+        }
+
+        const boardMap = new Map();
+        await Promise.all(Array.from(projectKeys).map(async (projectKey) => {
+            const names = await fetchBoardsForProject({ baseUrl, headers, projectKey });
+            boardMap.set(projectKey, names);
+        }));
+
+        const normalized = issues.map((issue) => {
+            const fields = issue?.fields ?? {};
+            const times = extractTimeTracking(issue);
+            const projectKey = fields.project?.key || null;
+            const projectName = fields.project?.name || null;
+            const dueDate = fields.duedate || null;
+            let dueDateGregorian = dueDate;
+            let dueDateJalaali = dueDate;
+            if (dueDate) {
+                const dueMoment = moment(dueDate, 'YYYY-MM-DD', true);
+                if (dueMoment.isValid()) {
+                    dueDateGregorian = dueMoment.format('YYYY-MM-DD');
+                    dueDateJalaali = dueMoment.format('jYYYY/jMM/jDD');
+                }
+            }
+
+            const updatedRaw = fields.updated || null;
+            let updatedGregorian = updatedRaw;
+            let updatedJalaali = updatedRaw;
+            let updatedMs = Number.NEGATIVE_INFINITY;
+            if (updatedRaw) {
+                const updatedMoment = moment(updatedRaw);
+                if (updatedMoment.isValid()) {
+                    const localized = updatedMoment.clone().utcOffset(TEHRAN_OFFSET_MIN);
+                    updatedGregorian = localized.format('YYYY-MM-DD HH:mm');
+                    updatedJalaali = localized.format('jYYYY/jMM/jDD HH:mm');
+                    updatedMs = localized.valueOf();
+                }
+            }
+
+            return {
+                issueKey: issue?.key || null,
+                issueType: fields.issuetype?.name || null,
+                summary: fields.summary || '',
+                dueDate,
+                dueDateGregorian,
+                dueDateJalaali,
+                status: fields.status?.name || null,
+                estimateHours: secsToHours(times.originalSeconds),
+                loggedHours: secsToHours(times.spentSeconds),
+                remainingHours: secsToHours(times.remainingSeconds),
+                sprints: extractSprintNames(issue),
+                projectKey,
+                projectName,
+                boardNames: boardMap.get(projectKey) || [],
+                updated: updatedRaw,
+                updatedGregorian,
+                updatedJalaali,
+                updatedMs
+            };
+        }).filter((entry) => entry.issueKey);
+
+        normalized.sort((a, b) => {
+            const aMs = Number.isFinite(a.updatedMs) ? a.updatedMs : Number.NEGATIVE_INFINITY;
+            const bMs = Number.isFinite(b.updatedMs) ? b.updatedMs : Number.NEGATIVE_INFINITY;
+            return bMs - aMs;
+        });
+
+        return normalized.map(({ updatedMs, ...rest }) => rest);
     }
 
     async function fetchIssuesDueThisMonth({ baseUrl, headers, username, start, end }) {
@@ -486,6 +652,7 @@
         }
 
         let dueIssuesCurrentMonth = [];
+        let assignedIssues = [];
 
         if (includeDetails) {
             worklogs.sort((a, b) => moment(a.date, 'YYYY-MM-DD').diff(moment(b.date, 'YYYY-MM-DD')));
@@ -500,6 +667,17 @@
             } catch (err) {
                 console.error('Failed to fetch due issues for selected month:', err);
                 dueIssuesCurrentMonth = [];
+            }
+
+            try {
+                assignedIssues = await fetchAssignedIssues({
+                    baseUrl,
+                    headers,
+                    username
+                });
+            } catch (err) {
+                console.error('Failed to fetch assigned issues:', err);
+                assignedIssues = [];
             }
         }
 
@@ -564,6 +742,7 @@
             result.deficits = deficits;
             result.worklogs = worklogs;
             result.dueIssuesCurrentMonth = dueIssuesCurrentMonth;
+            result.assignedIssues = assignedIssues;
         }
 
         result.baseUrl = baseUrl;
