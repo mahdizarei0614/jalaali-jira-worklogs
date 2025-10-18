@@ -253,10 +253,31 @@
         return Array.from(names);
     }
 
-    async function fetchIssuesDueThisMonth({ baseUrl, headers, username, nowG }) {
-        const start = nowG.clone().startOf('jMonth').format('YYYY-MM-DD');
-        const end = nowG.clone().endOf('jMonth').format('YYYY-MM-DD');
-        const jql = `assignee = "${username}" AND duedate >= "${start}" AND duedate <= "${end}" ORDER BY duedate`;
+    async function fetchIssuesDueThisMonth({ baseUrl, headers, username, start, end }) {
+        function normalizeYMD(value) {
+            if (!value) return null;
+            if (moment.isMoment(value)) {
+                return value.clone().format('YYYY-MM-DD');
+            }
+            if (typeof value === 'string' && value.trim()) {
+                const strict = moment(value, 'YYYY-MM-DD', true);
+                if (strict.isValid()) return strict.format('YYYY-MM-DD');
+                const loose = moment(value);
+                if (loose.isValid()) return loose.format('YYYY-MM-DD');
+            }
+            return null;
+        }
+
+        let startYMD = normalizeYMD(start);
+        let endYMD = normalizeYMD(end);
+
+        if (!startYMD || !endYMD) {
+            const now = mtNow();
+            startYMD = now.clone().startOf('jMonth').format('YYYY-MM-DD');
+            endYMD = now.clone().endOf('jMonth').format('YYYY-MM-DD');
+        }
+
+        const jql = `assignee = "${username}" AND duedate >= "${startYMD}" AND duedate <= "${endYMD}" ORDER BY duedate`;
         const fields = [
             'key',
             'summary',
@@ -469,9 +490,15 @@
         if (includeDetails) {
             worklogs.sort((a, b) => moment(a.date, 'YYYY-MM-DD').diff(moment(b.date, 'YYYY-MM-DD')));
             try {
-                dueIssuesCurrentMonth = await fetchIssuesDueThisMonth({ baseUrl, headers, username, nowG });
+                dueIssuesCurrentMonth = await fetchIssuesDueThisMonth({
+                    baseUrl,
+                    headers,
+                    username,
+                    start: fromYMD,
+                    end: toYMD
+                });
             } catch (err) {
-                console.error('Failed to fetch due issues for current month:', err);
+                console.error('Failed to fetch due issues for selected month:', err);
                 dueIssuesCurrentMonth = [];
             }
         }
