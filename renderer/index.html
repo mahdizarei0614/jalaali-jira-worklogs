@@ -420,6 +420,7 @@
             <button type="button" class="nav-item is-active" data-route="monthly-summary" aria-controls="monthlySummaryView">Monthly Summary</button>
             <button type="button" class="nav-item" data-route="detailed-worklogs" aria-controls="detailedWorklogsView">Detailed Worklogs</button>
             <button type="button" class="nav-item" data-route="due-issues" aria-controls="dueIssuesView">Issues Due This Month</button>
+            <button type="button" class="nav-item" data-route="issues-overview" aria-controls="issuesOverviewView">Issues</button>
             <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView">Quarter Report</button>
             <button type="button" class="nav-item" data-route="configurations" aria-controls="configurationsView">Configurations</button>
         </nav>
@@ -455,6 +456,14 @@
                 data-route-view="due-issues"
                 data-route-title="Issues Due This Month"
                 data-template="./views/due-issues.html">
+        </section>
+
+        <section
+                id="issuesOverviewView"
+                class="view"
+                data-route-view="issues-overview"
+                data-route-title="Issues"
+                data-template="./views/issues-overview.html">
         </section>
 
         <section

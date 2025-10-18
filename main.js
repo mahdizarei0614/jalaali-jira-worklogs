@@ -75,6 +75,7 @@
     let mainWindow;
     let tray;
     const lastUI = { jYear: null, jMonth: null, username: null };
+    const BOARD_CACHE = new Map();
 
     const mtNow = () => moment().utcOffset(TEHRAN_OFFSET_MIN);
     const mj = (jYear, jMonth, jDay) =>
@@ -253,6 +254,51 @@
         return Array.from(names);
     }
 
+    function extractSprintBoardIds(issue) {
+        const fields = issue?.fields ?? {};
+        const candidates = [
+            fields.customfield_10020,
+            fields.customfield_10016,
+            fields.customfield_10007,
+            fields.sprint,
+            fields.sprints
+        ];
+
+        const ids = new Set();
+        const addId = (val) => {
+            const num = Number(val);
+            if (Number.isFinite(num)) {
+                ids.add(num);
+            }
+        };
+
+        for (const candidate of candidates) {
+            if (!candidate) continue;
+            const items = Array.isArray(candidate) ? candidate : [candidate];
+            for (const item of items) {
+                if (!item) continue;
+                if (typeof item === 'object') {
+                    ['boardId', 'originBoardId', 'rapidViewId'].forEach((key) => {
+                        if (item[key] != null) {
+                            addId(item[key]);
+                        }
+                    });
+                }
+
+                const str = typeof item === 'string' ? item : String(item);
+                if (str && str !== '[object Object]') {
+                    const matches = str.match(/(?:boardId|originBoardId|rapidViewId)=(\d+)/gi) || [];
+                    matches.forEach((match) => {
+                        const [, id] = match.split('=');
+                        addId(id);
+                    });
+                }
+            }
+        }
+
+        return Array.from(ids);
+    }
+
     async function fetchIssuesDueThisMonth({ baseUrl, headers, username, start, end }) {
         function normalizeYMD(value) {
             if (!value) return null;
@@ -326,6 +372,135 @@
             })
             .filter(Boolean)
             .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    }
+
+    async function fetchBoardDetails(baseUrl, headers, boardId) {
+        if (!Number.isFinite(boardId)) return null;
+        if (BOARD_CACHE.has(boardId)) {
+            return BOARD_CACHE.get(boardId);
+        }
+
+        try {
+            const { data } = await axios.get(`${baseUrl}/rest/agile/1.0/board/${boardId}`, { headers });
+            const info = {
+                id: data?.id ?? boardId,
+                name: typeof data?.name === 'string' && data.name.trim() ? data.name.trim() : null,
+                type: data?.type || null
+            };
+            BOARD_CACHE.set(boardId, info);
+            return info;
+        } catch (err) {
+            console.warn(`Failed to load board details for ${boardId}`, err?.message || err);
+            const fallback = { id: boardId, name: null, type: null };
+            BOARD_CACHE.set(boardId, fallback);
+            return fallback;
+        }
+    }
+
+    async function fetchUserIssuesOverview({ baseUrl, headers, username }) {
+        if (!username) return [];
+
+        const jql = `assignee = "${username}" ORDER BY updated DESC`;
+        const fields = [
+            'key',
+            'summary',
+            'duedate',
+            'status',
+            'issuetype',
+            'project',
+            'updated',
+            'timeoriginalestimate',
+            'timeestimate',
+            'timespent',
+            'aggregatetimeestimate',
+            'aggregatetimespent',
+            'aggregatetimeoriginalestimate',
+            'timetracking',
+            'customfield_10020',
+            'customfield_10016',
+            'customfield_10007',
+            'sprint',
+            'sprints'
+        ].join(',');
+
+        const issues = await searchIssuesPaged(baseUrl, headers, jql, fields);
+
+        issues.sort((a, b) => {
+            const mb = moment(b?.fields?.updated);
+            const ma = moment(a?.fields?.updated);
+            const vb = mb.isValid() ? mb.valueOf() : 0;
+            const va = ma.isValid() ? ma.valueOf() : 0;
+            return vb - va;
+        });
+
+        const boardIds = new Set();
+        for (const issue of issues) {
+            const ids = extractSprintBoardIds(issue);
+            ids.forEach((id) => boardIds.add(id));
+        }
+
+        const boardMap = new Map();
+        await Promise.all(Array.from(boardIds).map(async (id) => {
+            const info = await fetchBoardDetails(baseUrl, headers, id).catch(() => null);
+            if (info) {
+                boardMap.set(id, info);
+            }
+        }));
+
+        return issues.map((issue) => {
+            const fields = issue?.fields ?? {};
+            const times = extractTimeTracking(issue);
+            const dueDate = fields.duedate || null;
+            let dueDateGregorian = dueDate;
+            let dueDateJalaali = dueDate;
+            if (dueDate) {
+                const dueMoment = moment(dueDate, 'YYYY-MM-DD', true);
+                if (dueMoment.isValid()) {
+                    dueDateGregorian = dueMoment.format('YYYY-MM-DD');
+                    dueDateJalaali = dueMoment.format('jYYYY/jMM/jDD');
+                }
+            }
+
+            const updatedRaw = fields.updated || null;
+            let updatedIso = updatedRaw;
+            let updatedGregorian = updatedRaw;
+            let updatedJalaali = updatedRaw;
+            if (updatedRaw) {
+                const updatedMoment = moment(updatedRaw);
+                if (updatedMoment.isValid()) {
+                    updatedIso = updatedMoment.toISOString();
+                    const adjusted = updatedMoment.clone().utcOffset(TEHRAN_OFFSET_MIN);
+                    updatedGregorian = adjusted.format('YYYY-MM-DD HH:mm');
+                    updatedJalaali = adjusted.format('jYYYY/jMM/jDD HH:mm');
+                }
+            }
+
+            const sprintNames = extractSprintNames(issue);
+            const sprintBoardIds = extractSprintBoardIds(issue);
+            const boardNames = sprintBoardIds
+                .map((id) => boardMap.get(id)?.name || (Number.isFinite(id) ? `Board ${id}` : null))
+                .filter(Boolean);
+
+            return {
+                issueKey: issue.key,
+                summary: fields.summary || '',
+                issueType: fields.issuetype?.name || null,
+                status: fields.status?.name || null,
+                dueDate,
+                dueDateGregorian,
+                dueDateJalaali,
+                updated: updatedIso,
+                updatedGregorian,
+                updatedJalaali,
+                sprints: sprintNames,
+                boards: boardNames,
+                projectKey: fields.project?.key || null,
+                projectName: fields.project?.name || null,
+                estimateHours: secsToHours(times.originalSeconds),
+                loggedHours: secsToHours(times.spentSeconds),
+                remainingHours: secsToHours(times.remainingSeconds)
+            };
+        });
     }
 
     async function getFullIssueWorklogs(baseUrl, headers, issueKey, initialContainer) {
@@ -486,20 +661,35 @@
         }
 
         let dueIssuesCurrentMonth = [];
+        let assignedIssues = [];
 
         if (includeDetails) {
             worklogs.sort((a, b) => moment(a.date, 'YYYY-MM-DD').diff(moment(b.date, 'YYYY-MM-DD')));
-            try {
-                dueIssuesCurrentMonth = await fetchIssuesDueThisMonth({
+            const [dueResult, assignedResult] = await Promise.allSettled([
+                fetchIssuesDueThisMonth({
                     baseUrl,
                     headers,
                     username,
                     start: fromYMD,
                     end: toYMD
-                });
-            } catch (err) {
-                console.error('Failed to fetch due issues for selected month:', err);
-                dueIssuesCurrentMonth = [];
+                }),
+                fetchUserIssuesOverview({
+                    baseUrl,
+                    headers,
+                    username
+                })
+            ]);
+
+            if (dueResult.status === 'fulfilled' && Array.isArray(dueResult.value)) {
+                dueIssuesCurrentMonth = dueResult.value;
+            } else if (dueResult.status === 'rejected') {
+                console.error('Failed to fetch due issues for selected month:', dueResult.reason);
+            }
+
+            if (assignedResult.status === 'fulfilled' && Array.isArray(assignedResult.value)) {
+                assignedIssues = assignedResult.value;
+            } else if (assignedResult.status === 'rejected') {
+                console.error('Failed to fetch assigned issues overview:', assignedResult.reason);
             }
         }
 
@@ -564,6 +754,7 @@
             result.deficits = deficits;
             result.worklogs = worklogs;
             result.dueIssuesCurrentMonth = dueIssuesCurrentMonth;
+            result.assignedIssues = assignedIssues;
         }
 
         result.baseUrl = baseUrl;
