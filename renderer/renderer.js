@@ -1018,6 +1018,8 @@
             return {};
         }
 
+        setupIssueLinkHandler(root);
+
         reportStateInstance.subscribe((state) => {
             if (state.isFetching && !state.result) {
                 setTableMessage(tbody, 8, 'Loading…');
@@ -1040,11 +1042,13 @@
             tbody.innerHTML = '';
             Array.from(new Set(worklogs)).forEach((w, idx) => {
                 const tr = document.createElement('tr');
+                const issueUrl = buildIssueUrl(res.baseUrl, w.issueKey);
+                const issueCell = renderIssueLink(w.issueKey, issueUrl);
                 tr.innerHTML = `
                     <td>${idx + 1}</td>
                     <td>${w.persianDate || ''}</td>
                     <td>${w.date || ''}</td>
-                    <td>${w.issueKey || ''}</td>
+                    <td>${issueCell}</td>
                     <td>${(w.summary || '').toString().replace(/\n/g, ' ')}</td>
                     <td>${Number(w.hours || 0).toFixed(2)}</td>
                     <td>${w.timeSpent || ''}</td>
@@ -1073,6 +1077,8 @@
             return {};
         }
 
+        setupIssueLinkHandler(root);
+
         reportStateInstance.subscribe((state) => {
             if (state.isFetching && !state.result) {
                 setTableMessage(tbody, 8, 'Loading…');
@@ -1096,10 +1102,12 @@
             issues.forEach((issue, idx) => {
                 const summary = (issue.summary || '').toString().replace(/\n/g, ' ');
                 const tr = document.createElement('tr');
+                const issueUrl = buildIssueUrl(res.baseUrl, issue.issueKey);
+                const issueCell = renderIssueLink(issue.issueKey, issueUrl);
                 tr.innerHTML = `
                     <td>${idx + 1}</td>
                     <td>${issue.dueDate || ''}</td>
-                    <td>${issue.issueKey || ''}</td>
+                    <td>${issueCell}</td>
                     <td>${summary}</td>
                     <td>${issue.status || ''}</td>
                     <td>${Number(issue.estimateHours || 0).toFixed(2)}</td>
@@ -1256,6 +1264,58 @@
             }
         }
         return {};
+    }
+
+    function setupIssueLinkHandler(root) {
+        if (!root || root.dataset.issueLinkHandlerAttached === 'true') return;
+        root.addEventListener('click', (event) => {
+            const link = event.target?.closest?.('a[data-issue-url]');
+            if (!link) return;
+            event.preventDefault();
+            const url = link.dataset.issueUrl || link.getAttribute('href');
+            if (!url) return;
+            if (typeof window.appApi?.openExternal === 'function') {
+                Promise.resolve(window.appApi.openExternal(url))
+                    .then((res) => {
+                        if (!res || res.ok !== true) {
+                            window.open(url, '_blank', 'noopener,noreferrer');
+                        }
+                    })
+                    .catch((err) => {
+                        console.error('Failed to open external URL via app API', err);
+                        window.open(url, '_blank', 'noopener,noreferrer');
+                    });
+            } else {
+                window.open(url, '_blank', 'noopener,noreferrer');
+            }
+        });
+        root.dataset.issueLinkHandlerAttached = 'true';
+    }
+
+    function renderIssueLink(issueKey, issueUrl) {
+        const label = escapeHtml(issueKey ?? '');
+        if (!label) return '';
+        if (!issueUrl) return label;
+        const safeUrl = escapeHtml(issueUrl);
+        return `<a href="${safeUrl}" class="issue-link" data-issue-url="${safeUrl}" target="_blank" rel="noreferrer noopener">${label}</a>`;
+    }
+
+    function buildIssueUrl(baseUrl, issueKey) {
+        const safeBase = stripTrailingSlash(sanitizeUrl(baseUrl || ''));
+        const key = typeof issueKey === 'string' ? issueKey.trim() : String(issueKey ?? '').trim();
+        if (!safeBase || !key) return null;
+        if (!isLikelyUrl(safeBase)) return null;
+        try {
+            return `${safeBase}/browse/${encodeURIComponent(key)}`;
+        } catch (err) {
+            return `${safeBase}/browse/${key}`;
+        }
+    }
+
+    function escapeHtml(value) {
+        const str = String(value ?? '');
+        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+        return str.replace(/[&<>"']/g, (ch) => map[ch] || ch);
     }
 
     function setTableMessage(tbody, columns, message) {

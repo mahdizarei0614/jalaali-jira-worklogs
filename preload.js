@@ -13,4 +13,5 @@ contextBridge.exposeInMainWorld('appApi', {
     authorize: (token) => ipcRenderer.invoke('auth:authorize', { token }),
     logout: () => ipcRenderer.invoke('auth:logout'),
     whoami: () => ipcRenderer.invoke('auth:whoami'),
+    openExternal: (url) => ipcRenderer.invoke('app:open-external', { url }),
 });
