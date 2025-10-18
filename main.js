@@ -228,11 +228,16 @@
                 if (!dueDate) return null;
 
                 const times = extractTimeTracking(issue);
+                const dueMoment = moment(dueDate, 'YYYY-MM-DD', true);
+                const dueDateGregorian = dueMoment.isValid() ? dueMoment.format('YYYY-MM-DD') : dueDate;
+                const dueDateJalaali = dueMoment.isValid() ? dueMoment.format('jYYYY/jMM/jDD') : dueDate;
 
                 return {
                     issueKey: issue.key,
                     summary: issue?.fields?.summary || '',
                     dueDate,
+                    dueDateGregorian,
+                    dueDateJalaali,
                     status: issue?.fields?.status?.name || null,
                     estimateHours: secsToHours(times.originalSeconds),
                     loggedHours: secsToHours(times.spentSeconds),
