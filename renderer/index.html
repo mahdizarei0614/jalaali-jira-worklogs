@@ -303,7 +303,7 @@
         .quarter-month strong{ font-size:13px; }
         .quarter-month .muted{ font-size:12px; }
 
-        .tip{ position:relative; cursor:help; border-bottom:1px dotted var(--tooltip-underline); }
+        .tip{ position:relative; cursor:help; border-bottom:1px dotted var(--tooltip-underline); z-index: 1; }
         .tip[data-tip]::after{
             content:attr(data-tip);
             position:absolute; left:0; top:100%;
