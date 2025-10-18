@@ -137,6 +137,8 @@
         'timetracking'
     ].join(',');
 
+    const boardNameCache = new Map();
+
     async function searchIssuesPaged(baseUrl, headers, jql, fields = DEFAULT_SEARCH_FIELDS) {
         const issues = [];
         let startAt = 0;
@@ -203,32 +205,80 @@
         };
     }
 
-    function parseSprintName(value) {
+    function normalizeBoardId(value) {
+        if (value == null) return null;
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return String(value);
+        }
+        const str = String(value).trim();
+        if (!str) return null;
+        const num = Number.parseInt(str, 10);
+        if (Number.isFinite(num)) {
+            return String(num);
+        }
+        return str;
+    }
+
+    function parseSprintDetails(value) {
         if (!value) return null;
+        const fromObject = (obj) => {
+            if (!obj || typeof obj !== 'object') return null;
+            const detail = {};
+            if (typeof obj.name === 'string' && obj.name.trim()) {
+                detail.name = obj.name.trim();
+            }
+            const boardIdCandidate =
+                obj.originBoardId ??
+                obj.rapidViewId ??
+                obj.boardId ??
+                obj.idBoard ??
+                obj.sprintBoardId ??
+                null;
+            const normalizedBoardId = normalizeBoardId(boardIdCandidate);
+            if (normalizedBoardId) {
+                detail.boardId = normalizedBoardId;
+            }
+            if (detail.name || detail.boardId) {
+                return detail;
+            }
+            const str = String(obj);
+            if (str && str !== '[object Object]') {
+                return parseSprintDetails(str);
+            }
+            return null;
+        };
+
         if (typeof value === 'string') {
             const trimmed = value.trim();
             if (!trimmed) return null;
-            const match = trimmed.match(/name=([^,\]]+)/i);
-            return (match ? match[1] : trimmed).trim() || null;
+            const nameMatch = trimmed.match(/name=([^,\]]+)/i);
+            const boardMatch = trimmed.match(/(?:rapidViewId|originBoardId)=([^,\]]+)/i);
+            const detail = {};
+            if (nameMatch && nameMatch[1].trim()) {
+                detail.name = nameMatch[1].trim();
+            } else {
+                detail.name = trimmed;
+            }
+            if (boardMatch && boardMatch[1].trim()) {
+                detail.boardId = normalizeBoardId(boardMatch[1]);
+            }
+            return detail.name || detail.boardId ? detail : null;
         }
 
         if (typeof value === 'object') {
-            if (typeof value.name === 'string' && value.name.trim()) {
-                return value.name.trim();
-            }
-            const str = String(value);
-            if (str && str !== '[object Object]') {
-                const match = str.match(/name=([^,\]]+)/i);
-                if (match && match[1].trim()) {
-                    return match[1].trim();
-                }
-            }
+            const detail = fromObject(value);
+            if (detail) return detail;
         }
 
         return null;
     }
 
-    function extractSprintNames(issue) {
+    function parseSprintName(value) {
+        const detail = parseSprintDetails(value);
+        return detail?.name || null;
+    }
+
+    function extractSprintDetails(issue) {
         const fields = issue?.fields ?? {};
         const candidates = [
             fields.customfield_10020,
@@ -238,18 +288,34 @@
             fields.sprints
         ];
 
-        const names = new Set();
+        const details = [];
         for (const candidate of candidates) {
             if (!candidate) continue;
             const items = Array.isArray(candidate) ? candidate : [candidate];
             for (const item of items) {
-                const name = parseSprintName(item);
-                if (name) {
-                    names.add(name);
+                const detail = parseSprintDetails(item);
+                if (detail) {
+                    details.push(detail);
                 }
             }
         }
 
+        if (!details.length) {
+            return [];
+        }
+
+        return details;
+    }
+
+    function extractSprintNames(issue) {
+        const details = extractSprintDetails(issue);
+        if (!details.length) return [];
+        const names = new Set();
+        details.forEach((detail) => {
+            if (detail.name) {
+                names.add(detail.name);
+            }
+        });
         return Array.from(names);
     }
 
@@ -326,6 +392,128 @@
             })
             .filter(Boolean)
             .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    }
+
+    async function fetchBoardName(baseUrl, headers, boardId) {
+        const key = normalizeBoardId(boardId);
+        if (!key) return null;
+        if (boardNameCache.has(key)) {
+            return boardNameCache.get(key);
+        }
+        try {
+            const { data } = await axios.get(
+                `${baseUrl}/rest/agile/1.0/board/${encodeURIComponent(key)}`,
+                { headers }
+            );
+            const name = typeof data?.name === 'string' && data.name.trim() ? data.name.trim() : null;
+            boardNameCache.set(key, name);
+            return name;
+        } catch (err) {
+            const status = err?.response?.status;
+            const reason = err?.response?.statusText || err?.message;
+            console.warn(`Failed to fetch board ${key}: ${status ? `${status} ${reason}` : reason}`);
+            boardNameCache.set(key, null);
+            return null;
+        }
+    }
+
+    async function fetchAllIssuesForUser({ baseUrl, headers, username }) {
+        const fields = [
+            'key',
+            'summary',
+            'duedate',
+            'status',
+            'issuetype',
+            'project',
+            'updated',
+            'timeoriginalestimate',
+            'timeestimate',
+            'timespent',
+            'aggregatetimeestimate',
+            'aggregatetimespent',
+            'aggregatetimeoriginalestimate',
+            'timetracking',
+            'customfield_10020',
+            'customfield_10016',
+            'customfield_10007',
+            'sprint',
+            'sprints'
+        ].join(',');
+
+        const jql = `assignee = "${username}" ORDER BY updated DESC`;
+        const issues = await searchIssuesPaged(baseUrl, headers, jql, fields);
+
+        const boardIdsNeeded = new Set();
+
+        const mappedIssues = issues.map((issue) => {
+            const fieldsData = issue?.fields ?? {};
+            const times = extractTimeTracking(issue);
+            const dueDateRaw = fieldsData.duedate;
+            const dueMoment = dueDateRaw ? moment(dueDateRaw, 'YYYY-MM-DD', true) : null;
+            const dueDateGregorian = dueMoment?.isValid() ? dueMoment.format('YYYY-MM-DD') : (dueDateRaw || null);
+            const dueDateJalaali = dueMoment?.isValid() ? dueMoment.format('jYYYY/jMM/jDD') : (dueDateRaw || null);
+
+            const updatedRaw = fieldsData.updated;
+            const updatedMoment = updatedRaw ? moment(updatedRaw) : null;
+            const updatedGregorian = updatedMoment?.isValid() ? updatedMoment.format('YYYY-MM-DD HH:mm') : (updatedRaw || null);
+            const updatedJalaali = updatedMoment?.isValid() ? updatedMoment.format('jYYYY/jMM/jDD HH:mm') : (updatedRaw || null);
+            const updatedTimestamp = updatedMoment?.isValid() ? updatedMoment.valueOf() : null;
+
+            const sprintDetails = extractSprintDetails(issue);
+            const sprintNames = Array.from(new Set(sprintDetails.map((detail) => detail.name).filter(Boolean)));
+            const boardIds = Array.from(new Set(sprintDetails.map((detail) => detail.boardId).filter(Boolean)));
+            boardIds.forEach((id) => boardIdsNeeded.add(id));
+
+            const projectName = fieldsData.project?.name || null;
+            const projectKey = fieldsData.project?.key || null;
+
+            return {
+                issueKey: issue.key,
+                issueType: fieldsData.issuetype?.name || null,
+                summary: fieldsData.summary || '',
+                status: fieldsData.status?.name || null,
+                dueDate: dueDateRaw || null,
+                dueDateGregorian,
+                dueDateJalaali,
+                updated: updatedRaw || null,
+                updatedGregorian,
+                updatedJalaali,
+                updatedTimestamp,
+                sprints: sprintNames,
+                boardIds,
+                projectName,
+                projectKey,
+                estimateHours: secsToHours(times.originalSeconds),
+                loggedHours: secsToHours(times.spentSeconds),
+                remainingHours: secsToHours(times.remainingSeconds)
+            };
+        });
+
+        const boardNamesMap = new Map();
+        for (const boardId of boardIdsNeeded) {
+            const name = await fetchBoardName(baseUrl, headers, boardId);
+            if (name) {
+                boardNamesMap.set(boardId, name);
+            }
+        }
+
+        const enrichedIssues = mappedIssues.map((issue) => {
+            const boardNames = issue.boardIds
+                .map((id) => boardNamesMap.get(id))
+                .filter((name, idx, arr) => Boolean(name) && arr.indexOf(name) === idx);
+            return {
+                ...issue,
+                boardNames,
+            };
+        });
+
+        enrichedIssues.sort((a, b) => {
+            const aTs = Number.isFinite(a.updatedTimestamp) ? a.updatedTimestamp : -Infinity;
+            const bTs = Number.isFinite(b.updatedTimestamp) ? b.updatedTimestamp : -Infinity;
+            return bTs - aTs;
+        });
+
+        return enrichedIssues;
     }
 
     async function getFullIssueWorklogs(baseUrl, headers, issueKey, initialContainer) {
@@ -486,6 +674,7 @@
         }
 
         let dueIssuesCurrentMonth = [];
+        let assignedIssues = [];
 
         if (includeDetails) {
             worklogs.sort((a, b) => moment(a.date, 'YYYY-MM-DD').diff(moment(b.date, 'YYYY-MM-DD')));
@@ -500,6 +689,17 @@
             } catch (err) {
                 console.error('Failed to fetch due issues for selected month:', err);
                 dueIssuesCurrentMonth = [];
+            }
+
+            try {
+                assignedIssues = await fetchAllIssuesForUser({
+                    baseUrl,
+                    headers,
+                    username,
+                });
+            } catch (err) {
+                console.error('Failed to fetch assigned issues for user:', err);
+                assignedIssues = [];
             }
         }
 
@@ -564,6 +764,7 @@
             result.deficits = deficits;
             result.worklogs = worklogs;
             result.dueIssuesCurrentMonth = dueIssuesCurrentMonth;
+            result.assignedIssues = assignedIssues;
         }
 
         result.baseUrl = baseUrl;

@@ -291,6 +291,7 @@
         registerController('monthly-summary', (node) => initMonthlySummary(node, reportState)),
         registerController('detailed-worklogs', (node) => initDetailedWorklogs(node, reportState)),
         registerController('due-issues', (node) => initDueIssues(node, reportState)),
+        registerController('issues', (node) => initAssignedIssues(node, reportState)),
         registerController('quarter-report', (node) => initQuarterReport(node, reportState)),
         registerController('configurations', (node) => initConfigurations(node, reportState, userSelectContext, settingsPromise))
     ]);
@@ -1162,6 +1163,156 @@
                     <td>${summary}</td>
                     <td>${sprintText}</td>
                     <td>${issue.status || ''}</td>
+                    <td>${estimateHours.toFixed(2)}</td>
+                    <td>${loggedHours.toFixed(2)}</td>
+                    <td>${remainingHours.toFixed(2)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            updateFooter({
+                estimate: totals.estimate.toFixed(2),
+                logged: totals.logged.toFixed(2),
+                remaining: totals.remaining.toFixed(2),
+            });
+        });
+
+        return {
+            onShow: () => reportStateInstance.refresh()
+        };
+    }
+
+    function initAssignedIssues(root, reportStateInstance) {
+        if (!root || root.dataset.controllerReady === 'true') return {};
+        root.dataset.controllerReady = 'true';
+
+        const table = root.querySelector('#assignedIssuesTable');
+        const tbody = table?.querySelector('tbody');
+        const tfoot = table?.querySelector('tfoot');
+        const footerCells = {
+            estimate: tfoot?.querySelector('[data-footer-field="estimate"]') || null,
+            logged: tfoot?.querySelector('[data-footer-field="logged"]') || null,
+            remaining: tfoot?.querySelector('[data-footer-field="remaining"]') || null,
+        };
+
+        function resetFooter() {
+            if (!tfoot) return;
+            Array.from(tfoot.querySelectorAll('td')).forEach((cell) => {
+                if (!cell.dataset.footerField) {
+                    cell.textContent = '—';
+                }
+            });
+            Object.values(footerCells).forEach((cell) => {
+                if (cell) cell.textContent = '—';
+            });
+        }
+
+        function updateFooter(totals) {
+            if (!tfoot) return;
+            resetFooter();
+            if (!totals) return;
+            if (footerCells.estimate) footerCells.estimate.textContent = totals.estimate;
+            if (footerCells.logged) footerCells.logged.textContent = totals.logged;
+            if (footerCells.remaining) footerCells.remaining.textContent = totals.remaining;
+        }
+
+        if (!table || !tbody) {
+            console.warn('Issues view missing required elements.');
+            return {};
+        }
+
+        setupIssueLinkHandler(root);
+
+        reportStateInstance.subscribe((state) => {
+            if (state.isFetching && !state.result) {
+                setTableMessage(tbody, 13, 'Loading…');
+                resetFooter();
+                return;
+            }
+
+            const res = state.result;
+            if (!res || !res.ok) {
+                const message = res ? (res.reason || 'Unable to load issues.') : 'No data yet.';
+                setTableMessage(tbody, 13, message);
+                resetFooter();
+                return;
+            }
+
+            const issues = Array.isArray(res.assignedIssues) ? res.assignedIssues : [];
+            if (!issues.length) {
+                setTableMessage(tbody, 13, '—');
+                resetFooter();
+                return;
+            }
+
+            tbody.innerHTML = '';
+            let totals = {
+                estimate: 0,
+                logged: 0,
+                remaining: 0,
+            };
+
+            const sortedIssues = issues.slice().sort((a, b) => {
+                const aTs = Number.isFinite(a.updatedTimestamp) ? a.updatedTimestamp : -Infinity;
+                const bTs = Number.isFinite(b.updatedTimestamp) ? b.updatedTimestamp : -Infinity;
+                return bTs - aTs;
+            });
+
+            sortedIssues.forEach((issue, idx) => {
+                const summary = (issue.summary || '').toString().replace(/\n/g, ' ');
+                const tr = document.createElement('tr');
+                const issueUrl = buildIssueUrl(res.baseUrl, issue.issueKey);
+                const issueCell = renderIssueLink(issue.issueKey, issueUrl);
+
+                const updatedLabelRaw = issue.updatedJalaali || issue.updatedGregorian || issue.updated || '';
+                const updatedTipRaw = issue.updatedGregorian || issue.updated || '';
+                const updatedCell = updatedLabelRaw
+                    ? `<span class="tip" data-tip="${escapeHtml(updatedTipRaw || updatedLabelRaw)}">${escapeHtml(updatedLabelRaw)}</span>`
+                    : '—';
+
+                const dueLabelRaw = issue.dueDateJalaali || issue.dueDateGregorian || issue.dueDate || '';
+                const dueTipRaw = issue.dueDateGregorian || issue.dueDate || '';
+                const dueCell = dueLabelRaw
+                    ? `<span class="tip" data-tip="${escapeHtml(dueTipRaw || dueLabelRaw)}">${escapeHtml(dueLabelRaw)}</span>`
+                    : '—';
+
+                const issueType = escapeHtml(issue.issueType || '');
+                const status = escapeHtml(issue.status || '');
+
+                const sprints = Array.isArray(issue.sprints) ? issue.sprints.filter(Boolean) : [];
+                const sprintText = escapeHtml(sprints.length ? sprints.join(', ') : '—');
+
+                const boards = Array.isArray(issue.boardNames) ? issue.boardNames.filter(Boolean) : [];
+                const boardsText = escapeHtml(boards.length ? boards.join(', ') : '—');
+
+                let projectRaw = '';
+                if (issue.projectName && issue.projectKey) {
+                    projectRaw = `${issue.projectName} (${issue.projectKey})`;
+                } else if (issue.projectName) {
+                    projectRaw = issue.projectName;
+                } else if (issue.projectKey) {
+                    projectRaw = issue.projectKey;
+                }
+                const projectText = escapeHtml(projectRaw || '—');
+
+                const estimateHours = Number(issue.estimateHours || 0);
+                const loggedHours = Number(issue.loggedHours || 0);
+                const remainingHours = Number(issue.remainingHours || 0);
+                totals.estimate += estimateHours;
+                totals.logged += loggedHours;
+                totals.remaining += remainingHours;
+
+                tr.innerHTML = `
+                    <td>${idx + 1}</td>
+                    <td>${updatedCell}</td>
+                    <td>${dueCell}</td>
+                    <td>${issueType}</td>
+                    <td>${issueCell}</td>
+                    <td>${summary}</td>
+                    <td>${status}</td>
+                    <td>${sprintText}</td>
+                    <td>${boardsText}</td>
+                    <td>${projectText}</td>
                     <td>${estimateHours.toFixed(2)}</td>
                     <td>${loggedHours.toFixed(2)}</td>
                     <td>${remainingHours.toFixed(2)}</td>
