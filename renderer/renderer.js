@@ -2,6 +2,408 @@
     const $ = (selector, root = document) => root.querySelector(selector);
     const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
+    class TableEnhancer {
+        constructor(table, options = {}) {
+            this.table = table || null;
+            this.tbody = this.table?.querySelector('tbody') || null;
+            this.columns = Array.isArray(options.columns) ? options.columns.map((col, index) => ({
+                ...col,
+                key: col?.key || `col-${index}`
+            })) : [];
+            this.exportFileName = options.exportFileName || (this.table?.id || 'table-data');
+            this.exportLabel = options.exportLabel || 'Export Excel';
+            this.onVisibleRowsChanged = typeof options.onVisibleRowsChanged === 'function'
+                ? options.onVisibleRowsChanged
+                : null;
+            this.rowsData = [];
+            this.visibleRows = [];
+            this.filters = new Map();
+            this.sortState = { index: null, direction: null };
+            this.columnIndexByKey = new Map();
+            this.headerButtons = [];
+            this.filterSelects = [];
+            this.toolbar = null;
+            this.exportButton = null;
+            if (!this.table || !this.tbody || !this.columns.length) {
+                return;
+            }
+            this.setupToolbar();
+            this.setupHeaders();
+        }
+
+        setupToolbar() {
+            const wrap = this.table.closest('.table-wrap');
+            if (!wrap) return;
+            let toolbar = wrap.querySelector('.table-toolbar');
+            if (!toolbar) {
+                toolbar = document.createElement('div');
+                toolbar.className = 'table-toolbar';
+                const actions = document.createElement('div');
+                actions.className = 'table-toolbar__actions';
+                toolbar.appendChild(actions);
+                wrap.insertBefore(toolbar, this.table);
+            }
+            const actions = toolbar.querySelector('.table-toolbar__actions') || toolbar;
+            const exportBtn = document.createElement('button');
+            exportBtn.type = 'button';
+            exportBtn.className = 'btn btn-outline btn-sm';
+            exportBtn.textContent = this.exportLabel;
+            exportBtn.addEventListener('click', () => this.exportVisibleRows());
+            actions.appendChild(exportBtn);
+            this.toolbar = toolbar;
+            this.exportButton = exportBtn;
+            this.updateExportButtonState();
+        }
+
+        setupHeaders() {
+            const thead = this.table.querySelector('thead');
+            if (!thead) return;
+            const headerCells = Array.from(thead.querySelectorAll('th'));
+            headerCells.forEach((th, index) => {
+                const column = this.columns[index] || {};
+                const label = (column.label || th.textContent || '').trim();
+                column.label = label;
+                this.columns[index] = column;
+                this.columnIndexByKey.set(column.key, index);
+                th.innerHTML = '';
+                th.dataset.columnKey = column.key;
+                if (column.sortable) {
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'table-sort-button';
+                    button.dataset.direction = '';
+                    const labelSpan = document.createElement('span');
+                    labelSpan.textContent = label;
+                    const indicator = document.createElement('span');
+                    indicator.className = 'sort-indicator';
+                    indicator.textContent = '↕';
+                    button.append(labelSpan, indicator);
+                    button.addEventListener('click', () => this.toggleSort(index));
+                    th.appendChild(button);
+                    this.headerButtons[index] = button;
+                } else {
+                    const span = document.createElement('span');
+                    span.textContent = label;
+                    span.className = 'table-sort-label';
+                    th.appendChild(span);
+                    this.headerButtons[index] = null;
+                }
+                if (column.filterable) {
+                    const select = document.createElement('select');
+                    select.className = 'table-filter';
+                    select.dataset.columnKey = column.key;
+                    select.innerHTML = '<option value="">All</option>';
+                    select.addEventListener('change', () => {
+                        const value = select.value;
+                        if (value) {
+                            this.filters.set(column.key, value);
+                        } else {
+                            this.filters.delete(column.key);
+                        }
+                        this.applySortAndFilter();
+                    });
+                    th.appendChild(select);
+                    this.filterSelects[index] = select;
+                } else {
+                    this.filterSelects[index] = null;
+                }
+            });
+        }
+
+        refresh() {
+            if (!this.tbody) return;
+            const rows = Array.from(this.tbody.querySelectorAll('tr'));
+            if (!rows.length) {
+                this.clear();
+                return;
+            }
+            // Detect message rows (single cell with colspan)
+            if (rows.length === 1) {
+                const single = rows[0];
+                if (single.cells.length <= 1 || single.cells[0]?.colSpan > 1) {
+                    this.clear();
+                    return;
+                }
+            }
+            this.rowsData = rows.map((tr, index) => {
+                const cells = this.columns.map((column, colIdx) => this.extractCellData(tr.cells[colIdx], column));
+                return {
+                    element: tr,
+                    cells,
+                    originalIndex: index
+                };
+            });
+            this.buildFilterOptions();
+            this.applySortAndFilter();
+        }
+
+        clear() {
+            this.rowsData = [];
+            this.visibleRows = [];
+            this.filters.clear();
+            this.filterSelects.forEach((select) => {
+                if (select) {
+                    select.innerHTML = '<option value="">All</option>';
+                    select.value = '';
+                }
+            });
+            this.sortState = { index: null, direction: null };
+            this.updateSortIndicators();
+            this.updateExportButtonState();
+        }
+
+        buildFilterOptions() {
+            this.filterSelects.forEach((select, index) => {
+                if (!select) return;
+                const column = this.columns[index];
+                const values = new Set();
+                this.rowsData.forEach((row) => {
+                    const cell = row.cells[index];
+                    if (!cell) return;
+                    const value = cell.filterValue;
+                    if (value !== '' && value != null) {
+                        values.add(String(value));
+                    }
+                });
+                const sorted = TableEnhancer.sortFilterValues(Array.from(values), column?.type);
+                const previous = select.value;
+                select.innerHTML = '<option value="">All</option>';
+                sorted.forEach((value) => {
+                    const option = document.createElement('option');
+                    option.value = value;
+                    option.textContent = value;
+                    select.appendChild(option);
+                });
+                if (previous && values.has(previous)) {
+                    select.value = previous;
+                    this.filters.set(column.key, previous);
+                } else {
+                    select.value = '';
+                    this.filters.delete(column.key);
+                }
+            });
+        }
+
+        applySortAndFilter() {
+            if (!this.rowsData.length) {
+                this.visibleRows = [];
+                this.updateExportButtonState();
+                this.updateSortIndicators();
+                return;
+            }
+            const visible = [];
+            const hidden = [];
+            this.rowsData.forEach((row) => {
+                let matches = true;
+                this.filters.forEach((value, key) => {
+                    if (!matches) return;
+                    const colIndex = this.getColumnIndex(key);
+                    if (colIndex == null) return;
+                    const cell = row.cells[colIndex];
+                    const cellValue = cell?.filterValue ?? '';
+                    if (value && cellValue !== value) {
+                        matches = false;
+                    }
+                });
+                if (matches) {
+                    visible.push(row);
+                } else {
+                    hidden.push(row);
+                }
+            });
+
+            let sortedRows = visible;
+            if (this.sortState.index != null && this.sortState.direction) {
+                const column = this.columns[this.sortState.index] || {};
+                const direction = this.sortState.direction === 'asc' ? 1 : -1;
+                sortedRows = visible.slice().sort((a, b) => {
+                    const cellA = a.cells[this.sortState.index];
+                    const cellB = b.cells[this.sortState.index];
+                    const result = TableEnhancer.compareValues(cellA?.sortValue, cellB?.sortValue, column.type);
+                    if (result === 0) {
+                        return a.originalIndex - b.originalIndex;
+                    }
+                    return result * direction;
+                });
+            } else {
+                sortedRows = visible.slice().sort((a, b) => a.originalIndex - b.originalIndex);
+            }
+
+            sortedRows.forEach((row) => {
+                row.element.style.display = '';
+                this.tbody.appendChild(row.element);
+            });
+            hidden.forEach((row) => {
+                row.element.style.display = 'none';
+                this.tbody.appendChild(row.element);
+            });
+
+            this.visibleRows = sortedRows;
+            this.updateSequenceColumns();
+            this.updateExportButtonState();
+            this.updateSortIndicators();
+
+            if (this.onVisibleRowsChanged) {
+                const snapshots = sortedRows.map((row) => this.createRowSnapshot(row));
+                this.onVisibleRowsChanged(snapshots, this);
+            }
+        }
+
+        updateSequenceColumns() {
+            const sequenceColumns = this.columns
+                .map((column, index) => (column?.isSequence ? index : null))
+                .filter((index) => index != null);
+            if (!sequenceColumns.length) return;
+            this.visibleRows.forEach((row, visibleIndex) => {
+                sequenceColumns.forEach((colIndex) => {
+                    const cell = row.cells[colIndex];
+                    if (!cell?.td) return;
+                    const label = String(visibleIndex + 1);
+                    cell.td.textContent = label;
+                    cell.text = label;
+                    cell.filterValue = label;
+                    cell.exportValue = label;
+                    cell.sortValue = visibleIndex + 1;
+                });
+            });
+        }
+
+        updateExportButtonState() {
+            if (this.exportButton) {
+                this.exportButton.disabled = this.visibleRows.length === 0;
+            }
+        }
+
+        updateSortIndicators() {
+            this.headerButtons.forEach((button, index) => {
+                if (!button) return;
+                const isActive = this.sortState.index === index && this.sortState.direction;
+                const direction = isActive ? this.sortState.direction : '';
+                button.dataset.direction = direction || '';
+                const indicator = button.querySelector('.sort-indicator');
+                if (indicator) {
+                    indicator.textContent = direction === 'asc' ? '▲' : direction === 'desc' ? '▼' : '↕';
+                }
+            });
+        }
+
+        toggleSort(index) {
+            if (this.sortState.index !== index) {
+                this.sortState = { index, direction: 'asc' };
+            } else if (this.sortState.direction === 'asc') {
+                this.sortState.direction = 'desc';
+            } else if (this.sortState.direction === 'desc') {
+                this.sortState = { index: null, direction: null };
+            } else {
+                this.sortState.direction = 'asc';
+            }
+            this.applySortAndFilter();
+        }
+
+        getColumnIndex(key) {
+            if (this.columnIndexByKey.has(key)) return this.columnIndexByKey.get(key);
+            return null;
+        }
+
+        exportVisibleRows() {
+            if (!this.visibleRows.length) return;
+            const headers = this.columns.map((column) => escapeHtml(column.label || ''));
+            const rowsHtml = this.visibleRows.map((row) => {
+                const cellsHtml = this.columns.map((column, index) => {
+                    const cell = row.cells[index];
+                    const value = cell ? (cell.exportValue ?? cell.text ?? '') : '';
+                    return `<td>${escapeHtml(value)}</td>`;
+                }).join('');
+                return `<tr>${cellsHtml}</tr>`;
+            }).join('');
+            const tableHtml = `<table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rowsHtml}</tbody></table>`;
+            const blob = new Blob(['\ufeff' + tableHtml], { type: 'application/vnd.ms-excel' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `${this.exportFileName}.xls`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        extractCellData(td, column = {}) {
+            if (!td) {
+                return { td: null, text: '', sortValue: '', filterValue: '', exportValue: '', numericValue: null };
+            }
+            const dataset = td.dataset || {};
+            const text = (td.textContent || '').trim();
+            const sortRaw = dataset.sortValue ?? text;
+            const filterRaw = dataset.filterValue ?? text;
+            const exportRaw = dataset.exportValue ?? text;
+            const numericRaw = dataset.numericValue;
+            const sortValue = TableEnhancer.parseSortValue(sortRaw, column.type);
+            const filterValue = String(filterRaw ?? '').trim();
+            const exportValue = String(exportRaw ?? '').trim();
+            const numericValue = numericRaw != null ? Number(numericRaw) : (column.type === 'number' ? TableEnhancer.parseNumber(sortRaw) : null);
+            return { td, text, sortValue, filterValue, exportValue, numericValue };
+        }
+
+        createRowSnapshot(row) {
+            const byKey = {};
+            this.columns.forEach((column, index) => {
+                if (!column?.key) return;
+                byKey[column.key] = row.cells[index];
+            });
+            return {
+                cells: row.cells.slice(),
+                byKey
+            };
+        }
+
+        static parseSortValue(raw, type) {
+            if (raw == null) return '';
+            if (type === 'number') {
+                return TableEnhancer.parseNumber(raw);
+            }
+            if (type === 'date') {
+                const ts = Number(Date.parse(raw));
+                return Number.isFinite(ts) ? ts : raw;
+            }
+            return String(raw).toLowerCase();
+        }
+
+        static parseNumber(raw) {
+            const num = Number(raw);
+            return Number.isFinite(num) ? num : 0;
+        }
+
+        static compareValues(a, b, type) {
+            if (type === 'number') {
+                const av = Number(a);
+                const bv = Number(b);
+                if (Number.isFinite(av) && Number.isFinite(bv)) return av - bv;
+            }
+            if (type === 'date') {
+                const av = Number(a);
+                const bv = Number(b);
+                if (Number.isFinite(av) && Number.isFinite(bv)) return av - bv;
+            }
+            const as = String(a ?? '').toLowerCase();
+            const bs = String(b ?? '').toLowerCase();
+            if (as < bs) return -1;
+            if (as > bs) return 1;
+            return 0;
+        }
+
+        static sortFilterValues(values, type) {
+            if (!Array.isArray(values)) return [];
+            const copy = values.slice();
+            if (type === 'number') {
+                copy.sort((a, b) => Number(a) - Number(b));
+            } else {
+                copy.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+            }
+            return copy;
+        }
+    }
+
     const GITHUB_USER = 'mahdizarei0614';
     const GITHUB_REPO = 'jira-worklogs-electron';
 
@@ -847,6 +1249,17 @@
             return {};
         }
 
+        const tableEnhancer = new TableEnhancer(table, {
+            exportFileName: 'monthly-summary',
+            columns: [
+                { key: 'index', label: '#', sortable: false, isSequence: true },
+                { key: 'jalaali', label: 'Jalaali', sortable: true, filterable: true, type: 'date' },
+                { key: 'weekday', label: 'Weekday', sortable: true, filterable: true },
+                { key: 'flags', label: 'Flags', sortable: true, filterable: true },
+                { key: 'hours', label: 'Hours', sortable: true, type: 'number' }
+            ]
+        });
+
         reportStateInstance.subscribe((state) => {
             renderSummary(state);
         });
@@ -857,6 +1270,7 @@
                 table.style.display = 'table';
                 setTableMessage(tbody, 5, 'Loading…');
                 updateFooter(null);
+                tableEnhancer.clear();
                 if (debug) debug.textContent = '';
                 return;
             }
@@ -870,6 +1284,7 @@
                     tbody.innerHTML = '';
                 }
                 updateFooter(null);
+                tableEnhancer.clear();
                 if (debug) debug.textContent = '';
                 return;
             }
@@ -886,16 +1301,24 @@
                     d.isHoliday ? 'holiday' : '',
                     d.isWorkday === false ? 'non-workday' : ''
                 ].filter(Boolean).join(', ');
+                const gregorian = escapeHtml(d.g || '');
+                const jalaali = escapeHtml(d.j || '');
+                const weekday = escapeHtml(weekdayName(d.weekday));
+                const flagsText = escapeHtml(flags);
+                const hoursValue = Number(d.hours || 0);
+                const hoursText = Number.isFinite(hoursValue) ? hoursValue.toFixed(2) : '0.00';
+                const sortValue = Number.isFinite(Date.parse(d.g)) ? String(Date.parse(d.g)) : gregorian || jalaali;
                 tr.innerHTML = `
-                    <td>${idx + 1}</td>
-                    <td><span class="tip" data-tip="${d.g}">${d.j}</span></td>
-                    <td>${weekdayName(d.weekday)}</td>
-                    <td><small>${flags}</small></td>
-                    <td>${Number(d.hours || 0).toFixed(2)}</td>
+                    <td data-sort-value="${idx + 1}" data-export-value="${idx + 1}">${idx + 1}</td>
+                    <td data-sort-value="${escapeHtml(sortValue)}" data-filter-value="${jalaali}" data-export-value="${jalaali}"><span class="tip" data-tip="${gregorian}">${jalaali}</span></td>
+                    <td data-sort-value="${weekday}" data-filter-value="${weekday}" data-export-value="${weekday}">${weekday}</td>
+                    <td data-sort-value="${flagsText}" data-filter-value="${flagsText}" data-export-value="${flagsText}"><small>${flagsText}</small></td>
+                    <td data-sort-value="${hoursValue}" data-export-value="${hoursText}" data-numeric-value="${hoursValue}">${hoursText}</td>
                 `;
                 tbody.appendChild(tr);
             });
 
+            tableEnhancer.refresh();
             updateFooter(state);
             if (debug) {
                 const selection = reportStateInstance.getSelection();
@@ -1019,16 +1442,32 @@
             return {};
         }
 
+        const tableEnhancer = new TableEnhancer(table, {
+            exportFileName: 'detailed-worklogs',
+            columns: [
+                { key: 'index', label: '#', sortable: false, isSequence: true },
+                { key: 'jalaaliDate', label: 'Jalaali Date', sortable: true, filterable: true, type: 'date' },
+                { key: 'type', label: 'Type', sortable: true, filterable: true },
+                { key: 'issue', label: 'Issue', sortable: true },
+                { key: 'summary', label: 'Summary', sortable: true },
+                { key: 'hours', label: 'Hours', sortable: true, type: 'number' },
+                { key: 'timeSpent', label: 'Time Spent', sortable: true },
+                { key: 'comment', label: 'Comment', sortable: true }
+            ]
+        });
+
         setupIssueLinkHandler(root);
 
         reportStateInstance.subscribe((state) => {
             if (state.isFetching && !state.result) {
+                tableEnhancer.clear();
                 setTableMessage(tbody, 8, 'Loading…');
                 return;
             }
 
             const res = state.result;
             if (!res || !res.ok) {
+                tableEnhancer.clear();
                 const message = res ? (res.reason || 'Unable to load worklogs.') : 'No data yet.';
                 setTableMessage(tbody, 8, message);
                 return;
@@ -1036,6 +1475,7 @@
 
             const worklogs = Array.isArray(res.worklogs) ? res.worklogs : [];
             if (!worklogs.length) {
+                tableEnhancer.clear();
                 setTableMessage(tbody, 8, 'No worklogs found.');
                 return;
             }
@@ -1048,21 +1488,31 @@
                 const jalaliDate = escapeHtml(w.persianDate || '');
                 const gregorianDate = escapeHtml(w.date || '');
                 const issueType = escapeHtml(w.issueType || '');
+                const issueKey = escapeHtml((w.issueKey || '').toString().trim());
+                const summaryRaw = (w.summary || '').toString().replace(/\n/g, ' ');
+                const summary = escapeHtml(summaryRaw);
+                const hoursValue = Number(w.hours || 0);
+                const hoursText = Number.isFinite(hoursValue) ? hoursValue.toFixed(2) : '0.00';
+                const timeSpent = escapeHtml((w.timeSpent || '').toString());
+                const commentRaw = (w.comment || '').toString().replace(/\n/g, ' ');
+                const comment = escapeHtml(commentRaw);
+                const sortTimestamp = Number.isFinite(Date.parse(w.date)) ? String(Date.parse(w.date)) : gregorianDate || jalaliDate;
                 tr.innerHTML = `
-                    <td>${idx + 1}</td>
-                    <td><span class="tip" data-tip="${gregorianDate}">${jalaliDate}</span></td>
-                    <td>${issueType}</td>
-                    <td>${issueCell}</td>
-                    <td>${(w.summary || '').toString().replace(/\n/g, ' ')}</td>
-                    <td>${Number(w.hours || 0).toFixed(2)}</td>
-                    <td>${w.timeSpent || ''}</td>
-                    <td>${(w.comment || '').toString().replace(/\n/g, ' ')}</td>
+                    <td data-sort-value="${idx + 1}" data-export-value="${idx + 1}">${idx + 1}</td>
+                    <td data-sort-value="${escapeHtml(sortTimestamp)}" data-filter-value="${jalaliDate}" data-export-value="${jalaliDate}"><span class="tip" data-tip="${gregorianDate}">${jalaliDate}</span></td>
+                    <td data-sort-value="${issueType}" data-filter-value="${issueType}" data-export-value="${issueType}">${issueType || '—'}</td>
+                    <td data-sort-value="${issueKey}" data-filter-value="${issueKey}" data-export-value="${issueKey}">${issueCell || '—'}</td>
+                    <td data-sort-value="${summary}" data-export-value="${summary}">${summary || '—'}</td>
+                    <td data-sort-value="${hoursValue}" data-export-value="${hoursText}" data-numeric-value="${hoursValue}">${hoursText}</td>
+                    <td data-sort-value="${timeSpent}" data-filter-value="${timeSpent}" data-export-value="${timeSpent}">${timeSpent}</td>
+                    <td data-sort-value="${comment}" data-export-value="${comment}">${comment || '—'}</td>
                 `;
                 if (!w.dueDate) {
                     tr.classList.add('no-due-date');
                 }
                 tbody.appendChild(tr);
             });
+            tableEnhancer.refresh();
         });
 
         return {
@@ -1109,12 +1559,46 @@
             return {};
         }
 
+        const tableEnhancer = new TableEnhancer(table, {
+            exportFileName: 'due-issues',
+            columns: [
+                { key: 'index', label: '#', sortable: false, isSequence: true },
+                { key: 'dueDate', label: 'Due Date (Jalaali)', sortable: true, filterable: true, type: 'date' },
+                { key: 'type', label: 'Type', sortable: true, filterable: true },
+                { key: 'issue', label: 'Issue', sortable: true },
+                { key: 'title', label: 'Title', sortable: true },
+                { key: 'sprints', label: 'Sprints', sortable: true },
+                { key: 'status', label: 'Status', sortable: true, filterable: true },
+                { key: 'estimate', label: 'Estimate (h)', sortable: true, type: 'number' },
+                { key: 'logged', label: 'Logged (h)', sortable: true, type: 'number' },
+                { key: 'remaining', label: 'Remaining (h)', sortable: true, type: 'number' }
+            ],
+            onVisibleRowsChanged: (rows) => {
+                if (!rows.length) {
+                    resetFooter();
+                    return;
+                }
+                const totals = rows.reduce((acc, row) => {
+                    acc.estimate += Number(row.byKey.estimate?.numericValue ?? 0);
+                    acc.logged += Number(row.byKey.logged?.numericValue ?? 0);
+                    acc.remaining += Number(row.byKey.remaining?.numericValue ?? 0);
+                    return acc;
+                }, { estimate: 0, logged: 0, remaining: 0 });
+                updateFooter({
+                    estimate: totals.estimate.toFixed(2),
+                    logged: totals.logged.toFixed(2),
+                    remaining: totals.remaining.toFixed(2)
+                });
+            }
+        });
+
         setupIssueLinkHandler(root);
 
         reportStateInstance.subscribe((state) => {
             if (state.isFetching && !state.result) {
                 setTableMessage(tbody, 10, 'Loading…');
                 resetFooter();
+                tableEnhancer.clear();
                 return;
             }
 
@@ -1123,6 +1607,7 @@
                 const message = res ? (res.reason || 'Unable to load due issues.') : 'No data yet.';
                 setTableMessage(tbody, 10, message);
                 resetFooter();
+                tableEnhancer.clear();
                 return;
             }
 
@@ -1130,15 +1615,11 @@
             if (!issues.length) {
                 setTableMessage(tbody, 10, '—');
                 resetFooter();
+                tableEnhancer.clear();
                 return;
             }
 
             tbody.innerHTML = '';
-            let totals = {
-                estimate: 0,
-                logged: 0,
-                remaining: 0,
-            };
             issues.forEach((issue, idx) => {
                 const summary = (issue.summary || '').toString().replace(/\n/g, ' ');
                 const tr = document.createElement('tr');
@@ -1152,29 +1633,29 @@
                 const estimateHours = Number(issue.estimateHours || 0);
                 const loggedHours = Number(issue.loggedHours || 0);
                 const remainingHours = Number(issue.remainingHours || 0);
-                totals.estimate += estimateHours;
-                totals.logged += loggedHours;
-                totals.remaining += remainingHours;
+                const estimateText = Number.isFinite(estimateHours) ? estimateHours.toFixed(2) : '0.00';
+                const loggedText = Number.isFinite(loggedHours) ? loggedHours.toFixed(2) : '0.00';
+                const remainingText = Number.isFinite(remainingHours) ? remainingHours.toFixed(2) : '0.00';
+                const issueKey = escapeHtml((issue.issueKey || '').toString().trim());
+                const status = escapeHtml(issue.status || '');
+                const sortTimestamp = Number.isFinite(Date.parse(issue.dueDateGregorian || issue.dueDate))
+                    ? String(Date.parse(issue.dueDateGregorian || issue.dueDate))
+                    : dueGregorian || dueJalaali;
                 tr.innerHTML = `
-                    <td>${idx + 1}</td>
-                    <td><span class="tip" data-tip="${dueGregorian}">${dueJalaali}</span></td>
-                    <td>${issueType}</td>
-                    <td>${issueCell}</td>
-                    <td>${summary}</td>
-                    <td>${sprintText}</td>
-                    <td>${issue.status || ''}</td>
-                    <td>${estimateHours.toFixed(2)}</td>
-                    <td>${loggedHours.toFixed(2)}</td>
-                    <td>${remainingHours.toFixed(2)}</td>
+                    <td data-sort-value="${idx + 1}" data-export-value="${idx + 1}">${idx + 1}</td>
+                    <td data-sort-value="${escapeHtml(sortTimestamp)}" data-filter-value="${dueJalaali}" data-export-value="${dueJalaali}"><span class="tip" data-tip="${dueGregorian}">${dueJalaali}</span></td>
+                    <td data-sort-value="${issueType}" data-filter-value="${issueType}" data-export-value="${issueType}">${issueType || '—'}</td>
+                    <td data-sort-value="${issueKey}" data-filter-value="${issueKey}" data-export-value="${issueKey}">${issueCell || '—'}</td>
+                    <td data-sort-value="${escapeHtml(summary)}" data-export-value="${escapeHtml(summary)}">${escapeHtml(summary) || '—'}</td>
+                    <td data-sort-value="${sprintText}" data-export-value="${sprintText}">${sprintText}</td>
+                    <td data-sort-value="${status}" data-filter-value="${status}" data-export-value="${status}">${status || '—'}</td>
+                    <td data-sort-value="${estimateHours}" data-export-value="${estimateText}" data-numeric-value="${estimateHours}">${estimateText}</td>
+                    <td data-sort-value="${loggedHours}" data-export-value="${loggedText}" data-numeric-value="${loggedHours}">${loggedText}</td>
+                    <td data-sort-value="${remainingHours}" data-export-value="${remainingText}" data-numeric-value="${remainingHours}">${remainingText}</td>
                 `;
                 tbody.appendChild(tr);
             });
-
-            updateFooter({
-                estimate: totals.estimate.toFixed(2),
-                logged: totals.logged.toFixed(2),
-                remaining: totals.remaining.toFixed(2),
-            });
+            tableEnhancer.refresh();
         });
 
         return {
@@ -1221,12 +1702,49 @@
             return {};
         }
 
+        const tableEnhancer = new TableEnhancer(table, {
+            exportFileName: 'issues',
+            columns: [
+                { key: 'index', label: '#', sortable: false, isSequence: true },
+                { key: 'updated', label: 'Updated (Jalaali)', sortable: true, filterable: true, type: 'date' },
+                { key: 'dueDate', label: 'Due Date (Jalaali)', sortable: true, filterable: true, type: 'date' },
+                { key: 'type', label: 'Type', sortable: true, filterable: true },
+                { key: 'issue', label: 'Issue', sortable: true },
+                { key: 'title', label: 'Title', sortable: true },
+                { key: 'sprints', label: 'Sprints', sortable: true },
+                { key: 'project', label: 'Project', sortable: true },
+                { key: 'board', label: 'Board', sortable: true },
+                { key: 'status', label: 'Status', sortable: true, filterable: true },
+                { key: 'estimate', label: 'Estimate (h)', sortable: true, type: 'number' },
+                { key: 'logged', label: 'Logged (h)', sortable: true, type: 'number' },
+                { key: 'remaining', label: 'Remaining (h)', sortable: true, type: 'number' }
+            ],
+            onVisibleRowsChanged: (rows) => {
+                if (!rows.length) {
+                    resetFooter();
+                    return;
+                }
+                const totals = rows.reduce((acc, row) => {
+                    acc.estimate += Number(row.byKey.estimate?.numericValue ?? 0);
+                    acc.logged += Number(row.byKey.logged?.numericValue ?? 0);
+                    acc.remaining += Number(row.byKey.remaining?.numericValue ?? 0);
+                    return acc;
+                }, { estimate: 0, logged: 0, remaining: 0 });
+                updateFooter({
+                    estimate: totals.estimate.toFixed(2),
+                    logged: totals.logged.toFixed(2),
+                    remaining: totals.remaining.toFixed(2)
+                });
+            }
+        });
+
         setupIssueLinkHandler(root);
 
         reportStateInstance.subscribe((state) => {
             if (state.isFetching && !state.result) {
                 setTableMessage(tbody, 13, 'Loading…');
                 resetFooter();
+                tableEnhancer.clear();
                 return;
             }
 
@@ -1235,6 +1753,7 @@
                 const message = res ? (res.reason || 'Unable to load issues.') : 'No data yet.';
                 setTableMessage(tbody, 13, message);
                 resetFooter();
+                tableEnhancer.clear();
                 return;
             }
 
@@ -1242,11 +1761,11 @@
             if (!issues.length) {
                 setTableMessage(tbody, 13, 'No issues found.');
                 resetFooter();
+                tableEnhancer.clear();
                 return;
             }
 
             tbody.innerHTML = '';
-            const totals = { estimate: 0, logged: 0, remaining: 0 };
 
             issues.forEach((issue, idx) => {
                 const tr = document.createElement('tr');
@@ -1270,9 +1789,16 @@
                 const estimateHours = Number(issue.estimateHours || 0);
                 const loggedHours = Number(issue.loggedHours || 0);
                 const remainingHours = Number(issue.remainingHours || 0);
-                totals.estimate += estimateHours;
-                totals.logged += loggedHours;
-                totals.remaining += remainingHours;
+                const estimateText = Number.isFinite(estimateHours) ? estimateHours.toFixed(2) : '0.00';
+                const loggedText = Number.isFinite(loggedHours) ? loggedHours.toFixed(2) : '0.00';
+                const remainingText = Number.isFinite(remainingHours) ? remainingHours.toFixed(2) : '0.00';
+                const updatedSort = Number.isFinite(Date.parse(issue.updatedGregorian))
+                    ? String(Date.parse(issue.updatedGregorian))
+                    : updatedTooltip || updatedDisplay;
+                const dueSort = Number.isFinite(Date.parse(issue.dueDateGregorian))
+                    ? String(Date.parse(issue.dueDateGregorian))
+                    : dueTooltip || dueDisplay;
+                const issueKeySafe = escapeHtml(issueKey);
 
                 const updatedCell = updatedDisplay
                     ? `<span class="tip" data-tip="${updatedTooltip || updatedDisplay}">${updatedDisplay}</span>`
@@ -1282,28 +1808,23 @@
                     : '<span class="muted">—</span>';
 
                 tr.innerHTML = `
-                    <td>${idx + 1}</td>
-                    <td>${updatedCell}</td>
-                    <td>${dueCell}</td>
-                    <td>${issueType}</td>
-                    <td>${issueCell}</td>
-                    <td>${summary}</td>
-                    <td>${sprintText}</td>
-                    <td>${projectText}</td>
-                    <td>${boardText}</td>
-                    <td>${status}</td>
-                    <td>${estimateHours.toFixed(2)}</td>
-                    <td>${loggedHours.toFixed(2)}</td>
-                    <td>${remainingHours.toFixed(2)}</td>
+                    <td data-sort-value="${idx + 1}" data-export-value="${idx + 1}">${idx + 1}</td>
+                    <td data-sort-value="${escapeHtml(updatedSort)}" data-filter-value="${updatedDisplay}" data-export-value="${updatedDisplay}">${updatedCell}</td>
+                    <td data-sort-value="${escapeHtml(dueSort)}" data-filter-value="${dueDisplay}" data-export-value="${dueDisplay}">${dueCell}</td>
+                    <td data-sort-value="${issueType}" data-filter-value="${issueType}" data-export-value="${issueType}">${issueType || '—'}</td>
+                    <td data-sort-value="${issueKeySafe}" data-filter-value="${issueKeySafe}" data-export-value="${issueKeySafe}">${issueCell}</td>
+                    <td data-sort-value="${summary}" data-export-value="${summary}">${summary || '—'}</td>
+                    <td data-sort-value="${sprintText}" data-export-value="${sprintText}">${sprintText}</td>
+                    <td data-sort-value="${projectText}" data-export-value="${projectText}">${projectText}</td>
+                    <td data-sort-value="${boardText}" data-export-value="${boardText}">${boardText}</td>
+                    <td data-sort-value="${status}" data-filter-value="${status}" data-export-value="${status}">${status || '—'}</td>
+                    <td data-sort-value="${estimateHours}" data-export-value="${estimateText}" data-numeric-value="${estimateHours}">${estimateText}</td>
+                    <td data-sort-value="${loggedHours}" data-export-value="${loggedText}" data-numeric-value="${loggedHours}">${loggedText}</td>
+                    <td data-sort-value="${remainingHours}" data-export-value="${remainingText}" data-numeric-value="${remainingHours}">${remainingText}</td>
                 `;
                 tbody.appendChild(tr);
             });
-
-            updateFooter({
-                estimate: totals.estimate.toFixed(2),
-                logged: totals.logged.toFixed(2),
-                remaining: totals.remaining.toFixed(2),
-            });
+            tableEnhancer.refresh();
         });
 
         return {
@@ -1322,9 +1843,23 @@
             return {};
         }
 
+        const tableEnhancer = new TableEnhancer(table, {
+            exportFileName: 'quarter-report',
+            columns: [
+                { key: 'season', label: 'Season', sortable: true, filterable: true },
+                { key: 'month1', label: 'Month 1', sortable: true },
+                { key: 'month2', label: 'Month 2', sortable: true },
+                { key: 'month3', label: 'Month 3', sortable: true },
+                { key: 'total', label: 'Quarter Total', sortable: true, type: 'number' },
+                { key: 'expected', label: 'Expected', sortable: true, type: 'number' },
+                { key: 'delta', label: 'Delta', sortable: true, type: 'number' }
+            ]
+        });
+
         reportStateInstance.subscribe((state) => {
             if (state.isFetching && !state.result) {
                 setTableMessage(tbody, 7, 'Loading…');
+                tableEnhancer.clear();
                 return;
             }
 
@@ -1332,12 +1867,14 @@
             if (!res || !res.ok) {
                 const message = res ? (res.reason || 'Unable to load quarter report.') : 'No data yet.';
                 setTableMessage(tbody, 7, message);
+                tableEnhancer.clear();
                 return;
             }
 
             const data = res.quarterReport;
             if (!data?.ok || !Array.isArray(data.seasons) || data.seasons.length === 0) {
                 setTableMessage(tbody, 7, '—');
+                tableEnhancer.clear();
                 return;
             }
 
@@ -1348,38 +1885,44 @@
                 while (months.length < 3) {
                     months.push(null);
                 }
-                const monthsHtml = months.map((month) => {
+                const monthCells = months.map((month) => {
                     if (!month) {
-                        return '<div class="quarter-month"><span class="muted">—</span></div>';
+                        return {
+                            html: '<td data-sort-value="" data-export-value="—"><div class="quarter-month"><span class="muted">—</span></div></td>'
+                        };
                     }
                     const label = month.label || `Month ${month.jMonth}`;
                     if (!month.ok) {
                         const reason = month.reason || 'No data';
-                        return `<div class="quarter-month"><strong>${label}</strong><span class="muted">${reason}</span></div>`;
+                        const exportValue = `${label} – ${reason}`;
+                        return {
+                            html: `<td data-sort-value="${escapeHtml(label)}" data-export-value="${escapeHtml(exportValue)}"><div class="quarter-month"><strong>${label}</strong><span class="muted">${reason}</span></div></td>`
+                        };
                     }
                     const delta = Number.parseFloat(month.delta || 0) || 0;
                     const deltaCls = delta >= 0 ? 'delta-pos' : 'delta-neg';
-                    return `
-                        <div class="quarter-month">
-                            <strong>${label}</strong>
-                            <div>${formatHours(month.totalHours)} h</div>
-                            <div class="muted">Exp ${formatHours(month.expectedHours)} h</div>
-                            <div class="${deltaCls}">${delta.toFixed(2)} h</div>
-                        </div>
-                    `;
+                    const totalHours = Number.parseFloat(month.totalHours || 0) || 0;
+                    const expectedHours = Number.parseFloat(month.expectedHours || 0) || 0;
+                    const exportValue = `${label}: ${formatHours(totalHours)} h (Exp ${formatHours(expectedHours)} h, Δ ${delta.toFixed(2)} h)`;
+                    return {
+                        html: `<td data-sort-value="${totalHours}" data-export-value="${escapeHtml(exportValue)}"><div class="quarter-month"><strong>${label}</strong><div>${formatHours(totalHours)} h</div><div class="muted">Exp ${formatHours(expectedHours)} h</div><div class="${deltaCls}">${delta.toFixed(2)} h</div></div></td>`
+                    };
                 });
                 const totals = season.totals || {};
                 const totalDelta = Number.parseFloat(totals.delta || 0) || 0;
                 const totalDeltaCls = totalDelta >= 0 ? 'delta-pos' : 'delta-neg';
+                const quarterTotal = Number.parseFloat(totals.totalHours || 0) || 0;
+                const expectedHours = Number.parseFloat(totals.expectedHours || 0) || 0;
                 tr.innerHTML = `
-                    <td><strong>${season.label || 'Season'}</strong></td>
-                    ${monthsHtml.map((html) => `<td>${html}</td>`).join('')}
-                    <td>${formatHours(totals.totalHours)} h</td>
-                    <td>${formatHours(totals.expectedHours)} h</td>
-                    <td class="${totalDeltaCls}">${totalDelta.toFixed(2)} h</td>
+                    <td data-sort-value="${escapeHtml(season.label || 'Season')}" data-filter-value="${escapeHtml(season.label || 'Season')}" data-export-value="${escapeHtml(season.label || 'Season')}"><strong>${season.label || 'Season'}</strong></td>
+                    ${monthCells.map((cell) => cell.html).join('')}
+                    <td data-sort-value="${quarterTotal}" data-export-value="${formatHours(totals.totalHours)}" data-numeric-value="${quarterTotal}">${formatHours(totals.totalHours)} h</td>
+                    <td data-sort-value="${expectedHours}" data-export-value="${formatHours(totals.expectedHours)}" data-numeric-value="${expectedHours}">${formatHours(totals.expectedHours)} h</td>
+                    <td data-sort-value="${totalDelta}" data-export-value="${totalDelta.toFixed(2)}" data-numeric-value="${totalDelta}" class="${totalDeltaCls}">${totalDelta.toFixed(2)} h</td>
                 `;
                 tbody.appendChild(tr);
             });
+            tableEnhancer.refresh();
         });
 
         return {
