@@ -273,13 +273,84 @@
         .table-wrap{
             margin-top:12px; border:1px solid var(--border); border-radius:16px; background:var(--card);
             box-shadow:0 6px 24px rgba(0,0,0,.04);
+            position:relative;
         }
+        .table-toolbar{
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:12px;
+            padding:16px 18px 6px;
+        }
+        .table-toolbar__title{
+            font-size:13px;
+            font-weight:700;
+            letter-spacing:.08em;
+            text-transform:uppercase;
+            color:var(--muted);
+        }
+        .table-toolbar__actions{ display:flex; gap:8px; align-items:center; }
+        .table-export{ font-size:11px; letter-spacing:.08em; text-transform:uppercase; padding:8px 12px; border-radius:10px; }
         table{ width:100%; border-collapse:separate; border-spacing:0 }
         thead th{
             position:sticky; top:0; background:var(--table-head-bg); z-index:1;
             font-size:12px; text-transform:uppercase; letter-spacing:.02em; color:var(--table-head-text);
             border-bottom:1px solid var(--border); padding:10px 12px; text-align:left;
+            vertical-align:top;
         }
+        thead th .table-head-cell{ display:flex; flex-direction:column; gap:6px; align-items:flex-start; width:100%; }
+        .table-sort-button{
+            display:inline-flex;
+            align-items:center;
+            gap:6px;
+            padding:0;
+            margin:0;
+            background:none;
+            border:none;
+            color:inherit;
+            font:inherit;
+            text-transform:inherit;
+            letter-spacing:inherit;
+            cursor:pointer;
+        }
+        .table-sort-button:focus{ outline:none; box-shadow:0 0 0 3px var(--focus-ring); border-radius:8px; }
+        .table-sort-button:hover .table-sort-label{ color:var(--accent); }
+        .table-sort-label{ font-weight:700; }
+        .table-sort-indicator{
+            width:0;
+            height:0;
+            border-left:4px solid transparent;
+            border-right:4px solid transparent;
+            border-top:6px solid currentColor;
+            opacity:.22;
+            transition:transform .12s ease, opacity .12s ease;
+        }
+        thead th[data-sort="asc"] .table-sort-indicator{
+            opacity:1;
+            transform:rotate(180deg);
+        }
+        thead th[data-sort="desc"] .table-sort-indicator{
+            opacity:1;
+            transform:rotate(0deg);
+        }
+        .table-head-label{ font-weight:700; letter-spacing:.06em; }
+        .table-filter-select,
+        .table-filter-input{
+            width:100%;
+            font-size:11px;
+            padding:4px 8px;
+            border-radius:8px;
+            border:1px solid var(--border);
+            background:var(--input-bg);
+            color:var(--text);
+        }
+        .table-filter-select:focus,
+        .table-filter-input:focus{
+            border-color:var(--accent);
+            box-shadow:0 0 0 3px var(--focus-ring);
+            outline:none;
+        }
+        .table-filter-input{ text-transform:none; letter-spacing:normal; }
         tbody td{ padding:10px 12px; border-bottom:1px solid var(--border) }
         #detailedWorklogsTable tbody tr:nth-child(2n){ background:var(--row-alt) }
         #dueThisMonthTable tbody tr:nth-child(2n){ background:var(--row-alt) }
