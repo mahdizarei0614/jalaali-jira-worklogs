@@ -131,6 +131,12 @@
             return route ? [route, el] : null;
         }).filter(Boolean)
     );
+    const fullReportAction = $('#fullReportAction');
+    const fullReportButton = $('#downloadFullReportBtn');
+    const fullReportStatus = $('#downloadFullReportStatus');
+    const fullReportOriginalLabel = fullReportButton ? (fullReportButton.textContent || 'Get Full Report') : 'Get Full Report';
+    let fullReportStatusTimer = null;
+    let adminExportContext = { isAdmin: false, username: null, teams: [] };
 
     async function loadTemplateForView(el) {
         const templatePath = el.getAttribute('data-template');
@@ -283,7 +289,187 @@
         titleFor: (route) => routeLabels[route] || null
     });
 
+    function clearFullReportStatusTimer() {
+        if (fullReportStatusTimer) {
+            clearTimeout(fullReportStatusTimer);
+            fullReportStatusTimer = null;
+        }
+    }
+
+    function setFullReportStatus(message, variant) {
+        if (!fullReportStatus) return;
+        fullReportStatus.textContent = message || '';
+        fullReportStatus.classList.remove('sidebar-action__status--error', 'sidebar-action__status--success');
+        if (variant === 'error') {
+            fullReportStatus.classList.add('sidebar-action__status--error');
+        } else if (variant === 'success') {
+            fullReportStatus.classList.add('sidebar-action__status--success');
+        }
+        clearFullReportStatusTimer();
+        if (message) {
+            const timeout = variant === 'error' ? 7000 : 4000;
+            fullReportStatusTimer = setTimeout(() => {
+                if (fullReportStatus) {
+                    fullReportStatus.textContent = '';
+                    fullReportStatus.classList.remove('sidebar-action__status--error', 'sidebar-action__status--success');
+                }
+                clearFullReportStatusTimer();
+            }, timeout);
+        }
+    }
+
+    function toggleFullReportVisibility(isAdmin) {
+        if (!fullReportAction) return;
+        const shouldShow = !!isAdmin;
+        fullReportAction.hidden = !shouldShow;
+        if (!shouldShow) {
+            setFullReportStatus('', null);
+            if (fullReportButton) {
+                fullReportButton.disabled = false;
+                fullReportButton.textContent = fullReportOriginalLabel;
+            }
+        }
+    }
+
+    function buildTeamsPayload(teamValues) {
+        if (!Array.isArray(teamValues) || teamValues.length === 0) {
+            return [];
+        }
+        const seen = new Set();
+        return teamValues
+            .map((value) => {
+                const key = (value || '').trim();
+                if (!key || seen.has(key)) {
+                    return null;
+                }
+                seen.add(key);
+                const team = TEAM_DATA.find((item) => item.value === key);
+                const usersRaw = Array.isArray(team?.users) ? team.users : [];
+                const users = usersRaw
+                    .map((user) => {
+                        const username = (user?.value || '').trim();
+                        if (!username) return null;
+                        const displayName = (user?.text || '').trim() || username;
+                        return { username, displayName };
+                    })
+                    .filter(Boolean);
+                if (users.length === 0) {
+                    return null;
+                }
+                return {
+                    id: key,
+                    label: (team?.label || key || '').trim() || key,
+                    users
+                };
+            })
+            .filter(Boolean);
+    }
+
+    function initFullReportButton(reportStateInstance) {
+        if (!fullReportButton || !fullReportAction) {
+            return {
+                updateAdminContext: () => {}
+            };
+        }
+
+        toggleFullReportVisibility(false);
+        setFullReportStatus('', null);
+
+        fullReportButton.addEventListener('click', async () => {
+            if (!adminExportContext.isAdmin) {
+                return;
+            }
+            if (typeof window.appApi?.downloadFullReport !== 'function') {
+                setFullReportStatus('Export is unavailable.', 'error');
+                return;
+            }
+            const selection = reportStateInstance.getSelection();
+            const jYear = Number.parseInt(selection?.jYear, 10);
+            const jMonth = Number.parseInt(selection?.jMonth, 10);
+            if (!Number.isFinite(jYear) || !Number.isFinite(jMonth)) {
+                setFullReportStatus('Select a valid month before exporting.', 'error');
+                return;
+            }
+            const teamsPayload = buildTeamsPayload(adminExportContext.teams);
+            if (teamsPayload.length === 0) {
+                setFullReportStatus('No teams available to export.', 'error');
+                return;
+            }
+
+            try {
+                fullReportButton.disabled = true;
+                fullReportButton.textContent = 'Preparing…';
+                setFullReportStatus('Preparing export…', null);
+                const response = await window.appApi.downloadFullReport({
+                    jYear,
+                    jMonth,
+                    teams: teamsPayload,
+                    requestedBy: adminExportContext.username || null
+                });
+                if (!response?.ok || !response?.data) {
+                    const reason = response?.reason || 'Unable to export full report.';
+                    setFullReportStatus(reason, 'error');
+                    return;
+                }
+                const bytes = base64ToUint8Array(response.data);
+                if (!bytes.length) {
+                    setFullReportStatus('Received empty export.', 'error');
+                    return;
+                }
+                const blob = new Blob([bytes], { type: 'application/zip' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                const fileName = (response.fileName && typeof response.fileName === 'string' && response.fileName.trim())
+                    ? response.fileName.trim()
+                    : `full-report_${jYear}-${String(jMonth).padStart(2, '0')}.zip`;
+                link.download = fileName;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setTimeout(() => URL.revokeObjectURL(url), 0);
+                setFullReportStatus('Full report downloaded.', 'success');
+            } catch (err) {
+                console.error('Failed to download full report', err);
+                setFullReportStatus(err?.message || 'Export failed.', 'error');
+            } finally {
+                fullReportButton.disabled = false;
+                fullReportButton.textContent = fullReportOriginalLabel;
+            }
+        });
+
+        return {
+            updateAdminContext(context) {
+                adminExportContext = {
+                    isAdmin: !!context?.isAdmin,
+                    username: (context?.username || '').trim() || null,
+                    teams: Array.isArray(context?.teams) ? context.teams : []
+                };
+                toggleFullReportVisibility(adminExportContext.isAdmin);
+                if (!adminExportContext.isAdmin) {
+                    setFullReportStatus('', null);
+                }
+            }
+        };
+    }
+
+    function base64ToUint8Array(base64) {
+        try {
+            const binary = atob(base64);
+            const len = binary.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i += 1) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            return bytes;
+        } catch (err) {
+            console.error('Failed to decode base64 payload', err);
+            return new Uint8Array();
+        }
+    }
+
     const reportState = createReportState();
+    const fullReportController = initFullReportButton(reportState);
     let latestReportSelection = reportState.getSelection();
     reportState.subscribe((state) => {
         latestReportSelection = state?.selection ? { ...state.selection } : {};
@@ -627,6 +813,9 @@
                 const currentSelection = reportStateInstance.getSelection();
                 const adminTeams = getAdminTeamsForUser(self);
                 const isAdmin = adminTeams.length > 0;
+                if (fullReportController && typeof fullReportController.updateAdminContext === 'function') {
+                    fullReportController.updateAdminContext({ isAdmin, username: self, teams: adminTeams });
+                }
                 let teamForSelf = findTeamForUser(self) || '';
                 if (teamForSelf) {
                     ensureUserInTeamMap(teamForSelf, { value: self, text: displayName });

@@ -140,6 +140,30 @@
             color:var(--muted);
             padding:2px;
         }
+        .sidebar-action{ display:flex; flex-direction:column; gap:6px; margin-bottom:12px; }
+        .sidebar-action__button{
+            padding:10px 14px;
+            border-radius:12px;
+            border:1px solid var(--accent);
+            background:transparent;
+            color:var(--accent);
+            font-size:14px;
+            font-weight:600;
+            cursor:pointer;
+            transition:background .15s ease, color .15s ease, box-shadow .15s ease;
+        }
+        .sidebar-action__button:hover{
+            background:rgba(0,122,255,.08);
+            box-shadow:0 0 0 1px rgba(0,122,255,.12);
+        }
+        .sidebar-action__button:disabled{
+            opacity:.6;
+            cursor:not-allowed;
+            box-shadow:none;
+        }
+        .sidebar-action__status{ font-size:12px; min-height:14px; color:var(--muted); padding-left:2px; }
+        .sidebar-action__status--error{ color:var(--red); }
+        .sidebar-action__status--success{ color:var(--green); }
         .nav-item{
             display:flex;
             align-items:center;
@@ -469,6 +493,10 @@
             </div>
         </nav>
         <hr class="sidebar-divider" />
+        <div class="sidebar-action" id="fullReportAction" hidden>
+            <button type="button" class="sidebar-action__button" id="downloadFullReportBtn">Get Full Report</button>
+            <p class="sidebar-action__status" id="downloadFullReportStatus" role="status" aria-live="polite"></p>
+        </div>
         <nav class="nav" aria-label="Settings">
             <div class="nav-group" role="group" aria-labelledby="navGroupSettingsLabel">
                 <button type="button" class="nav-item" data-route="configurations" aria-controls="configurationsView">Configurations</button>

@@ -8,6 +8,7 @@
     const keytar = require('keytar');
     const cron = require('node-cron');
     const moment = require('moment-jalaali');
+    const JSZip = require('jszip');
 
     const STORE = new Store({ name: 'settings' });
     const SERVICE_NAME = 'alo-worklog';
@@ -828,6 +829,18 @@
         return { ok: true, jYear, seasons };
     }
 
+    function sanitizePathSegment(name, fallback = 'item') {
+        const fallbackSafe = (fallback && typeof fallback === 'string' && fallback.trim()) ? fallback.trim() : 'item';
+        if (!name || typeof name !== 'string') return fallbackSafe;
+        const trimmed = name.trim();
+        if (!trimmed) return fallbackSafe;
+        const cleaned = trimmed
+            .replace(/[^a-z0-9\-_.]+/gi, '_')
+            .replace(/_+/g, '_')
+            .replace(/^_+|_+$/g, '');
+        return cleaned || fallbackSafe;
+    }
+
     async function computeScan(opts) {
         const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
         const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
@@ -955,6 +968,130 @@
     });
     app.on('window-all-closed', (e) => { if (process.platform !== 'darwin') e.preventDefault(); });
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+
+    ipcMain.handle('reports:full-export', async (_evt, payload) => {
+        try {
+            const teamsRaw = Array.isArray(payload?.teams) ? payload.teams : [];
+            const jYear = Number.parseInt(toAsciiDigits(payload?.jYear), 10);
+            const jMonth = Number.parseInt(toAsciiDigits(payload?.jMonth), 10);
+            if (!Number.isFinite(jYear) || !Number.isFinite(jMonth)) {
+                return { ok: false, reason: 'Invalid Jalaali month selection.' };
+            }
+            if (teamsRaw.length === 0) {
+                return { ok: false, reason: 'No teams provided for export.' };
+            }
+
+            const validTeams = teamsRaw
+                .map((team, teamIdx) => {
+                    const id = (team?.id || team?.value || '').toString().trim();
+                    const label = (team?.label || id || '').toString().trim();
+                    const usersRaw = Array.isArray(team?.users) ? team.users : [];
+                    const users = usersRaw
+                        .map((user, userIdx) => {
+                            const username = (user?.username || user?.value || '').toString().trim();
+                            if (!username) return null;
+                            const displayName = (user?.displayName || user?.text || '').toString().trim() || username;
+                            return {
+                                username,
+                                displayName,
+                                fallback: `user-${userIdx + 1}`
+                            };
+                        })
+                        .filter(Boolean);
+                    if (!users.length) return null;
+                    return {
+                        id: id || `team-${teamIdx + 1}`,
+                        label: label || id || `Team ${teamIdx + 1}`,
+                        users,
+                        fallback: `team-${teamIdx + 1}`
+                    };
+                })
+                .filter(Boolean);
+
+            if (validTeams.length === 0) {
+                return { ok: false, reason: 'No valid teams to export.' };
+            }
+
+            const zip = new JSZip();
+            const generatedAt = new Date().toISOString();
+
+            for (const team of validTeams) {
+                const teamFolderName = sanitizePathSegment(team.label, team.fallback);
+                const teamFolder = zip.folder(teamFolderName);
+                if (!teamFolder) continue;
+
+                for (const user of team.users) {
+                    const userFolderName = sanitizePathSegment(user.username, user.fallback);
+                    const userFolder = teamFolder.folder(userFolderName);
+                    if (!userFolder) continue;
+
+                    try {
+                        const res = await computeScan({ jYear, jMonth, username: user.username });
+                        if (!res?.ok) {
+                            userFolder.file('error.json', JSON.stringify({ ok: false, reason: res?.reason || 'Unable to generate report.' }, null, 2));
+                            continue;
+                        }
+
+                        const summaryPayload = {
+                            ok: true,
+                            jYear: res.jYear,
+                            jMonth: res.jMonth,
+                            jMonthLabel: res.jMonthLabel,
+                            totalHours: res.totalHours,
+                            expectedByNowHours: res.expectedByNowHours,
+                            expectedByEndMonthHours: res.expectedByEndMonthHours,
+                            summary: res.summary,
+                            days: res.days,
+                            deficits: res.deficits
+                        };
+
+                        userFolder.file('metadata.json', JSON.stringify({
+                            team: { id: team.id, label: team.label },
+                            user: { username: user.username, displayName: user.displayName },
+                            period: {
+                                jYear: res.jYear,
+                                jMonth: res.jMonth,
+                                label: res.jMonthLabel
+                            },
+                            generatedAt
+                        }, null, 2));
+                        userFolder.file('monthly-summary.json', JSON.stringify(summaryPayload, null, 2));
+                        userFolder.file('detailed-worklogs.json', JSON.stringify(res.worklogs || [], null, 2));
+                        userFolder.file('due-issues.json', JSON.stringify(res.dueIssuesCurrentMonth || [], null, 2));
+                        userFolder.file('assigned-issues.json', JSON.stringify(res.assignedIssues || [], null, 2));
+                        userFolder.file('quarter-report.json', JSON.stringify(res.quarterReport || {}, null, 2));
+                    } catch (err) {
+                        console.error('Failed to build report for export', err);
+                        userFolder.file('error.json', JSON.stringify({ ok: false, reason: err?.message || 'Unexpected error.' }, null, 2));
+                    }
+                }
+            }
+
+            const readmeLines = [
+                `Full report export generated at ${generatedAt}`,
+                `Requested by: ${(payload?.requestedBy || '').toString().trim() || 'Admin user'}`,
+                `Jalaali month: ${jYear}/${jMonth}`,
+                '',
+                'Folders are organised as Team → Username → Report files.'
+            ];
+            zip.file('README.txt', readmeLines.join('\n'));
+
+            const buffer = await zip.generateAsync({
+                type: 'nodebuffer',
+                compression: 'DEFLATE',
+                compressionOptions: { level: 9 }
+            });
+
+            const fileName = (payload?.fileName && typeof payload.fileName === 'string' && payload.fileName.trim())
+                ? payload.fileName.trim()
+                : `full-report_${jYear}-${String(jMonth).padStart(2, '0')}_${Date.now()}.zip`;
+
+            return { ok: true, data: buffer.toString('base64'), fileName };
+        } catch (err) {
+            console.error('Failed to export full report', err);
+            return { ok: false, reason: err?.message || 'Failed to export full report.' };
+        }
+    });
 
     ipcMain.handle('views:load', async (_evt, relPath) => {
         if (typeof relPath !== 'string') {
