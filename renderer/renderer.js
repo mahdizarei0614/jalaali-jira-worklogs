@@ -1878,13 +1878,36 @@
         const blob = new Blob([`\ufeff${tableHtml}`], { type: 'application/vnd.ms-excel' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
-        const datePart = new Date().toISOString().slice(0, 10);
+        const selection = typeof reportState?.getSelection === 'function' ? reportState.getSelection() : {};
+        const selectedYearMonth = formatJalaaliYearMonth(selection?.jYear, selection?.jMonth);
+        const usernameSegment = sanitizeFilenameSegment(selection?.username, 'user');
+        const tableSegment = sanitizeFilenameSegment(state.exportName, 'table');
+        const exportYearMonth = formatJalaaliYearMonth(getCurrentJalaaliYear(), getCurrentJalaaliMonth());
+        const fileName = `selectedYearAndMonth(${selectedYearMonth})_${usernameSegment}_${tableSegment}_exportDate(${exportYearMonth}).xls`;
+
         link.href = url;
-        link.download = `${state.exportName || 'table'}-${datePart}.xls`;
+        link.download = fileName;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         setTimeout(() => URL.revokeObjectURL(url), 0);
+    }
+
+    function formatJalaaliYearMonth(year, month) {
+        const parsedYear = parseJalaaliInt(year);
+        const parsedMonth = parseJalaaliInt(month);
+        if (!Number.isFinite(parsedYear) || !Number.isFinite(parsedMonth) || parsedMonth < 1 || parsedMonth > 12) {
+            return 'unknown';
+        }
+        const yearPart = String(parsedYear).padStart(4, '0');
+        const monthPart = String(parsedMonth).padStart(2, '0');
+        return `j${yearPart}j${monthPart}`;
+    }
+
+    function sanitizeFilenameSegment(value, fallback = 'value') {
+        const raw = toAsciiDigits(String(value ?? '').trim());
+        const cleaned = raw.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+        return cleaned || fallback;
     }
 
     function escapeForExcel(value) {
