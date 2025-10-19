@@ -284,6 +284,10 @@
     });
 
     const reportState = createReportState();
+    let latestReportSelection = reportState.getSelection();
+    reportState.subscribe((state) => {
+        latestReportSelection = state?.selection ? { ...state.selection } : {};
+    });
     initLoadingOverlay(reportState);
     const settingsPromise = loadSettings();
     const userSelectContext = initUserSelect($('#sidebarUserSelect'), reportState);
@@ -1878,9 +1882,14 @@
         const blob = new Blob([`\ufeff${tableHtml}`], { type: 'application/vnd.ms-excel' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
-        const datePart = new Date().toISOString().slice(0, 10);
+        const selection = latestReportSelection || {};
+        const selectedYearMonth = formatJalaaliYearMonth(selection.jYear, selection.jMonth);
+        const usernamePart = sanitizeFilenamePart(selection.username, 'unknown-user');
+        const tableNamePart = sanitizeFilenamePart(state.exportName || 'table', 'table');
+        const exportYearMonth = formatJalaaliYearMonth(getCurrentJalaaliYear(), getCurrentJalaaliMonth());
+        const fileName = `selectedYearAndMonth(${selectedYearMonth})_${usernamePart}_${tableNamePart}_exportDate(${exportYearMonth}).xls`;
         link.href = url;
-        link.download = `${state.exportName || 'table'}-${datePart}.xls`;
+        link.download = fileName;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -2034,6 +2043,28 @@
     function parseJalaaliInt(val) {
         const parsed = Number.parseInt(toAsciiDigits(val), 10);
         return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    function formatJalaaliYearMonth(year, month, fallback = 'unknown') {
+        const parsedYear = Number.parseInt(toAsciiDigits(year), 10);
+        const parsedMonth = Number.parseInt(toAsciiDigits(month), 10);
+        if (!Number.isFinite(parsedYear) || !Number.isFinite(parsedMonth)) {
+            return fallback;
+        }
+        const safeMonth = Math.min(Math.max(parsedMonth, 1), 12);
+        const yearPart = String(parsedYear).padStart(4, '0');
+        const monthPart = String(safeMonth).padStart(2, '0');
+        return `${yearPart}j${monthPart}`;
+    }
+
+    function sanitizeFilenamePart(value, fallback = 'unknown') {
+        const raw = toAsciiDigits(value ?? '').trim();
+        if (!raw) return fallback;
+        const replaced = raw
+            .replace(/\s+/g, '_')
+            .replace(/[^A-Za-z0-9_.-]+/g, '_');
+        const normalised = replaced.replace(/_+/g, '_').replace(/^[_.-]+|[_.-]+$/g, '');
+        return normalised || fallback;
     }
 
     function toAsciiDigits(val) {
