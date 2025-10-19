@@ -1,12 +1,13 @@
 (async () => {
     const Store = (await import('electron-store')).default;
 
-    const { app, BrowserWindow, ipcMain, Notification, Tray, Menu, nativeImage, shell } = require('electron');
+    const { app, BrowserWindow, ipcMain, Notification, Tray, Menu, nativeImage, shell, dialog } = require('electron');
     const path = require('path');
     const fs = require('fs/promises');
     const axios = require('axios');
     const keytar = require('keytar');
     const cron = require('node-cron');
+    const JSZip = require('jszip');
     const moment = require('moment-jalaali');
 
     const STORE = new Store({ name: 'settings' });
@@ -908,6 +909,18 @@
             return null;
         }
     }
+
+    function sanitizeZipSegment(name, fallback = 'item') {
+        const raw = (name ?? '').toString();
+        const cleaned = raw.replace(/[\0]/g, '').replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, '_');
+        const normalised = cleaned.replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+        return normalised || fallback;
+    }
+
+    function sanitizeZipFileName(name) {
+        const segment = sanitizeZipSegment(name, 'full-report');
+        return segment.toLowerCase().endsWith('.zip') ? segment : `${segment}.zip`;
+    }
     function scheduleDailyReminders() {
         DAILY_REMINDER_TIMES.forEach(t => {
             const [hh, mm] = t.split(':').map(Number);
@@ -1020,6 +1033,60 @@
         } catch (err) {
             console.error('Failed to open external URL', err);
             return { ok: false, reason: err?.message || 'Unable to open URL' };
+        }
+    });
+
+    ipcMain.handle('reports:full-export', async (_evt, payload) => {
+        try {
+            const entries = Array.isArray(payload?.entries) ? payload.entries : [];
+            if (!entries.length) {
+                return { ok: false, reason: 'No data provided' };
+            }
+
+            const zip = new JSZip();
+            entries.forEach((entry) => {
+                const rawPath = typeof entry?.path === 'string' ? entry.path : '';
+                const segments = rawPath
+                    .split('/')
+                    .map((segment) => sanitizeZipSegment(segment))
+                    .filter(Boolean);
+                if (!segments.length) {
+                    return;
+                }
+                const zipPath = segments.join('/');
+                const content = entry?.content ?? '';
+                zip.file(zipPath, typeof content === 'string' ? content : Buffer.from(content));
+            });
+
+            const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+            if (!zipBuffer || !zipBuffer.length) {
+                return { ok: false, reason: 'No archive data generated' };
+            }
+
+            const defaultName = sanitizeZipFileName(payload?.defaultFileName);
+            const suggestedDir = (() => {
+                try {
+                    return app.getPath('downloads');
+                } catch (err) {
+                    return app.getPath('documents');
+                }
+            })();
+
+            const { canceled, filePath } = await dialog.showSaveDialog(mainWindow || BrowserWindow.getFocusedWindow(), {
+                title: 'Save Full Report',
+                defaultPath: path.join(suggestedDir, defaultName),
+                filters: [{ name: 'ZIP Archive', extensions: ['zip'] }],
+            });
+
+            if (canceled || !filePath) {
+                return { ok: false, reason: 'cancelled' };
+            }
+
+            await fs.writeFile(filePath, zipBuffer);
+            return { ok: true, path: filePath };
+        } catch (err) {
+            console.error('Failed to generate full report archive', err);
+            return { ok: false, reason: err?.message || 'Unable to generate archive' };
         }
     });
 
