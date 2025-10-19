@@ -56,6 +56,9 @@
     }).filter(Boolean));
     const PERSIAN_MONTHS = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
     const routeHooks = new Map();
+    const TABLE_FEATURES = new WeakMap();
+    const TABLE_FEATURE_STATES = new Set();
+    let tableFeatureResizeAttached = false;
 
     function getAdminTeamsForUser(username) {
         const key = (username || '').trim();
@@ -847,6 +850,8 @@
             return {};
         }
 
+        ensureTableFeatures(table);
+
         reportStateInstance.subscribe((state) => {
             renderSummary(state);
         });
@@ -868,6 +873,7 @@
                 } else {
                     table.style.display = 'none';
                     tbody.innerHTML = '';
+                    notifyTableUpdate(table, { clearState: true });
                 }
                 updateFooter(null);
                 if (debug) debug.textContent = '';
@@ -886,17 +892,24 @@
                     d.isHoliday ? 'holiday' : '',
                     d.isWorkday === false ? 'non-workday' : ''
                 ].filter(Boolean).join(', ');
+                const indexValue = idx + 1;
+                const jalaliDisplay = escapeHtml(d.j || '');
+                const gregorianDisplay = escapeHtml(d.g || '');
+                const weekday = escapeHtml(weekdayName(d.weekday));
+                const flagsValue = escapeHtml(flags || '');
+                const hoursValue = Number(d.hours || 0).toFixed(2);
                 tr.innerHTML = `
-                    <td>${idx + 1}</td>
-                    <td><span class="tip" data-tip="${d.g}">${d.j}</span></td>
-                    <td>${weekdayName(d.weekday)}</td>
-                    <td><small>${flags}</small></td>
-                    <td>${Number(d.hours || 0).toFixed(2)}</td>
+                    <td data-sort-value="${indexValue}" data-filter-value="${indexValue}" data-export-value="${indexValue}">${indexValue}</td>
+                    <td data-sort-value="${gregorianDisplay}" data-filter-value="${jalaliDisplay}" data-export-value="${jalaliDisplay}"><span class="tip" data-tip="${gregorianDisplay}">${jalaliDisplay}</span></td>
+                    <td data-sort-value="${weekday}" data-filter-value="${weekday}" data-export-value="${weekday}">${weekday}</td>
+                    <td data-sort-value="${flagsValue}" data-filter-value="${flagsValue}" data-export-value="${flagsValue}"><small>${flagsValue}</small></td>
+                    <td data-sort-value="${hoursValue}" data-filter-value="${hoursValue}" data-export-value="${hoursValue}">${hoursValue}</td>
                 `;
                 tbody.appendChild(tr);
             });
 
             updateFooter(state);
+            notifyTableUpdate(table);
             if (debug) {
                 const selection = reportStateInstance.getSelection();
                 debug.textContent = JSON.stringify({
@@ -1019,6 +1032,8 @@
             return {};
         }
 
+        ensureTableFeatures(table);
+
         setupIssueLinkHandler(root);
 
         reportStateInstance.subscribe((state) => {
@@ -1048,21 +1063,30 @@
                 const jalaliDate = escapeHtml(w.persianDate || '');
                 const gregorianDate = escapeHtml(w.date || '');
                 const issueType = escapeHtml(w.issueType || '');
+                const indexValue = idx + 1;
+                const issueKeyValue = escapeHtml(w.issueKey || '');
+                const summaryText = (w.summary || '').toString().replace(/\n/g, ' ');
+                const summaryValue = escapeHtml(summaryText);
+                const hoursValue = Number(w.hours || 0).toFixed(2);
+                const timeSpentValue = escapeHtml(w.timeSpent || '');
+                const commentText = (w.comment || '').toString().replace(/\n/g, ' ');
+                const commentValue = escapeHtml(commentText);
                 tr.innerHTML = `
-                    <td>${idx + 1}</td>
-                    <td><span class="tip" data-tip="${gregorianDate}">${jalaliDate}</span></td>
-                    <td>${issueType}</td>
-                    <td>${issueCell}</td>
-                    <td>${(w.summary || '').toString().replace(/\n/g, ' ')}</td>
-                    <td>${Number(w.hours || 0).toFixed(2)}</td>
-                    <td>${w.timeSpent || ''}</td>
-                    <td>${(w.comment || '').toString().replace(/\n/g, ' ')}</td>
+                    <td data-sort-value="${indexValue}" data-filter-value="${indexValue}" data-export-value="${indexValue}">${indexValue}</td>
+                    <td data-sort-value="${gregorianDate}" data-filter-value="${jalaliDate}" data-export-value="${jalaliDate}"><span class="tip" data-tip="${gregorianDate}">${jalaliDate}</span></td>
+                    <td data-sort-value="${issueType}" data-filter-value="${issueType}" data-export-value="${issueType}">${issueType}</td>
+                    <td data-sort-value="${issueKeyValue}" data-filter-value="${issueKeyValue}" data-export-value="${issueKeyValue}">${issueCell}</td>
+                    <td data-sort-value="${summaryValue}" data-filter-value="${summaryValue}" data-export-value="${summaryValue}">${summaryValue}</td>
+                    <td data-sort-value="${hoursValue}" data-filter-value="${hoursValue}" data-export-value="${hoursValue}">${hoursValue}</td>
+                    <td data-sort-value="${timeSpentValue}" data-filter-value="${timeSpentValue}" data-export-value="${timeSpentValue}">${timeSpentValue}</td>
+                    <td data-sort-value="${commentValue}" data-filter-value="${commentValue}" data-export-value="${commentValue}">${commentValue}</td>
                 `;
                 if (!w.dueDate) {
                     tr.classList.add('no-due-date');
                 }
                 tbody.appendChild(tr);
             });
+            notifyTableUpdate(table);
         });
 
         return {
@@ -1109,6 +1133,8 @@
             return {};
         }
 
+        ensureTableFeatures(table);
+
         setupIssueLinkHandler(root);
 
         reportStateInstance.subscribe((state) => {
@@ -1152,20 +1178,24 @@
                 const estimateHours = Number(issue.estimateHours || 0);
                 const loggedHours = Number(issue.loggedHours || 0);
                 const remainingHours = Number(issue.remainingHours || 0);
+                const statusText = escapeHtml(issue.status || '');
+                const summaryValue = escapeHtml(summary);
+                const indexValue = idx + 1;
+                const issueKeySafe = escapeHtml(issue.issueKey || '');
                 totals.estimate += estimateHours;
                 totals.logged += loggedHours;
                 totals.remaining += remainingHours;
                 tr.innerHTML = `
-                    <td>${idx + 1}</td>
-                    <td><span class="tip" data-tip="${dueGregorian}">${dueJalaali}</span></td>
-                    <td>${issueType}</td>
-                    <td>${issueCell}</td>
-                    <td>${summary}</td>
-                    <td>${sprintText}</td>
-                    <td>${issue.status || ''}</td>
-                    <td>${estimateHours.toFixed(2)}</td>
-                    <td>${loggedHours.toFixed(2)}</td>
-                    <td>${remainingHours.toFixed(2)}</td>
+                    <td data-sort-value="${indexValue}" data-filter-value="${indexValue}" data-export-value="${indexValue}">${indexValue}</td>
+                    <td data-sort-value="${dueGregorian}" data-filter-value="${dueJalaali}" data-export-value="${dueJalaali}"><span class="tip" data-tip="${dueGregorian}">${dueJalaali}</span></td>
+                    <td data-sort-value="${issueType}" data-filter-value="${issueType}" data-export-value="${issueType}">${issueType}</td>
+                    <td data-sort-value="${issueKeySafe}" data-filter-value="${issueKeySafe}" data-export-value="${issueKeySafe}">${issueCell}</td>
+                    <td data-sort-value="${summaryValue}" data-filter-value="${summaryValue}" data-export-value="${summaryValue}">${summaryValue}</td>
+                    <td data-sort-value="${sprintText}" data-filter-value="${sprintText}" data-export-value="${sprintText}">${sprintText}</td>
+                    <td data-sort-value="${statusText}" data-filter-value="${statusText}" data-export-value="${statusText}">${statusText}</td>
+                    <td data-sort-value="${estimateHours.toFixed(2)}" data-filter-value="${estimateHours.toFixed(2)}" data-export-value="${estimateHours.toFixed(2)}">${estimateHours.toFixed(2)}</td>
+                    <td data-sort-value="${loggedHours.toFixed(2)}" data-filter-value="${loggedHours.toFixed(2)}" data-export-value="${loggedHours.toFixed(2)}">${loggedHours.toFixed(2)}</td>
+                    <td data-sort-value="${remainingHours.toFixed(2)}" data-filter-value="${remainingHours.toFixed(2)}" data-export-value="${remainingHours.toFixed(2)}">${remainingHours.toFixed(2)}</td>
                 `;
                 tbody.appendChild(tr);
             });
@@ -1175,6 +1205,7 @@
                 logged: totals.logged.toFixed(2),
                 remaining: totals.remaining.toFixed(2),
             });
+            notifyTableUpdate(table);
         });
 
         return {
@@ -1220,6 +1251,8 @@
             console.warn('Issues view missing required elements.');
             return {};
         }
+
+        ensureTableFeatures(table);
 
         setupIssueLinkHandler(root);
 
@@ -1273,6 +1306,13 @@
                 totals.estimate += estimateHours;
                 totals.logged += loggedHours;
                 totals.remaining += remainingHours;
+                const indexValue = idx + 1;
+                const issueKeySafe = escapeHtml(issueKey || '');
+                const updatedSort = updatedTooltip || updatedDisplay;
+                const dueSort = dueTooltip || dueDisplay;
+                const estimateText = estimateHours.toFixed(2);
+                const loggedText = loggedHours.toFixed(2);
+                const remainingText = remainingHours.toFixed(2);
 
                 const updatedCell = updatedDisplay
                     ? `<span class="tip" data-tip="${updatedTooltip || updatedDisplay}">${updatedDisplay}</span>`
@@ -1282,19 +1322,19 @@
                     : '<span class="muted">—</span>';
 
                 tr.innerHTML = `
-                    <td>${idx + 1}</td>
-                    <td>${updatedCell}</td>
-                    <td>${dueCell}</td>
-                    <td>${issueType}</td>
-                    <td>${issueCell}</td>
-                    <td>${summary}</td>
-                    <td>${sprintText}</td>
-                    <td>${projectText}</td>
-                    <td>${boardText}</td>
-                    <td>${status}</td>
-                    <td>${estimateHours.toFixed(2)}</td>
-                    <td>${loggedHours.toFixed(2)}</td>
-                    <td>${remainingHours.toFixed(2)}</td>
+                    <td data-sort-value="${indexValue}" data-filter-value="${indexValue}" data-export-value="${indexValue}">${indexValue}</td>
+                    <td data-sort-value="${updatedSort}" data-filter-value="${updatedDisplay}" data-export-value="${updatedDisplay}">${updatedCell}</td>
+                    <td data-sort-value="${dueSort}" data-filter-value="${dueDisplay}" data-export-value="${dueDisplay}">${dueCell}</td>
+                    <td data-sort-value="${issueType}" data-filter-value="${issueType}" data-export-value="${issueType}">${issueType}</td>
+                    <td data-sort-value="${issueKeySafe}" data-filter-value="${issueKeySafe}" data-export-value="${issueKeySafe}">${issueCell}</td>
+                    <td data-sort-value="${summary}" data-filter-value="${summary}" data-export-value="${summary}">${summary}</td>
+                    <td data-sort-value="${sprintText}" data-filter-value="${sprintText}" data-export-value="${sprintText}">${sprintText}</td>
+                    <td data-sort-value="${projectText}" data-filter-value="${projectText}" data-export-value="${projectText}">${projectText}</td>
+                    <td data-sort-value="${boardText}" data-filter-value="${boardText}" data-export-value="${boardText}">${boardText}</td>
+                    <td data-sort-value="${status}" data-filter-value="${status}" data-export-value="${status}">${status}</td>
+                    <td data-sort-value="${estimateText}" data-filter-value="${estimateText}" data-export-value="${estimateText}">${estimateText}</td>
+                    <td data-sort-value="${loggedText}" data-filter-value="${loggedText}" data-export-value="${loggedText}">${loggedText}</td>
+                    <td data-sort-value="${remainingText}" data-filter-value="${remainingText}" data-export-value="${remainingText}">${remainingText}</td>
                 `;
                 tbody.appendChild(tr);
             });
@@ -1304,6 +1344,7 @@
                 logged: totals.logged.toFixed(2),
                 remaining: totals.remaining.toFixed(2),
             });
+            notifyTableUpdate(table);
         });
 
         return {
@@ -1321,6 +1362,8 @@
             console.warn('Quarter report view missing required elements.');
             return {};
         }
+
+        ensureTableFeatures(table);
 
         reportStateInstance.subscribe((state) => {
             if (state.isFetching && !state.result) {
@@ -1348,43 +1391,509 @@
                 while (months.length < 3) {
                     months.push(null);
                 }
-                const monthsHtml = months.map((month) => {
+                const monthCells = months.map((month) => {
                     if (!month) {
-                        return '<div class="quarter-month"><span class="muted">—</span></div>';
+                        return {
+                            html: '<div class="quarter-month"><span class="muted">—</span></div>',
+                            sort: '',
+                            filter: '—'
+                        };
                     }
                     const label = month.label || `Month ${month.jMonth}`;
                     if (!month.ok) {
                         const reason = month.reason || 'No data';
-                        return `<div class="quarter-month"><strong>${label}</strong><span class="muted">${reason}</span></div>`;
+                        return {
+                            html: `<div class="quarter-month"><strong>${label}</strong><span class="muted">${reason}</span></div>`,
+                            sort: label,
+                            filter: `${label} - ${reason}`
+                        };
                     }
+                    const totalHours = Number.parseFloat(month.totalHours || 0) || 0;
+                    const expectedHours = Number.parseFloat(month.expectedHours || 0) || 0;
                     const delta = Number.parseFloat(month.delta || 0) || 0;
                     const deltaCls = delta >= 0 ? 'delta-pos' : 'delta-neg';
-                    return `
-                        <div class="quarter-month">
-                            <strong>${label}</strong>
-                            <div>${formatHours(month.totalHours)} h</div>
-                            <div class="muted">Exp ${formatHours(month.expectedHours)} h</div>
-                            <div class="${deltaCls}">${delta.toFixed(2)} h</div>
-                        </div>
-                    `;
+                    return {
+                        html: `
+                            <div class="quarter-month">
+                                <strong>${label}</strong>
+                                <div>${formatHours(totalHours)} h</div>
+                                <div class="muted">Exp ${formatHours(expectedHours)} h</div>
+                                <div class="${deltaCls}">${delta.toFixed(2)} h</div>
+                            </div>
+                        `,
+                        sort: totalHours.toFixed(2),
+                        filter: `${label} (${formatHours(totalHours)} h)`
+                    };
                 });
                 const totals = season.totals || {};
                 const totalDelta = Number.parseFloat(totals.delta || 0) || 0;
                 const totalDeltaCls = totalDelta >= 0 ? 'delta-pos' : 'delta-neg';
                 tr.innerHTML = `
-                    <td><strong>${season.label || 'Season'}</strong></td>
-                    ${monthsHtml.map((html) => `<td>${html}</td>`).join('')}
-                    <td>${formatHours(totals.totalHours)} h</td>
-                    <td>${formatHours(totals.expectedHours)} h</td>
-                    <td class="${totalDeltaCls}">${totalDelta.toFixed(2)} h</td>
+                    <td data-sort-value="${escapeHtml(season.label || 'Season')}" data-filter-value="${escapeHtml(season.label || 'Season')}" data-export-value="${escapeHtml(season.label || 'Season')}"><strong>${season.label || 'Season'}</strong></td>
+                    ${monthCells.map((cell) => `<td data-sort-value="${escapeHtml(cell.sort)}" data-filter-value="${escapeHtml(cell.filter)}" data-export-value="${escapeHtml(cell.filter)}">${cell.html}</td>`).join('')}
+                    <td data-sort-value="${formatHours(totals.totalHours)}" data-filter-value="${formatHours(totals.totalHours)}" data-export-value="${formatHours(totals.totalHours)}">${formatHours(totals.totalHours)} h</td>
+                    <td data-sort-value="${formatHours(totals.expectedHours)}" data-filter-value="${formatHours(totals.expectedHours)}" data-export-value="${formatHours(totals.expectedHours)}">${formatHours(totals.expectedHours)} h</td>
+                    <td data-sort-value="${totalDelta.toFixed(2)}" data-filter-value="${totalDelta.toFixed(2)}" data-export-value="${totalDelta.toFixed(2)}" class="${totalDeltaCls}">${totalDelta.toFixed(2)} h</td>
                 `;
                 tbody.appendChild(tr);
             });
+            notifyTableUpdate(table);
         });
 
         return {
             onShow: () => reportStateInstance.refresh()
         };
+    }
+
+    function notifyTableUpdate(table, options = {}) {
+        if (!table) return;
+        refreshTableFeatures(table, options);
+    }
+
+    function refreshTableFeatures(table, options = {}) {
+        const state = ensureTableFeatures(table);
+        if (!state) return;
+
+        updateFilterRowOffset(state);
+
+        const tbody = table.tBodies?.[0];
+        const dataRows = tbody
+            ? Array.from(tbody.rows).filter((row) => row && row.dataset.tableMessage !== 'true' && row.dataset.filterMessage !== 'true')
+            : [];
+
+        state.rawRows = dataRows;
+
+        if (options.clearState) {
+            state.filters.clear();
+            state.sort.column = null;
+            state.sort.direction = 'asc';
+            state.columnMeta.forEach((meta) => {
+                if (meta?.control) {
+                    if (meta.type === 'select') {
+                        meta.control.value = '';
+                    } else {
+                        meta.control.value = '';
+                    }
+                }
+            });
+        }
+
+        const hasData = dataRows.length > 0;
+        state.columnMeta.forEach((meta) => {
+            if (!meta?.control) return;
+            meta.control.disabled = !hasData;
+        });
+        if (state.exportButton) {
+            state.exportButton.disabled = !hasData;
+        }
+
+        if (!hasData) {
+            removeFilterMessage(state);
+            updateSortIndicators(state);
+            state.displayRows = [];
+            return;
+        }
+
+        const columnValues = new Map();
+        dataRows.forEach((row) => {
+            Array.from(row.cells).forEach((cell, index) => {
+                const value = getCellFilterValue(cell);
+                if (!value) return;
+                if (!columnValues.has(index)) {
+                    columnValues.set(index, new Set());
+                }
+                columnValues.get(index).add(value);
+            });
+        });
+
+        state.columnMeta.forEach((meta, index) => {
+            if (!meta) return;
+            const values = Array.from(columnValues.get(index) || []);
+            values.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+            ensureFilterControlType(state, meta, values);
+            if (meta.type === 'select') {
+                updateSelectOptions(state, meta, values);
+            }
+        });
+
+        updateSortIndicators(state);
+        applyFiltersAndSort(state);
+    }
+
+    function ensureTableFeatures(table) {
+        if (!table) return null;
+        let state = TABLE_FEATURES.get(table);
+        if (state) return state;
+
+        const thead = table.tHead;
+        if (!thead || !thead.rows.length) return null;
+
+        const headerRow = thead.rows[0];
+        const columns = Array.from(headerRow.cells);
+        if (!columns.length) return null;
+
+        state = {
+            table,
+            wrap: table.closest('.table-wrap') || null,
+            headerRow,
+            columnMeta: [],
+            filters: new Map(),
+            sort: { column: null, direction: 'asc' },
+            rawRows: [],
+            displayRows: [],
+            filterRow: null,
+            filterMessageRow: null,
+            exportButton: null,
+            exportName: table.dataset.exportName || table.id || 'table',
+        };
+
+        TABLE_FEATURES.set(table, state);
+        TABLE_FEATURE_STATES.add(state);
+        if (!tableFeatureResizeAttached) {
+            tableFeatureResizeAttached = true;
+            window.addEventListener('resize', () => {
+                TABLE_FEATURE_STATES.forEach((featureState) => updateFilterRowOffset(featureState));
+            });
+        }
+
+        setupTableToolbar(state);
+        setupHeaderInteractions(state, columns);
+        setupFilterRow(state, columns);
+
+        return state;
+    }
+
+    function setupTableToolbar(state) {
+        const { wrap, table } = state;
+        if (!wrap) return;
+        let toolbar = wrap.querySelector(':scope > .table-toolbar');
+        if (!toolbar) {
+            toolbar = document.createElement('div');
+            toolbar.className = 'table-toolbar';
+            wrap.insertBefore(toolbar, wrap.firstChild);
+        }
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-outline table-export-btn';
+        button.textContent = 'Export to Excel';
+        button.disabled = true;
+        button.addEventListener('click', () => exportTableToExcel(state));
+        toolbar.appendChild(button);
+        state.exportButton = button;
+    }
+
+    function setupHeaderInteractions(state, columns) {
+        columns.forEach((th, index) => {
+            th.classList.add('table-sortable');
+            th.dataset.sortIndex = String(index);
+            th.addEventListener('click', (event) => {
+                if (event.defaultPrevented) return;
+                if (event.target && event.target.closest('.table-filter-control')) return;
+                handleSortRequest(state, index);
+            });
+        });
+    }
+
+    function setupFilterRow(state, columns) {
+        const filterRow = document.createElement('tr');
+        filterRow.className = 'table-filter-row';
+        columns.forEach((th, index) => {
+            const filterCell = document.createElement('th');
+            filterCell.className = 'table-filter-cell';
+            const meta = {
+                index,
+                header: (th.textContent || '').trim(),
+                preferSelect: /(status|type|project|board|sprint|season|month|weekday|flags)/i.test((th.textContent || '').trim()),
+                type: 'text',
+                control: null,
+                cell: filterCell,
+            };
+            state.columnMeta[index] = meta;
+            const control = document.createElement('input');
+            control.type = 'text';
+            control.placeholder = 'Filter…';
+            control.className = 'table-filter-control';
+            control.disabled = true;
+            control.addEventListener('input', () => handleFilterChange(state, meta, control.value));
+            filterCell.appendChild(control);
+            meta.control = control;
+            filterRow.appendChild(filterCell);
+        });
+        const thead = state.headerRow.parentElement;
+        if (thead && !Array.from(thead.rows).includes(filterRow)) {
+            thead.appendChild(filterRow);
+        }
+        state.filterRow = filterRow;
+        updateFilterRowOffset(state);
+    }
+
+    function updateFilterRowOffset(state) {
+        if (!state || !state.table || !state.headerRow || !state.headerRow.isConnected) return;
+        const headerHeight = Math.max(0, state.headerRow.getBoundingClientRect().height);
+        if (headerHeight > 0) {
+            state.table.style.setProperty('--table-filter-offset', `${Math.round(headerHeight)}px`);
+        }
+    }
+
+    function handleSortRequest(state, columnIndex) {
+        if (!state.rawRows.length) return;
+        if (state.sort.column !== columnIndex) {
+            state.sort.column = columnIndex;
+            state.sort.direction = 'asc';
+        } else if (state.sort.direction === 'asc') {
+            state.sort.direction = 'desc';
+        } else {
+            state.sort.column = null;
+            state.sort.direction = 'asc';
+        }
+        updateSortIndicators(state);
+        applyFiltersAndSort(state);
+    }
+
+    function updateSortIndicators(state) {
+        const { headerRow, sort } = state;
+        Array.from(headerRow.cells).forEach((th, index) => {
+            if (sort.column === index) {
+                th.dataset.sortDirection = sort.direction;
+                th.classList.add('is-sorted');
+            } else {
+                th.dataset.sortDirection = '';
+                th.classList.remove('is-sorted');
+            }
+        });
+    }
+
+    function handleFilterChange(state, meta, rawValue) {
+        const value = (rawValue || '').trim();
+        if (!value) {
+            state.filters.delete(meta.index);
+        } else if (meta.type === 'select') {
+            state.filters.set(meta.index, value);
+        } else {
+            state.filters.set(meta.index, value.toLowerCase());
+        }
+        applyFiltersAndSort(state);
+    }
+
+    function ensureFilterControlType(state, meta, values) {
+        const numericOnly = values.length > 0 && values.every((val) => /^-?\d+(?:\.\d+)?$/.test(val));
+        const shouldSelect = meta.preferSelect || (!numericOnly && values.length > 0 && values.length <= 15);
+        if (shouldSelect && meta.type !== 'select') {
+            replaceFilterControl(state, meta, 'select');
+        } else if (!shouldSelect && meta.type !== 'text') {
+            replaceFilterControl(state, meta, 'text');
+        }
+    }
+
+    function replaceFilterControl(state, meta, type) {
+        if (!meta?.cell) return;
+        const previousValue = meta.control ? meta.control.value : '';
+        const cell = meta.cell;
+        cell.innerHTML = '';
+        let control;
+        if (type === 'select') {
+            control = document.createElement('select');
+            control.className = 'table-filter-control';
+            control.disabled = meta.control?.disabled ?? true;
+            control.addEventListener('change', () => handleFilterChange(state, meta, control.value));
+        } else {
+            control = document.createElement('input');
+            control.type = 'text';
+            control.placeholder = 'Filter…';
+            control.className = 'table-filter-control';
+            control.disabled = meta.control?.disabled ?? true;
+            control.addEventListener('input', () => handleFilterChange(state, meta, control.value));
+        }
+        cell.appendChild(control);
+        meta.control = control;
+        meta.type = type;
+        if (type === 'text') {
+            control.value = previousValue || '';
+            if (control.value) {
+                handleFilterChange(state, meta, control.value);
+            }
+        }
+    }
+
+    function updateSelectOptions(state, meta, values) {
+        if (!meta?.control) return;
+        const select = meta.control;
+        const previous = select.value;
+        select.innerHTML = '';
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'All';
+        select.appendChild(option);
+        values.forEach((val) => {
+            const opt = document.createElement('option');
+            opt.value = val;
+            opt.textContent = val;
+            select.appendChild(opt);
+        });
+        let restoreValue = '';
+        if (values.includes(previous)) {
+            restoreValue = previous;
+        } else {
+            const lowerMap = new Map(values.map((val) => [val.toLowerCase(), val]));
+            const matched = lowerMap.get((previous || '').toLowerCase());
+            if (matched) {
+                restoreValue = matched;
+            }
+        }
+        if (restoreValue) {
+            select.value = restoreValue;
+            state.filters.set(meta.index, restoreValue);
+        } else {
+            select.value = '';
+            state.filters.delete(meta.index);
+        }
+    }
+
+    function applyFiltersAndSort(state) {
+        const rows = state.rawRows || [];
+        if (!rows.length) return;
+        const activeFilters = Array.from(state.filters.entries());
+        const filtered = rows.filter((row) => {
+            return activeFilters.every(([index, value]) => {
+                const cell = row.cells[index];
+                if (!cell) return true;
+                const cellValue = getCellFilterValue(cell);
+                if (!value) return true;
+                const meta = state.columnMeta[index];
+                if (meta?.type === 'select') {
+                    return cellValue === value;
+                }
+                return cellValue.toLowerCase().includes(value);
+            });
+        });
+
+        const { column, direction } = state.sort;
+        let sorted = filtered;
+        if (Number.isInteger(column)) {
+            sorted = filtered.slice().sort((a, b) => {
+                const cellA = a.cells[column];
+                const cellB = b.cells[column];
+                const valueA = getCellSortValue(cellA);
+                const valueB = getCellSortValue(cellB);
+                return compareSortValues(valueA, valueB, direction);
+            });
+        }
+
+        const tbody = state.table.tBodies?.[0];
+        if (!tbody) return;
+
+        tbody.innerHTML = '';
+        sorted.forEach((row) => tbody.appendChild(row));
+        state.displayRows = sorted;
+
+        if (!sorted.length) {
+            showFilterMessage(state);
+        } else {
+            removeFilterMessage(state);
+        }
+    }
+
+    function compareSortValues(a, b, direction) {
+        const dir = direction === 'desc' ? -1 : 1;
+        const numA = Number.parseFloat(a);
+        const numB = Number.parseFloat(b);
+        const bothNumeric = Number.isFinite(numA) && Number.isFinite(numB);
+        if (bothNumeric) {
+            if (numA === numB) return 0;
+            return numA > numB ? dir : -dir;
+        }
+        const strA = String(a ?? '').toLowerCase();
+        const strB = String(b ?? '').toLowerCase();
+        if (strA === strB) return 0;
+        return strA > strB ? dir : -dir;
+    }
+
+    function showFilterMessage(state) {
+        const tbody = state.table.tBodies?.[0];
+        if (!tbody) return;
+        if (!state.filterMessageRow) {
+            const tr = document.createElement('tr');
+            tr.dataset.filterMessage = 'true';
+            const td = document.createElement('td');
+            td.colSpan = state.headerRow.cells.length;
+            td.textContent = 'No rows match the current filters.';
+            tr.appendChild(td);
+            state.filterMessageRow = tr;
+        }
+        if (!tbody.contains(state.filterMessageRow)) {
+            tbody.appendChild(state.filterMessageRow);
+        }
+    }
+
+    function removeFilterMessage(state) {
+        if (!state.filterMessageRow) return;
+        const tbody = state.table.tBodies?.[0];
+        if (tbody && tbody.contains(state.filterMessageRow)) {
+            tbody.removeChild(state.filterMessageRow);
+        }
+    }
+
+    function getCellFilterValue(cell) {
+        if (!cell) return '';
+        return (cell.dataset.filterValue || cell.dataset.sortValue || cell.dataset.exportValue || cell.textContent || '').trim();
+    }
+
+    function getCellSortValue(cell) {
+        if (!cell) return '';
+        const value = cell.dataset.sortValue;
+        if (value != null) return value;
+        return (cell.textContent || '').trim();
+    }
+
+    function getCellExportValue(cell) {
+        if (!cell) return '';
+        return (cell.dataset.exportValue || cell.dataset.filterValue || cell.textContent || '').trim();
+    }
+
+    function exportTableToExcel(state) {
+        const table = state.table;
+        const rows = state.displayRows && state.displayRows.length ? state.displayRows : state.rawRows;
+        if (!rows || !rows.length) return;
+        const headerCells = Array.from(state.headerRow.cells).map((cell) => (cell.textContent || '').trim());
+        const bodyRowsHtml = rows
+            .map((row) => {
+                const cells = Array.from(row.cells).map((cell) => `<td>${escapeForExcel(getCellExportValue(cell))}</td>`).join('');
+                return `<tr>${cells}</tr>`;
+            })
+            .join('');
+        const headerHtml = `<tr>${headerCells.map((text) => `<th>${escapeForExcel(text)}</th>`).join('')}</tr>`;
+        let footerHtml = '';
+        if (table.tFoot && table.tFoot.rows.length) {
+            footerHtml = Array.from(table.tFoot.rows)
+                .map((row) => {
+                    const cells = Array.from(row.cells)
+                        .map((cell) => `<td>${escapeForExcel((cell.textContent || '').trim())}</td>`)
+                        .join('');
+                    return `<tr>${cells}</tr>`;
+                })
+                .join('');
+            footerHtml = `<tfoot>${footerHtml}</tfoot>`;
+        }
+        const tableHtml = `<table><thead>${headerHtml}</thead><tbody>${bodyRowsHtml}</tbody>${footerHtml}</table>`;
+        const blob = new Blob([`\ufeff${tableHtml}`], { type: 'application/vnd.ms-excel' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const datePart = new Date().toISOString().slice(0, 10);
+        link.href = url;
+        link.download = `${state.exportName || 'table'}-${datePart}.xls`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+    }
+
+    function escapeForExcel(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     function buildYearRange(baseYear, ...extra) {
@@ -1515,6 +2024,11 @@
         td.textContent = message;
         tr.appendChild(td);
         tbody.appendChild(tr);
+        tr.dataset.tableMessage = 'true';
+        const table = tbody.closest('table');
+        if (table) {
+            notifyTableUpdate(table, { clearState: true });
+        }
     }
 
     function parseJalaaliInt(val) {
