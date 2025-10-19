@@ -263,6 +263,22 @@
         .btn-danger{ background:var(--red); border-color:var(--red); color:#ffffff; }
         .btn-danger:hover{ filter:brightness(.95); }
 
+        .sidebar-admin-actions{
+            display:none;
+            flex-direction:column;
+            gap:8px;
+            margin:16px 0;
+        }
+        .sidebar-admin-actions.is-active{ display:flex; }
+        .sidebar-admin-button{
+            width:100%;
+            font-size:13px;
+            justify-content:center;
+            display:inline-flex;
+            align-items:center;
+            gap:6px;
+        }
+
         .legend{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin:12px 4px 0 }
         .chip{ display:inline-block; width:14px; height:14px; border-radius:4px; border:1px solid var(--border); margin-right:6px; vertical-align:middle; }
         .chip--gray{ background:var(--chip-gray); }
@@ -469,6 +485,11 @@
             </div>
         </nav>
         <hr class="sidebar-divider" />
+        <div class="sidebar-admin-actions" id="sidebarAdminActions">
+            <button type="button" class="btn btn-outline sidebar-admin-button" id="adminExportReports">
+                Get Full Report
+            </button>
+        </div>
         <nav class="nav" aria-label="Settings">
             <div class="nav-group" role="group" aria-labelledby="navGroupSettingsLabel">
                 <button type="button" class="nav-item" data-route="configurations" aria-controls="configurationsView">Configurations</button>

@@ -1,12 +1,13 @@
 (async () => {
     const Store = (await import('electron-store')).default;
 
-    const { app, BrowserWindow, ipcMain, Notification, Tray, Menu, nativeImage, shell } = require('electron');
+    const { app, BrowserWindow, ipcMain, Notification, Tray, Menu, nativeImage, shell, dialog } = require('electron');
     const path = require('path');
     const fs = require('fs/promises');
     const axios = require('axios');
     const keytar = require('keytar');
     const cron = require('node-cron');
+    const JSZip = require('jszip');
     const moment = require('moment-jalaali');
 
     const STORE = new Store({ name: 'settings' });
@@ -102,6 +103,24 @@
             '٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9'
         };
         return s.replace(/[0-9\u06F0-\u06F9\u0660-\u0669]/g, ch => map[ch] ?? ch);
+    }
+
+    function sanitizePathSegment(input, fallback = 'item') {
+        const raw = (input == null ? '' : String(input)).trim();
+        const replaced = raw.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim();
+        return replaced || fallback;
+    }
+
+    function ensureUniqueName(used, desired, fallback = 'item') {
+        const base = (desired && desired.trim()) ? desired.trim() : fallback;
+        let attempt = base;
+        let counter = 1;
+        while (used.has(attempt)) {
+            counter += 1;
+            attempt = `${base}-${counter}`;
+        }
+        used.add(attempt);
+        return attempt;
     }
 
     function buildHolidaysSetFromStatic(jYear, jMonth) {
@@ -955,6 +974,149 @@
     });
     app.on('window-all-closed', (e) => { if (process.platform !== 'darwin') e.preventDefault(); });
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+
+    ipcMain.handle('reports:export-full', async (_evt, payload) => {
+        try {
+            const jYear = Number.parseInt(toAsciiDigits(payload?.jYear), 10);
+            const jMonth = Number.parseInt(toAsciiDigits(payload?.jMonth), 10);
+            if (!Number.isFinite(jYear) || !Number.isFinite(jMonth) || jMonth < 1 || jMonth > 12) {
+                return { ok: false, reason: 'Invalid Jalaali month selection.' };
+            }
+
+            const teamsRaw = Array.isArray(payload?.teams) ? payload.teams : [];
+            const teamsNormalized = teamsRaw.map((team) => {
+                if (!team) return null;
+                const value = (team.value || '').toString().trim();
+                const label = (team.label || value || '').toString().trim();
+                const usersRaw = Array.isArray(team.users) ? team.users : [];
+                const seen = new Set();
+                const users = usersRaw.map((user) => {
+                    if (!user) return null;
+                    const username = (user.username || user.value || '').toString().trim();
+                    if (!username || seen.has(username)) return null;
+                    seen.add(username);
+                    const displayName = (user.displayName || user.text || '').toString().trim() || username;
+                    return { username, displayName };
+                }).filter(Boolean);
+                if (!value || !users.length) {
+                    return null;
+                }
+                return { value, label: label || value, users };
+            }).filter(Boolean);
+
+            if (!teamsNormalized.length) {
+                return { ok: false, reason: 'No teams to export.' };
+            }
+
+            const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim();
+            const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
+            if (!baseUrl || !token) {
+                return { ok: false, reason: 'Missing Jira base URL or token.' };
+            }
+
+            const targetWindow = BrowserWindow.getFocusedWindow() || mainWindow || undefined;
+            const defaultFileName = `alo-worklogs-full-report-${jYear}-${String(jMonth).padStart(2, '0')}.zip`;
+            const { canceled, filePath } = await dialog.showSaveDialog(targetWindow, {
+                title: 'Save Full Report',
+                buttonLabel: 'Save',
+                defaultPath: defaultFileName,
+                filters: [{ name: 'ZIP Archive', extensions: ['zip'] }],
+            });
+
+            if (canceled || !filePath) {
+                return { ok: false, reason: 'save-cancelled' };
+            }
+
+            const zip = new JSZip();
+            const usedTeamNames = new Set();
+
+            zip.file('metadata.json', JSON.stringify({
+                generatedAt: new Date().toISOString(),
+                jYear,
+                jMonth,
+                teams: teamsNormalized.map((team) => ({
+                    value: team.value,
+                    label: team.label,
+                    users: team.users.map((user) => user.username),
+                })),
+            }, null, 2));
+
+            for (const team of teamsNormalized) {
+                const teamFolderName = ensureUniqueName(
+                    usedTeamNames,
+                    sanitizePathSegment(team.label || team.value, 'team'),
+                    'team'
+                );
+                const teamFolder = zip.folder(teamFolderName);
+                const usedUserNames = new Set();
+
+                for (const user of team.users) {
+                    const userFolderName = ensureUniqueName(
+                        usedUserNames,
+                        sanitizePathSegment(user.username, 'user'),
+                        'user'
+                    );
+                    const userFolder = teamFolder.folder(userFolderName);
+                    let report;
+                    try {
+                        report = await computeScan({ jYear, jMonth, username: user.username });
+                    } catch (err) {
+                        console.error(`Failed to compute report for ${user.username}`, err);
+                        report = { ok: false, reason: err?.message || 'Failed to compute report.' };
+                    }
+
+                    if (!report?.ok) {
+                        userFolder.file('error.json', JSON.stringify({
+                            ok: false,
+                            username: user.username,
+                            team: team.label,
+                            reason: report?.reason || 'Unable to compute report.',
+                        }, null, 2));
+                        continue;
+                    }
+
+                    const userDisplayName = (user.displayName || '').toString().trim();
+                    const monthlySummary = {
+                        ok: report.ok,
+                        username: user.username,
+                        displayName: userDisplayName || null,
+                        team: team.label,
+                        teamValue: team.value,
+                        jYear: report.jYear,
+                        jMonth: report.jMonth,
+                        jMonthLabel: report.jMonthLabel,
+                        jql: report.jql,
+                        totalHours: report.totalHours,
+                        expectedByNowHours: report.expectedByNowHours,
+                        expectedByEndMonthHours: report.expectedByEndMonthHours,
+                        summary: report.summary ?? null,
+                        days: report.days ?? [],
+                        deficits: report.deficits ?? [],
+                        baseUrl: report.baseUrl ?? null,
+                    };
+
+                    userFolder.file('monthly-summary.json', JSON.stringify(monthlySummary, null, 2));
+                    userFolder.file('detailed-worklogs.json', JSON.stringify(report.worklogs ?? [], null, 2));
+                    userFolder.file('due-issues.json', JSON.stringify(report.dueIssuesCurrentMonth ?? [], null, 2));
+                    userFolder.file('assigned-issues.json', JSON.stringify(report.assignedIssues ?? [], null, 2));
+                    userFolder.file('quarter-report.json', JSON.stringify(report.quarterReport ?? null, null, 2));
+                }
+            }
+
+            const zipBuffer = await zip.generateAsync({
+                type: 'nodebuffer',
+                compression: 'DEFLATE',
+                compressionOptions: { level: 9 },
+            });
+
+            await fs.writeFile(filePath, zipBuffer);
+
+            return { ok: true, path: filePath };
+        } catch (err) {
+            console.error('Failed to export full report archive', err);
+            return { ok: false, reason: err?.message || 'Failed to export full report.' };
+        }
+    });
 
     ipcMain.handle('views:load', async (_evt, relPath) => {
         if (typeof relPath !== 'string') {

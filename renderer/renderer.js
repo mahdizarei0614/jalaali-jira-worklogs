@@ -131,6 +131,113 @@
             return route ? [route, el] : null;
         }).filter(Boolean)
     );
+    const adminActionsEl = $('#sidebarAdminActions');
+    const adminExportBtn = $('#adminExportReports');
+    const hasAdminExportApi = typeof window.appApi?.exportFullReport === 'function';
+    let adminExportTeamValues = [];
+    let adminExportBusy = false;
+
+    function updateAdminExportButtonState() {
+        const available = hasAdminExportApi && adminExportTeamValues.length > 0;
+        if (adminActionsEl) {
+            adminActionsEl.classList.toggle('is-active', available);
+        }
+        if (adminExportBtn) {
+            adminExportBtn.disabled = !available || adminExportBusy;
+        }
+    }
+
+    function setAdminExportTeams(teamValues) {
+        if (!Array.isArray(teamValues)) {
+            adminExportTeamValues = [];
+            updateAdminExportButtonState();
+            return;
+        }
+        const normalized = teamValues
+            .map((value) => (value || '').trim())
+            .filter((value) => Boolean(value));
+        adminExportTeamValues = Array.from(new Set(normalized));
+        updateAdminExportButtonState();
+    }
+
+    function buildAdminExportPayload() {
+        if (!adminExportTeamValues.length) {
+            return { teams: [] };
+        }
+        const teams = [];
+        adminExportTeamValues.forEach((teamValue) => {
+            if (!teamValue) return;
+            const seenUsers = new Set();
+            const users = getTeamUsers(teamValue)
+                .map((user) => {
+                    const username = (user.value || '').trim();
+                    if (!username) return null;
+                    const displayName = (user.text || '').trim() || username;
+                    return { username, displayName };
+                })
+                .filter((user) => {
+                    if (!user || !user.username) return false;
+                    if (seenUsers.has(user.username)) {
+                        return false;
+                    }
+                    seenUsers.add(user.username);
+                    return true;
+                });
+            if (!users.length) {
+                return;
+            }
+            const teamMeta = TEAM_DATA.find((team) => team.value === teamValue);
+            const label = (teamMeta?.label || teamMeta?.value || teamValue || '').trim() || teamValue;
+            teams.push({ value: teamValue, label, users });
+        });
+        return { teams };
+    }
+
+    async function triggerAdminExport(reportStateInstance) {
+        if (!hasAdminExportApi || !adminExportBtn || adminExportBusy) {
+            return;
+        }
+        if (!reportStateInstance || typeof reportStateInstance.getSelection !== 'function') {
+            return;
+        }
+        const payload = buildAdminExportPayload();
+        if (!payload.teams.length) {
+            console.warn('No accessible teams available for full report export.');
+            return;
+        }
+        const selection = reportStateInstance.getSelection();
+        const jYear = Number.parseInt(selection.jYear, 10);
+        const jMonth = Number.parseInt(selection.jMonth, 10);
+        if (!Number.isFinite(jYear) || !Number.isFinite(jMonth)) {
+            console.warn('A valid Jalaali year and month are required to export the full report.');
+            return;
+        }
+        adminExportBusy = true;
+        const originalLabel = adminExportBtn.textContent;
+        adminExportBtn.textContent = 'Preparing…';
+        updateAdminExportButtonState();
+        let nextLabel = 'Saved!';
+        try {
+            const res = await window.appApi.exportFullReport({ jYear, jMonth, teams: payload.teams });
+            if (!res?.ok) {
+                nextLabel = 'Failed';
+                console.error('Failed to export full report', res?.reason || res);
+            }
+        } catch (err) {
+            nextLabel = 'Error';
+            console.error('Failed to export full report', err);
+        }
+        adminExportBtn.textContent = nextLabel;
+        adminExportBusy = false;
+        updateAdminExportButtonState();
+        window.setTimeout(() => {
+            if (adminExportBtn) {
+                adminExportBtn.textContent = originalLabel;
+            }
+        }, 2000);
+    }
+
+    updateAdminExportButtonState();
 
     async function loadTemplateForView(el) {
         const templatePath = el.getAttribute('data-template');
@@ -284,6 +391,9 @@
     });
 
     const reportState = createReportState();
+    if (adminExportBtn && hasAdminExportApi) {
+        adminExportBtn.addEventListener('click', () => triggerAdminExport(reportState));
+    }
     let latestReportSelection = reportState.getSelection();
     reportState.subscribe((state) => {
         latestReportSelection = state?.selection ? { ...state.selection } : {};
@@ -633,6 +743,7 @@
                 }
 
                 if (!isAdmin) {
+                    setAdminExportTeams([]);
                     renderTeamSelectOptions();
                     if (!teamForSelf) {
                         teamForSelf = teamSelectEl.value || DEFAULT_TEAM || TEAM_OPTIONS[0]?.value || '';
@@ -652,6 +763,7 @@
                     }
                 } else {
                     renderTeamSelectOptions(adminTeams);
+                    setAdminExportTeams(adminTeams);
                     teamSelectEl.disabled = false;
                     selectEl.disabled = false;
                     let activeTeam = currentSelection.team && adminTeams.includes(currentSelection.team)
@@ -685,6 +797,7 @@
                     }
                 }
             } catch (err) {
+                setAdminExportTeams([]);
                 console.error('Failed to determine user visibility', err);
             }
         }
