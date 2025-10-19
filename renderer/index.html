@@ -120,7 +120,7 @@
         .sidebar-title{ font-size:20px; font-weight:700; letter-spacing:.2px; } 
         .sidebar-subtitle{ font-size:12px; color:var(--muted); } 
         .sidebar-control{ display:flex; flex-direction:column; gap:6px; margin-bottom: 12px; }
-        .sidebar-label{ font-size:12px; font-weight:600; color:var(--muted); padding-left:2px; } 
+        .sidebar-label{ font-size:12px; font-weight:600; color:var(--muted); padding-left:2px; }
         .sidebar-control select{
             appearance:none; -webkit-appearance:none;
             width:100%; padding:10px 12px; border-radius:12px;
@@ -129,6 +129,7 @@
             outline:none; transition:border-color .15s ease, box-shadow .15s ease;
         }
         .sidebar-control select:focus{ border-color:var(--accent); box-shadow:0 0 0 4px var(--focus-ring); }
+        .sidebar-action{ width:100%; margin-bottom:12px; }
         .sidebar-divider{ height:1px; border:none; background:var(--border); margin: 12px 0; }
         .nav{ display:flex; flex-direction:column; gap:16px; }
         .nav-group{ display:flex; flex-direction:column; gap:8px; }
@@ -469,6 +470,12 @@
             </div>
         </nav>
         <hr class="sidebar-divider" />
+        <button
+            type="button"
+            id="adminFullReportBtn"
+            class="btn btn-outline sidebar-action"
+            hidden
+        >Get Full Report</button>
         <nav class="nav" aria-label="Settings">
             <div class="nav-group" role="group" aria-labelledby="navGroupSettingsLabel">
                 <button type="button" class="nav-item" data-route="configurations" aria-controls="configurationsView">Configurations</button>

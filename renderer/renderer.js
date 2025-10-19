@@ -30,6 +30,7 @@
         console.warn('Team data is empty. Please ensure data.json is populated correctly.');
     }
     const TEAM_OPTIONS = TEAM_DATA.map(({ value, label }) => ({ value, text: label }));
+    const TEAM_LABELS = new Map(TEAM_DATA.map(({ value, label }) => [value, label || value]));
     const TEAM_VALUES = TEAM_OPTIONS.map((option) => option.value);
     const TEAM_USERS = new Map();
     const USER_TEAM = new Map();
@@ -131,6 +132,20 @@
             return route ? [route, el] : null;
         }).filter(Boolean)
     );
+    const adminExportButton = $('#adminFullReportBtn');
+    const adminExportState = {
+        isAdmin: false,
+        teams: [],
+        username: null,
+        running: false
+    };
+    const ADMIN_EXPORT_DEFAULT_LABEL = adminExportButton
+        ? (adminExportButton.textContent || '').trim() || 'Get Full Report'
+        : 'Get Full Report';
+    if (adminExportButton) {
+        adminExportButton.hidden = true;
+        adminExportButton.disabled = true;
+    }
 
     async function loadTemplateForView(el) {
         const templatePath = el.getAttribute('data-template');
@@ -288,6 +303,12 @@
     reportState.subscribe((state) => {
         latestReportSelection = state?.selection ? { ...state.selection } : {};
     });
+    if (adminExportButton) {
+        adminExportButton.addEventListener('click', () => {
+            if (adminExportState.running) return;
+            handleAdminFullReportExport(reportState);
+        });
+    }
     initLoadingOverlay(reportState);
     const settingsPromise = loadSettings();
     const userSelectContext = initUserSelect($('#sidebarUserSelect'), reportState);
@@ -627,6 +648,7 @@
                 const currentSelection = reportStateInstance.getSelection();
                 const adminTeams = getAdminTeamsForUser(self);
                 const isAdmin = adminTeams.length > 0;
+                updateAdminExportAvailability({ isAdmin, teams: adminTeams, username: self });
                 let teamForSelf = findTeamForUser(self) || '';
                 if (teamForSelf) {
                     ensureUserInTeamMap(teamForSelf, { value: self, text: displayName });
@@ -1854,18 +1876,20 @@
         return (cell.dataset.exportValue || cell.dataset.filterValue || cell.textContent || '').trim();
     }
 
-    function exportTableToExcel(state) {
+    function buildTableExportData(state) {
+        if (!state || !state.table || !state.headerRow) return null;
         const table = state.table;
         const rows = state.displayRows && state.displayRows.length ? state.displayRows : state.rawRows;
-        if (!rows || !rows.length) return;
+        if (!rows || !rows.length) return null;
         const headerCells = Array.from(state.headerRow.cells).map((cell) => (cell.textContent || '').trim());
         const bodyRowsHtml = rows
             .map((row) => {
-                const cells = Array.from(row.cells).map((cell) => `<td>${escapeForExcel(getCellExportValue(cell))}</td>`).join('');
+                const cells = Array.from(row.cells)
+                    .map((cell) => `<td>${escapeForExcel(getCellExportValue(cell))}</td>`)
+                    .join('');
                 return `<tr>${cells}</tr>`;
             })
             .join('');
-        const headerHtml = `<tr>${headerCells.map((text) => `<th>${escapeForExcel(text)}</th>`).join('')}</tr>`;
         let footerHtml = '';
         if (table.tFoot && table.tFoot.rows.length) {
             footerHtml = Array.from(table.tFoot.rows)
@@ -1878,21 +1902,208 @@
                 .join('');
             footerHtml = `<tfoot>${footerHtml}</tfoot>`;
         }
+        const headerHtml = `<tr>${headerCells.map((text) => `<th>${escapeForExcel(text)}</th>`).join('')}</tr>`;
         const tableHtml = `<table><thead>${headerHtml}</thead><tbody>${bodyRowsHtml}</tbody>${footerHtml}</table>`;
-        const blob = new Blob([`\ufeff${tableHtml}`], { type: 'application/vnd.ms-excel' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
         const selection = latestReportSelection || {};
         const selectedYearMonth = formatJalaaliYearMonth(selection.jYear, selection.jMonth);
         const usernamePart = sanitizeFilenamePart(selection.username, 'unknown-user');
-        const tableNamePart = sanitizeFilenamePart(state.exportName || 'table', 'table');
+        const exportName = state.exportName || table.dataset.exportName || table.id || 'table';
+        const tableNamePart = sanitizeFilenamePart(exportName, 'table');
         const fileName = `${selectedYearMonth}_${usernamePart}_${tableNamePart}.xls`;
+        return {
+            fileName,
+            content: `\ufeff${tableHtml}`,
+            tableNamePart,
+            selectedYearMonth,
+            usernamePart,
+            exportName,
+        };
+    }
+
+    function exportTableToExcel(state) {
+        const exportData = buildTableExportData(state);
+        if (!exportData) return;
+        const blob = new Blob([exportData.content], { type: 'application/vnd.ms-excel' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
         link.href = url;
-        link.download = fileName;
+        link.download = exportData.fileName;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         setTimeout(() => URL.revokeObjectURL(url), 0);
+    }
+
+    function collectAllTableExports() {
+        const exports = [];
+        TABLE_FEATURE_STATES.forEach((state) => {
+            const data = buildTableExportData(state);
+            if (data) {
+                exports.push(data);
+            }
+        });
+        return exports;
+    }
+
+    function refreshAdminExportButton() {
+        if (!adminExportButton) return;
+        const hasAccess = adminExportState.isAdmin && adminExportState.teams.length > 0;
+        if (!hasAccess) {
+            adminExportButton.hidden = true;
+            adminExportButton.disabled = true;
+            adminExportButton.textContent = ADMIN_EXPORT_DEFAULT_LABEL;
+            return;
+        }
+        adminExportButton.hidden = false;
+        adminExportButton.disabled = adminExportState.running;
+        if (!adminExportState.running) {
+            adminExportButton.textContent = ADMIN_EXPORT_DEFAULT_LABEL;
+        }
+    }
+
+    function updateAdminExportAvailability({ isAdmin, teams, username }) {
+        const list = Array.isArray(teams) ? teams.filter((team) => TEAM_VALUE_SET.has(team)) : [];
+        adminExportState.isAdmin = Boolean(isAdmin && list.length > 0);
+        adminExportState.teams = adminExportState.isAdmin ? list : [];
+        adminExportState.username = adminExportState.isAdmin ? (username || null) : null;
+        if (!adminExportState.isAdmin) {
+            adminExportState.running = false;
+        }
+        refreshAdminExportButton();
+    }
+
+    async function handleAdminFullReportExport(reportStateInstance) {
+        if (!adminExportButton || !adminExportState.isAdmin || adminExportState.teams.length === 0) {
+            return;
+        }
+
+        adminExportState.running = true;
+        adminExportButton.hidden = false;
+        adminExportButton.disabled = true;
+        adminExportButton.textContent = 'Preparing…';
+
+        const originalSelection = reportStateInstance.getSelection();
+        const { jYear, jMonth, timeOffHours } = originalSelection;
+
+        if (!Number.isFinite(jYear) || !Number.isFinite(jMonth)) {
+            window.alert('Please choose a valid Jalaali year and month before exporting the full report.');
+            adminExportState.running = false;
+            refreshAdminExportButton();
+            return;
+        }
+
+        const teamValues = adminExportState.teams.slice();
+        if (!teamValues.length) {
+            window.alert('No teams are available for export.');
+            adminExportState.running = false;
+            refreshAdminExportButton();
+            return;
+        }
+
+        const entries = [];
+        const errors = [];
+        const preservedTimeOff = Number.isFinite(timeOffHours) && timeOffHours >= 0 ? timeOffHours : 0;
+
+        try {
+            for (const teamValue of teamValues) {
+                const teamLabel = TEAM_LABELS.get(teamValue) || teamValue;
+                const teamDir = sanitizeFilenamePart(teamLabel, sanitizeFilenamePart(teamValue, 'team'));
+                const users = getTeamUsers(teamValue).filter((user) => user && user.value);
+                if (!users.length) continue;
+
+                for (const user of users) {
+                    const username = (user.value || '').trim();
+                    if (!username) continue;
+                    const userDir = sanitizeFilenamePart(username, 'user');
+                    const selectionUpdate = {
+                        team: teamValue,
+                        username,
+                        jYear,
+                        jMonth,
+                        timeOffHours: preservedTimeOff,
+                    };
+                    const res = await reportStateInstance.setSelection(selectionUpdate, { refresh: true, pushSelection: false });
+                    await waitForRender();
+
+                    if (!res || res.ok === false) {
+                        const reason = res?.reason || 'Unable to load data';
+                        errors.push({ team: teamLabel, username, reason });
+                        entries.push({
+                            path: `${teamDir}/${userDir}/error.txt`,
+                            content: `Failed to generate reports for ${username}: ${reason}`,
+                        });
+                        continue;
+                    }
+
+                    const tableExports = collectAllTableExports();
+                    if (!tableExports.length) {
+                        entries.push({
+                            path: `${teamDir}/${userDir}/no-data.txt`,
+                            content: 'No report data available for this selection.',
+                        });
+                        continue;
+                    }
+
+                    tableExports.forEach((tableData) => {
+                        const periodPart = sanitizeFilenamePart(tableData.selectedYearMonth, 'period');
+                        const reportPart = sanitizeFilenamePart(tableData.tableNamePart || tableData.exportName || 'report', 'report');
+                        const fileName = `${periodPart}_${reportPart}.xls`;
+                        entries.push({
+                            path: `${teamDir}/${userDir}/${fileName}`,
+                            content: tableData.content,
+                        });
+                    });
+                }
+            }
+
+            if (!entries.length) {
+                window.alert('No report data was generated for the selected scope.');
+                return;
+            }
+
+            if (typeof window.appApi?.exportFullReport !== 'function') {
+                window.alert('Export API is not available in this build.');
+                return;
+            }
+
+            const defaultPeriod = sanitizeFilenamePart(formatJalaaliYearMonth(jYear, jMonth, 'reports'), 'reports');
+            const defaultZipName = `${defaultPeriod}_full-report.zip`;
+
+            const response = await window.appApi.exportFullReport({
+                entries,
+                defaultFileName: defaultZipName,
+            });
+
+            if (!response?.ok) {
+                if (response?.reason !== 'cancelled') {
+                    window.alert(`Unable to save the full report: ${response?.reason || 'Unknown error'}`);
+                }
+            } else if (errors.length) {
+                window.alert('The full report was saved, but some users could not be exported. Check the generated folders for details.');
+            }
+        } catch (err) {
+            console.error('Failed to generate full report', err);
+            window.alert('Failed to generate the full report. Please try again.');
+        } finally {
+            adminExportState.running = false;
+            refreshAdminExportButton();
+            try {
+                await reportStateInstance.setSelection(originalSelection, { refresh: true, pushSelection: true });
+                await waitForRender();
+            } catch (restoreErr) {
+                console.error('Failed to restore original selection after export', restoreErr);
+            }
+        }
+    }
+
+    function waitForRender() {
+        return new Promise((resolve) => {
+            if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(() => resolve());
+            } else {
+                setTimeout(resolve, 0);
+            }
+        });
     }
 
     function escapeForExcel(value) {
