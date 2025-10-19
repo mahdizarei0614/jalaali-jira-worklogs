@@ -56,6 +56,7 @@
     }).filter(Boolean));
     const PERSIAN_MONTHS = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
     const routeHooks = new Map();
+    const tableControllers = new WeakMap();
 
     function getAdminTeamsForUser(username) {
         const key = (username || '').trim();
@@ -838,14 +839,20 @@
         root.dataset.controllerReady = 'true';
 
         const table = root.querySelector('#results');
-        const tbody = table?.querySelector('tbody');
         const footerTotals = root.querySelector('#footerTotals');
         const debug = root.querySelector('#debug');
 
-        if (!table || !tbody || !footerTotals) {
+        if (!table || !table.querySelector('tbody') || !footerTotals) {
             console.warn('Monthly summary view missing required elements.');
             return {};
         }
+
+        const tableController = createTableController(table, {
+            exportFileName: 'monthly-summary',
+            emptyMessage: 'No data available.',
+            noMatchMessage: 'No rows match the current filters.',
+        });
+        setupTableExportButton(root, 'results', tableController);
 
         reportStateInstance.subscribe((state) => {
             renderSummary(state);
@@ -855,7 +862,7 @@
             const res = state.result;
             if (state.isFetching && !res) {
                 table.style.display = 'table';
-                setTableMessage(tbody, 5, 'Loading…');
+                tableController.showPlaceholder('Loading…');
                 updateFooter(null);
                 if (debug) debug.textContent = '';
                 return;
@@ -864,10 +871,10 @@
             if (!res || !res.ok) {
                 if (res) {
                     table.style.display = 'table';
-                    setTableMessage(tbody, 5, res.reason || 'No data available.');
+                    tableController.showPlaceholder(res.reason || 'No data available.');
                 } else {
                     table.style.display = 'none';
-                    tbody.innerHTML = '';
+                    tableController.showPlaceholder('Select a user and month to see worklogs.');
                 }
                 updateFooter(null);
                 if (debug) debug.textContent = '';
@@ -876,25 +883,48 @@
 
             const days = Array.isArray(res.days) ? res.days : [];
             table.style.display = 'table';
-            tbody.innerHTML = '';
-            days.forEach((d, idx) => {
-                const tr = document.createElement('tr');
-                tr.className = d.color || '';
+            if (!days.length) {
+                tableController.showPlaceholder('No data available.');
+                updateFooter(state);
+                if (debug) debug.textContent = '';
+                return;
+            }
+
+            const rows = days.map((d, idx) => {
                 const flags = [
                     d.isFuture ? 'future' : '',
                     d.isThuFri ? 'Thu/Fri' : '',
                     d.isHoliday ? 'holiday' : '',
                     d.isWorkday === false ? 'non-workday' : ''
                 ].filter(Boolean).join(', ');
-                tr.innerHTML = `
-                    <td>${idx + 1}</td>
-                    <td><span class="tip" data-tip="${d.g}">${d.j}</span></td>
-                    <td>${weekdayName(d.weekday)}</td>
-                    <td><small>${flags}</small></td>
-                    <td>${Number(d.hours || 0).toFixed(2)}</td>
-                `;
-                tbody.appendChild(tr);
+                const jalali = escapeHtml(d.j || '');
+                const gregorian = escapeHtml(d.g || '');
+                const hoursValue = Number(d.hours || 0);
+                return {
+                    className: d.color || '',
+                    cells: [
+                        { text: idx + 1, sortValue: idx + 1 },
+                        {
+                            html: `<span class="tip" data-tip="${gregorian}">${jalali}</span>`,
+                            sortValue: safeDateValue(d.g) ?? idx,
+                            filterValue: jalali,
+                            exportValue: jalali,
+                        },
+                        {
+                            text: weekdayName(d.weekday),
+                            filterValue: weekdayName(d.weekday),
+                        },
+                        { text: flags, filterValue: flags },
+                        {
+                            text: hoursValue.toFixed(2),
+                            sortValue: hoursValue,
+                            exportValue: hoursValue.toFixed(2),
+                        },
+                    ],
+                };
             });
+
+            tableController.setRows(rows);
 
             updateFooter(state);
             if (debug) {
@@ -1013,56 +1043,96 @@
         root.dataset.controllerReady = 'true';
 
         const table = root.querySelector('#detailedWorklogsTable');
-        const tbody = table?.querySelector('tbody');
-        if (!table || !tbody) {
+        if (!table || !table.querySelector('tbody')) {
             console.warn('Detailed worklogs view missing required elements.');
             return {};
         }
 
         setupIssueLinkHandler(root);
 
+        const tableController = createTableController(table, {
+            exportFileName: 'detailed-worklogs',
+            emptyMessage: 'No worklogs found.',
+            noMatchMessage: 'No worklogs match the current filters.',
+        });
+        setupTableExportButton(root, 'detailedWorklogsTable', tableController);
+
         reportStateInstance.subscribe((state) => {
             if (state.isFetching && !state.result) {
-                setTableMessage(tbody, 8, 'Loading…');
+                tableController.showPlaceholder('Loading…');
                 return;
             }
 
             const res = state.result;
             if (!res || !res.ok) {
                 const message = res ? (res.reason || 'Unable to load worklogs.') : 'No data yet.';
-                setTableMessage(tbody, 8, message);
+                tableController.showPlaceholder(message);
                 return;
             }
 
             const worklogs = Array.isArray(res.worklogs) ? res.worklogs : [];
             if (!worklogs.length) {
-                setTableMessage(tbody, 8, 'No worklogs found.');
+                tableController.showPlaceholder('No worklogs found.');
                 return;
             }
 
-            tbody.innerHTML = '';
-            Array.from(new Set(worklogs)).forEach((w, idx) => {
-                const tr = document.createElement('tr');
+            const uniqueWorklogs = Array.from(new Set(worklogs));
+            const rows = uniqueWorklogs.map((w, idx) => {
                 const issueUrl = buildIssueUrl(res.baseUrl, w.issueKey);
-                const issueCell = renderIssueLink(w.issueKey, issueUrl);
+                const issueCell = renderIssueLink(w.issueKey, issueUrl) || '<span class="muted">—</span>';
                 const jalaliDate = escapeHtml(w.persianDate || '');
                 const gregorianDate = escapeHtml(w.date || '');
-                const issueType = escapeHtml(w.issueType || '');
-                tr.innerHTML = `
-                    <td>${idx + 1}</td>
-                    <td><span class="tip" data-tip="${gregorianDate}">${jalaliDate}</span></td>
-                    <td>${issueType}</td>
-                    <td>${issueCell}</td>
-                    <td>${(w.summary || '').toString().replace(/\n/g, ' ')}</td>
-                    <td>${Number(w.hours || 0).toFixed(2)}</td>
-                    <td>${w.timeSpent || ''}</td>
-                    <td>${(w.comment || '').toString().replace(/\n/g, ' ')}</td>
-                `;
-                if (!w.dueDate) {
-                    tr.classList.add('no-due-date');
-                }
-                tbody.appendChild(tr);
+                const issueType = (w.issueType || '').toString().trim();
+                const summaryText = (w.summary || '').toString().replace(/\n/g, ' ').trim();
+                const hoursValue = Number(w.hours || 0);
+                const timeSpentDisplay = (w.timeSpent || '').toString();
+                const timeSpentSeconds = Number.isFinite(Number(w.timeSpentSeconds))
+                    ? Number(w.timeSpentSeconds)
+                    : parseDurationToSeconds(timeSpentDisplay);
+                const commentText = (w.comment || '').toString().replace(/\n/g, ' ').trim();
+                return {
+                    className: w.dueDate ? '' : 'no-due-date',
+                    cells: [
+                        { text: idx + 1, sortValue: idx + 1 },
+                        {
+                            html: `<span class="tip" data-tip="${gregorianDate}">${jalaliDate}</span>`,
+                            sortValue: safeDateValue(w.date || w.gregorianDate) ?? idx,
+                            filterValue: jalaliDate,
+                            exportValue: jalaliDate,
+                        },
+                        {
+                            text: issueType,
+                            filterValue: issueType,
+                            exportValue: issueType,
+                        },
+                        {
+                            html: issueCell,
+                            sortValue: (w.issueKey || '').toLowerCase(),
+                            exportValue: w.issueKey || '',
+                        },
+                        {
+                            text: summaryText,
+                            exportValue: summaryText,
+                        },
+                        {
+                            text: hoursValue.toFixed(2),
+                            sortValue: hoursValue,
+                            exportValue: hoursValue.toFixed(2),
+                        },
+                        {
+                            text: timeSpentDisplay,
+                            sortValue: timeSpentSeconds ?? timeSpentDisplay,
+                            exportValue: timeSpentDisplay,
+                        },
+                        {
+                            text: commentText,
+                            exportValue: commentText,
+                        },
+                    ],
+                };
             });
+
+            tableController.setRows(rows);
         });
 
         return {
@@ -1075,7 +1145,6 @@
         root.dataset.controllerReady = 'true';
 
         const table = root.querySelector('#dueThisMonthTable');
-        const tbody = table?.querySelector('tbody');
         const tfoot = table?.querySelector('tfoot');
         const footerCells = {
             estimate: tfoot?.querySelector('[data-footer-field="estimate"]') || null,
@@ -1104,77 +1173,118 @@
             if (footerCells.remaining) footerCells.remaining.textContent = totals.remaining;
         }
 
-        if (!table || !tbody) {
+        if (!table || !table.querySelector('tbody')) {
             console.warn('Due issues view missing required elements.');
             return {};
         }
 
         setupIssueLinkHandler(root);
 
+        const tableController = createTableController(table, {
+            exportFileName: 'due-issues',
+            emptyMessage: 'No due issues found.',
+            noMatchMessage: 'No due issues match the current filters.',
+            onRender: (rows) => {
+                if (!rows || rows.length === 0) {
+                    updateFooter(null);
+                    return;
+                }
+                const totals = rows.reduce((acc, row) => {
+                    const estimate = Number(row.cells[7]?.sortValue ?? row.cells[7]?.exportValue ?? 0);
+                    const logged = Number(row.cells[8]?.sortValue ?? row.cells[8]?.exportValue ?? 0);
+                    const remaining = Number(row.cells[9]?.sortValue ?? row.cells[9]?.exportValue ?? 0);
+                    acc.estimate += Number.isFinite(estimate) ? estimate : 0;
+                    acc.logged += Number.isFinite(logged) ? logged : 0;
+                    acc.remaining += Number.isFinite(remaining) ? remaining : 0;
+                    return acc;
+                }, { estimate: 0, logged: 0, remaining: 0 });
+                updateFooter({
+                    estimate: totals.estimate.toFixed(2),
+                    logged: totals.logged.toFixed(2),
+                    remaining: totals.remaining.toFixed(2),
+                });
+            },
+        });
+        setupTableExportButton(root, 'dueThisMonthTable', tableController);
+
         reportStateInstance.subscribe((state) => {
             if (state.isFetching && !state.result) {
-                setTableMessage(tbody, 10, 'Loading…');
-                resetFooter();
+                tableController.showPlaceholder('Loading…');
                 return;
             }
 
             const res = state.result;
             if (!res || !res.ok) {
                 const message = res ? (res.reason || 'Unable to load due issues.') : 'No data yet.';
-                setTableMessage(tbody, 10, message);
-                resetFooter();
+                tableController.showPlaceholder(message);
                 return;
             }
 
             const issues = Array.isArray(res.dueIssuesCurrentMonth) ? res.dueIssuesCurrentMonth : [];
             if (!issues.length) {
-                setTableMessage(tbody, 10, '—');
-                resetFooter();
+                tableController.showPlaceholder('—');
                 return;
             }
 
-            tbody.innerHTML = '';
-            let totals = {
-                estimate: 0,
-                logged: 0,
-                remaining: 0,
-            };
-            issues.forEach((issue, idx) => {
-                const summary = (issue.summary || '').toString().replace(/\n/g, ' ');
-                const tr = document.createElement('tr');
+            const rows = issues.map((issue, idx) => {
+                const summary = (issue.summary || '').toString().replace(/\n/g, ' ').trim();
                 const issueUrl = buildIssueUrl(res.baseUrl, issue.issueKey);
-                const issueCell = renderIssueLink(issue.issueKey, issueUrl);
+                const issueCell = renderIssueLink(issue.issueKey, issueUrl) || '<span class="muted">—</span>';
                 const dueJalaali = escapeHtml(issue.dueDateJalaali || issue.dueDate || '');
                 const dueGregorian = escapeHtml(issue.dueDateGregorian || issue.dueDate || '');
-                const issueType = escapeHtml(issue.issueType || '');
+                const issueType = (issue.issueType || '').toString().trim();
                 const sprints = Array.isArray(issue.sprints) ? issue.sprints.filter(Boolean) : [];
-                const sprintText = escapeHtml(sprints.length ? sprints.join(', ') : '—');
+                const sprintText = sprints.length ? sprints.join(', ') : '—';
+                const status = (issue.status || '').toString().trim();
                 const estimateHours = Number(issue.estimateHours || 0);
                 const loggedHours = Number(issue.loggedHours || 0);
                 const remainingHours = Number(issue.remainingHours || 0);
-                totals.estimate += estimateHours;
-                totals.logged += loggedHours;
-                totals.remaining += remainingHours;
-                tr.innerHTML = `
-                    <td>${idx + 1}</td>
-                    <td><span class="tip" data-tip="${dueGregorian}">${dueJalaali}</span></td>
-                    <td>${issueType}</td>
-                    <td>${issueCell}</td>
-                    <td>${summary}</td>
-                    <td>${sprintText}</td>
-                    <td>${issue.status || ''}</td>
-                    <td>${estimateHours.toFixed(2)}</td>
-                    <td>${loggedHours.toFixed(2)}</td>
-                    <td>${remainingHours.toFixed(2)}</td>
-                `;
-                tbody.appendChild(tr);
+                return {
+                    cells: [
+                        { text: idx + 1, sortValue: idx + 1 },
+                        {
+                            html: `<span class="tip" data-tip="${dueGregorian}">${dueJalaali}</span>`,
+                            sortValue: safeDateValue(issue.dueDateGregorian || issue.dueDate) ?? idx,
+                            filterValue: dueJalaali,
+                            exportValue: dueJalaali,
+                        },
+                        {
+                            text: issueType,
+                            filterValue: issueType,
+                            exportValue: issueType,
+                        },
+                        {
+                            html: issueCell,
+                            sortValue: (issue.issueKey || '').toLowerCase(),
+                            exportValue: issue.issueKey || '',
+                        },
+                        { text: summary, exportValue: summary },
+                        { text: sprintText, exportValue: sprintText },
+                        {
+                            text: status,
+                            filterValue: status,
+                            exportValue: status,
+                        },
+                        {
+                            text: estimateHours.toFixed(2),
+                            sortValue: estimateHours,
+                            exportValue: estimateHours.toFixed(2),
+                        },
+                        {
+                            text: loggedHours.toFixed(2),
+                            sortValue: loggedHours,
+                            exportValue: loggedHours.toFixed(2),
+                        },
+                        {
+                            text: remainingHours.toFixed(2),
+                            sortValue: remainingHours,
+                            exportValue: remainingHours.toFixed(2),
+                        },
+                    ],
+                };
             });
 
-            updateFooter({
-                estimate: totals.estimate.toFixed(2),
-                logged: totals.logged.toFixed(2),
-                remaining: totals.remaining.toFixed(2),
-            });
+            tableController.setRows(rows);
         });
 
         return {
@@ -1187,7 +1297,6 @@
         root.dataset.controllerReady = 'true';
 
         const table = root.querySelector('#issuesTable');
-        const tbody = table?.querySelector('tbody');
         const tfoot = table?.querySelector('tfoot');
         const footerCells = {
             estimate: tfoot?.querySelector('[data-footer-field="estimate"]') || null,
@@ -1216,63 +1325,80 @@
             if (footerCells.remaining) footerCells.remaining.textContent = totals.remaining;
         }
 
-        if (!table || !tbody) {
+        if (!table || !table.querySelector('tbody')) {
             console.warn('Issues view missing required elements.');
             return {};
         }
 
         setupIssueLinkHandler(root);
 
+        const tableController = createTableController(table, {
+            exportFileName: 'issues-report',
+            emptyMessage: 'No issues found.',
+            noMatchMessage: 'No issues match the current filters.',
+            onRender: (rows) => {
+                if (!rows || rows.length === 0) {
+                    updateFooter(null);
+                    return;
+                }
+                const totals = rows.reduce((acc, row) => {
+                    const estimate = Number(row.cells[10]?.sortValue ?? row.cells[10]?.exportValue ?? 0);
+                    const logged = Number(row.cells[11]?.sortValue ?? row.cells[11]?.exportValue ?? 0);
+                    const remaining = Number(row.cells[12]?.sortValue ?? row.cells[12]?.exportValue ?? 0);
+                    acc.estimate += Number.isFinite(estimate) ? estimate : 0;
+                    acc.logged += Number.isFinite(logged) ? logged : 0;
+                    acc.remaining += Number.isFinite(remaining) ? remaining : 0;
+                    return acc;
+                }, { estimate: 0, logged: 0, remaining: 0 });
+                updateFooter({
+                    estimate: totals.estimate.toFixed(2),
+                    logged: totals.logged.toFixed(2),
+                    remaining: totals.remaining.toFixed(2),
+                });
+            },
+        });
+        setupTableExportButton(root, 'issuesTable', tableController);
+
         reportStateInstance.subscribe((state) => {
             if (state.isFetching && !state.result) {
-                setTableMessage(tbody, 13, 'Loading…');
-                resetFooter();
+                tableController.showPlaceholder('Loading…');
                 return;
             }
 
             const res = state.result;
             if (!res || !res.ok) {
                 const message = res ? (res.reason || 'Unable to load issues.') : 'No data yet.';
-                setTableMessage(tbody, 13, message);
-                resetFooter();
+                tableController.showPlaceholder(message);
                 return;
             }
 
             const issues = Array.isArray(res.assignedIssues) ? res.assignedIssues : [];
             if (!issues.length) {
-                setTableMessage(tbody, 13, 'No issues found.');
-                resetFooter();
+                tableController.showPlaceholder('No issues found.');
                 return;
             }
 
-            tbody.innerHTML = '';
-            const totals = { estimate: 0, logged: 0, remaining: 0 };
-
-            issues.forEach((issue, idx) => {
-                const tr = document.createElement('tr');
+            const rows = issues.map((issue, idx) => {
                 const issueKey = issue.issueKey || '';
                 const issueUrl = buildIssueUrl(res.baseUrl, issueKey);
-                const issueCell = issueKey ? renderIssueLink(issueKey, issueUrl) : '—';
+                const issueCell = issueKey ? renderIssueLink(issueKey, issueUrl) : '<span class="muted">—</span>';
                 const updatedDisplay = escapeHtml(issue.updatedJalaali || '');
                 const updatedTooltip = escapeHtml(issue.updatedGregorian || '');
                 const dueDisplay = escapeHtml(issue.dueDateJalaali || '');
                 const dueTooltip = escapeHtml(issue.dueDateGregorian || '');
-                const issueType = escapeHtml(issue.issueType || '');
-                const summary = escapeHtml((issue.summary || '').toString().replace(/\n/g, ' '));
+                const issueType = (issue.issueType || '').toString().trim();
+                const summaryText = (issue.summary || '').toString().replace(/\n/g, ' ').trim();
                 const sprints = Array.isArray(issue.sprints) ? issue.sprints.filter(Boolean) : [];
-                const sprintText = escapeHtml(sprints.length ? sprints.join(', ') : '—');
-                const projectName = issue.projectName || issue.projectKey || '';
-                const projectText = projectName ? escapeHtml(projectName) : '—';
+                const sprintText = sprints.length ? sprints.join(', ') : '—';
+                const projectName = (issue.projectName || issue.projectKey || '').toString().trim();
+                const projectText = projectName || '—';
                 const boards = Array.isArray(issue.boardNames) ? issue.boardNames.filter(Boolean) : [];
-                const boardText = boards.length ? escapeHtml(boards.join(', ')) : '—';
-                const status = escapeHtml(issue.status || '');
+                const boardText = boards.length ? boards.join(', ') : '—';
+                const status = (issue.status || '').toString().trim();
 
                 const estimateHours = Number(issue.estimateHours || 0);
                 const loggedHours = Number(issue.loggedHours || 0);
                 const remainingHours = Number(issue.remainingHours || 0);
-                totals.estimate += estimateHours;
-                totals.logged += loggedHours;
-                totals.remaining += remainingHours;
 
                 const updatedCell = updatedDisplay
                     ? `<span class="tip" data-tip="${updatedTooltip || updatedDisplay}">${updatedDisplay}</span>`
@@ -1281,29 +1407,68 @@
                     ? `<span class="tip" data-tip="${dueTooltip || dueDisplay}">${dueDisplay}</span>`
                     : '<span class="muted">—</span>';
 
-                tr.innerHTML = `
-                    <td>${idx + 1}</td>
-                    <td>${updatedCell}</td>
-                    <td>${dueCell}</td>
-                    <td>${issueType}</td>
-                    <td>${issueCell}</td>
-                    <td>${summary}</td>
-                    <td>${sprintText}</td>
-                    <td>${projectText}</td>
-                    <td>${boardText}</td>
-                    <td>${status}</td>
-                    <td>${estimateHours.toFixed(2)}</td>
-                    <td>${loggedHours.toFixed(2)}</td>
-                    <td>${remainingHours.toFixed(2)}</td>
-                `;
-                tbody.appendChild(tr);
+                return {
+                    cells: [
+                        { text: idx + 1, sortValue: idx + 1 },
+                        {
+                            html: updatedCell,
+                            sortValue: safeDateValue(issue.updatedGregorian || issue.updatedJalaali) ?? idx,
+                            filterValue: updatedDisplay,
+                            exportValue: updatedDisplay || '',
+                        },
+                        {
+                            html: dueCell,
+                            sortValue: safeDateValue(issue.dueDateGregorian || issue.dueDateJalaali) ?? idx,
+                            filterValue: dueDisplay,
+                            exportValue: dueDisplay || '',
+                        },
+                        {
+                            text: issueType,
+                            filterValue: issueType,
+                            exportValue: issueType,
+                        },
+                        {
+                            html: issueCell,
+                            sortValue: issueKey.toLowerCase(),
+                            exportValue: issueKey,
+                        },
+                        { text: summaryText, exportValue: summaryText },
+                        { text: sprintText, exportValue: sprintText },
+                        {
+                            text: projectText,
+                            filterValue: projectText,
+                            exportValue: projectText,
+                        },
+                        {
+                            text: boardText,
+                            filterValue: boardText,
+                            exportValue: boardText,
+                        },
+                        {
+                            text: status,
+                            filterValue: status,
+                            exportValue: status,
+                        },
+                        {
+                            text: estimateHours.toFixed(2),
+                            sortValue: estimateHours,
+                            exportValue: estimateHours.toFixed(2),
+                        },
+                        {
+                            text: loggedHours.toFixed(2),
+                            sortValue: loggedHours,
+                            exportValue: loggedHours.toFixed(2),
+                        },
+                        {
+                            text: remainingHours.toFixed(2),
+                            sortValue: remainingHours,
+                            exportValue: remainingHours.toFixed(2),
+                        },
+                    ],
+                };
             });
 
-            updateFooter({
-                estimate: totals.estimate.toFixed(2),
-                logged: totals.logged.toFixed(2),
-                remaining: totals.remaining.toFixed(2),
-            });
+            tableController.setRows(rows);
         });
 
         return {
@@ -1316,75 +1481,592 @@
         root.dataset.controllerReady = 'true';
 
         const table = root.querySelector('#quarterReportTable');
-        const tbody = table?.querySelector('tbody');
-        if (!table || !tbody) {
+        if (!table || !table.querySelector('tbody')) {
             console.warn('Quarter report view missing required elements.');
             return {};
         }
 
+        const tableController = createTableController(table, {
+            exportFileName: 'quarter-report',
+            emptyMessage: 'Select a user and month to see the quarter report.',
+            noMatchMessage: 'No rows match the current filters.',
+        });
+        setupTableExportButton(root, 'quarterReportTable', tableController);
+
         reportStateInstance.subscribe((state) => {
             if (state.isFetching && !state.result) {
-                setTableMessage(tbody, 7, 'Loading…');
+                tableController.showPlaceholder('Loading…');
                 return;
             }
 
             const res = state.result;
             if (!res || !res.ok) {
                 const message = res ? (res.reason || 'Unable to load quarter report.') : 'No data yet.';
-                setTableMessage(tbody, 7, message);
+                tableController.showPlaceholder(message);
                 return;
             }
 
             const data = res.quarterReport;
             if (!data?.ok || !Array.isArray(data.seasons) || data.seasons.length === 0) {
-                setTableMessage(tbody, 7, '—');
+                tableController.showPlaceholder('—');
                 return;
             }
 
-            tbody.innerHTML = '';
-            data.seasons.forEach((season) => {
-                const tr = document.createElement('tr');
+            const rows = data.seasons.map((season) => {
                 const months = Array.isArray(season.months) ? season.months.slice(0, 3) : [];
                 while (months.length < 3) {
                     months.push(null);
                 }
-                const monthsHtml = months.map((month) => {
+                const monthCells = months.map((month) => {
                     if (!month) {
-                        return '<div class="quarter-month"><span class="muted">—</span></div>';
+                        return {
+                            html: '<div class="quarter-month"><span class="muted">—</span></div>',
+                            exportValue: '—',
+                        };
                     }
                     const label = month.label || `Month ${month.jMonth}`;
                     if (!month.ok) {
                         const reason = month.reason || 'No data';
-                        return `<div class="quarter-month"><strong>${label}</strong><span class="muted">${reason}</span></div>`;
+                        return {
+                            html: `<div class="quarter-month"><strong>${label}</strong><span class="muted">${escapeHtml(reason)}</span></div>`,
+                            exportValue: `${label}: ${reason}`,
+                        };
                     }
                     const delta = Number.parseFloat(month.delta || 0) || 0;
                     const deltaCls = delta >= 0 ? 'delta-pos' : 'delta-neg';
-                    return `
-                        <div class="quarter-month">
-                            <strong>${label}</strong>
-                            <div>${formatHours(month.totalHours)} h</div>
-                            <div class="muted">Exp ${formatHours(month.expectedHours)} h</div>
-                            <div class="${deltaCls}">${delta.toFixed(2)} h</div>
-                        </div>
-                    `;
+                    const totalHours = formatHours(month.totalHours);
+                    const expectedHours = formatHours(month.expectedHours);
+                    return {
+                        html: `
+                            <div class="quarter-month">
+                                <strong>${escapeHtml(label)}</strong>
+                                <div>${totalHours} h</div>
+                                <div class="muted">Exp ${expectedHours} h</div>
+                                <div class="${deltaCls}">${delta.toFixed(2)} h</div>
+                            </div>
+                        `,
+                        exportValue: `${label}: ${totalHours}h (Exp ${expectedHours}h, Δ ${delta.toFixed(2)}h)`,
+                    };
                 });
                 const totals = season.totals || {};
                 const totalDelta = Number.parseFloat(totals.delta || 0) || 0;
                 const totalDeltaCls = totalDelta >= 0 ? 'delta-pos' : 'delta-neg';
-                tr.innerHTML = `
-                    <td><strong>${season.label || 'Season'}</strong></td>
-                    ${monthsHtml.map((html) => `<td>${html}</td>`).join('')}
-                    <td>${formatHours(totals.totalHours)} h</td>
-                    <td>${formatHours(totals.expectedHours)} h</td>
-                    <td class="${totalDeltaCls}">${totalDelta.toFixed(2)} h</td>
-                `;
-                tbody.appendChild(tr);
+                const totalHours = Number(totals.totalHours || 0);
+                const expectedHours = Number(totals.expectedHours || 0);
+                return {
+                    cells: [
+                        {
+                            text: season.label || 'Season',
+                            exportValue: season.label || 'Season',
+                        },
+                        ...monthCells.map((cell) => ({
+                            html: cell.html,
+                            exportValue: cell.exportValue,
+                        })),
+                        {
+                            text: `${formatHours(totalHours)} h`,
+                            sortValue: totalHours,
+                            exportValue: formatHours(totalHours),
+                        },
+                        {
+                            text: `${formatHours(expectedHours)} h`,
+                            sortValue: expectedHours,
+                            exportValue: formatHours(expectedHours),
+                        },
+                        {
+                            html: `<span class="${totalDeltaCls}">${totalDelta.toFixed(2)} h</span>`,
+                            sortValue: totalDelta,
+                            exportValue: totalDelta.toFixed(2),
+                        },
+                    ],
+                };
             });
+
+            tableController.setRows(rows);
         });
 
         return {
             onShow: () => reportStateInstance.refresh()
         };
+    }
+
+    function createTableController(table, options = {}) {
+        if (!table) return null;
+        if (tableControllers.has(table)) {
+            const existing = tableControllers.get(table);
+            if (options && typeof options.onRender === 'function') {
+                existing.setRenderCallback(options.onRender);
+            }
+            if (options && options.exportFileName) {
+                existing.setExportName(options.exportFileName);
+            }
+            return existing;
+        }
+
+        const tbody = table.querySelector('tbody');
+        const headers = Array.from(table.querySelectorAll('thead th'));
+        if (!tbody || !headers.length) {
+            console.warn('Table controller cannot initialise without tbody/header.', table);
+            const noop = {
+                setRows: () => {},
+                showPlaceholder: () => {},
+                exportToExcel: () => {},
+                resetFilters: () => {},
+                setRenderCallback: () => {},
+                setExportName: () => {},
+                refresh: () => {},
+                getVisibleRows: () => [],
+            };
+            tableControllers.set(table, noop);
+            return noop;
+        }
+
+        const defaultSettings = {
+            exportFileName: table.id || 'table-export',
+            emptyMessage: 'No data available.',
+            noMatchMessage: 'No records match the current filters.',
+            onRender: null,
+        };
+        const settings = { ...defaultSettings, ...options };
+        const state = {
+            rows: [],
+            visibleRows: [],
+            sortIndex: null,
+            sortDirection: 'asc',
+            filters: new Map(),
+            filterControls: new Map(),
+            onRender: typeof settings.onRender === 'function' ? settings.onRender : null,
+            exportName: ensureExcelFileName(settings.exportFileName),
+            emptyMessage: settings.emptyMessage,
+            noMatchMessage: settings.noMatchMessage,
+            placeholderMessage: null,
+        };
+
+        const columns = headers.map((th, index) => {
+            const dataset = th.dataset || {};
+            const labelText = th.textContent.trim() || `Column ${index + 1}`;
+            const columnType = (dataset.type || '').toLowerCase();
+            const column = {
+                index,
+                th,
+                label: labelText,
+                type: columnType || 'string',
+                sortable: dataset.sortable !== 'false',
+                filterable: dataset.filterable === 'true',
+            };
+            th.textContent = '';
+            const wrapper = document.createElement('div');
+            wrapper.className = 'table-head-cell';
+            const labelEl = document.createElement('span');
+            labelEl.className = 'table-header__label';
+            labelEl.textContent = labelText;
+            wrapper.appendChild(labelEl);
+            if (column.filterable) {
+                const filterSelect = document.createElement('select');
+                filterSelect.className = 'table-filter';
+                filterSelect.innerHTML = '<option value="">All</option>';
+                filterSelect.addEventListener('change', () => {
+                    const value = filterSelect.value;
+                    if (value) {
+                        state.filters.set(index, value);
+                    } else {
+                        state.filters.delete(index);
+                    }
+                    state.placeholderMessage = null;
+                    render();
+                });
+                filterSelect.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                });
+                state.filterControls.set(index, filterSelect);
+                wrapper.appendChild(filterSelect);
+            }
+            th.appendChild(wrapper);
+            if (column.sortable) {
+                th.classList.add('is-sortable');
+                th.dataset.sortDirection = 'none';
+                th.addEventListener('click', (event) => {
+                    if (event.target instanceof Element && event.target.closest('.table-filter')) {
+                        return;
+                    }
+                    toggleSort(index);
+                });
+            } else {
+                th.dataset.sortDirection = 'none';
+            }
+            return column;
+        });
+
+        function toggleSort(index) {
+            if (state.sortIndex === index) {
+                if (state.sortDirection === 'asc') {
+                    state.sortDirection = 'desc';
+                } else if (state.sortDirection === 'desc') {
+                    state.sortIndex = null;
+                    state.sortDirection = 'asc';
+                } else {
+                    state.sortDirection = 'asc';
+                }
+            } else {
+                state.sortIndex = index;
+                state.sortDirection = 'asc';
+            }
+            headers.forEach((header, idx) => {
+                const dir = idx === state.sortIndex ? state.sortDirection : 'none';
+                header.dataset.sortDirection = dir || 'none';
+            });
+            state.placeholderMessage = null;
+            render();
+        }
+
+        function setRows(rows) {
+            const normalisedRows = Array.isArray(rows)
+                ? rows.map((row) => normaliseRow(row))
+                : [];
+            state.rows = normalisedRows;
+            state.placeholderMessage = null;
+            updateFilterOptions();
+            render();
+        }
+
+        function showPlaceholder(message) {
+            state.placeholderMessage = message || state.emptyMessage;
+            state.visibleRows = [];
+            headers.forEach((header) => {
+                header.dataset.sortDirection = 'none';
+            });
+            tbody.innerHTML = '';
+            const tr = document.createElement('tr');
+            const td = document.createElement('td');
+            td.colSpan = columns.length || 1;
+            td.textContent = state.placeholderMessage;
+            tr.appendChild(td);
+            tbody.appendChild(tr);
+            if (typeof state.onRender === 'function') {
+                state.onRender([]);
+            }
+        }
+
+        function render() {
+            if (state.placeholderMessage != null) {
+                return;
+            }
+            const filtered = applyFilters(state.rows);
+            const sorted = applySort(filtered);
+            state.visibleRows = sorted;
+            headers.forEach((header, idx) => {
+                const dir = idx === state.sortIndex ? state.sortDirection : 'none';
+                header.dataset.sortDirection = dir || 'none';
+            });
+            tbody.innerHTML = '';
+            if (!sorted.length) {
+                const tr = document.createElement('tr');
+                const td = document.createElement('td');
+                td.colSpan = columns.length || 1;
+                td.textContent = state.rows.length ? state.noMatchMessage : state.emptyMessage;
+                tr.appendChild(td);
+                tbody.appendChild(tr);
+                if (typeof state.onRender === 'function') {
+                    state.onRender([]);
+                }
+                return;
+            }
+            sorted.forEach((row) => {
+                const tr = document.createElement('tr');
+                if (row.className) {
+                    tr.className = row.className;
+                }
+                row.cells.forEach((cell) => {
+                    const td = document.createElement('td');
+                    if (cell.html != null) {
+                        td.innerHTML = cell.html;
+                    } else {
+                        td.textContent = cell.text != null ? cell.text : '';
+                    }
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            if (typeof state.onRender === 'function') {
+                state.onRender(sorted);
+            }
+        }
+
+        function applyFilters(rows) {
+            let result = rows;
+            state.filters.forEach((value, index) => {
+                if (!value) return;
+                result = result.filter((row) => normaliseFilterKey(row.cells[index]?.filterValue) === value);
+            });
+            return result;
+        }
+
+        function applySort(rows) {
+            if (state.sortIndex == null) {
+                return rows.slice();
+            }
+            const column = columns[state.sortIndex];
+            const direction = state.sortDirection === 'desc' ? -1 : 1;
+            return rows.slice().sort((a, b) => {
+                return compareCellValues(a.cells[state.sortIndex], b.cells[state.sortIndex], column.type) * direction;
+            });
+        }
+
+        function updateFilterOptions() {
+            state.filterControls.forEach((select, index) => {
+                const previous = select.value;
+                const options = new Map();
+                state.rows.forEach((row) => {
+                    const cell = row.cells[index];
+                    const label = cell?.filterValue;
+                    const key = normaliseFilterKey(label);
+                    if (!key) return;
+                    if (!options.has(key)) {
+                        options.set(key, String(label ?? ''));
+                    }
+                });
+                const entries = Array.from(options.entries()).sort((a, b) => {
+                    return String(a[1] ?? '').localeCompare(String(b[1] ?? ''), undefined, { sensitivity: 'base' });
+                });
+                const htmlParts = ['<option value="">All</option>'];
+                entries.forEach(([key, label]) => {
+                    htmlParts.push(`<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`);
+                });
+                select.innerHTML = htmlParts.join('');
+                if (previous && options.has(previous)) {
+                    select.value = previous;
+                    state.filters.set(index, previous);
+                } else {
+                    select.value = '';
+                    state.filters.delete(index);
+                }
+            });
+        }
+
+        function normaliseRow(row) {
+            const cells = Array.isArray(row?.cells) ? row.cells : [];
+            return {
+                className: row?.className || '',
+                cells: columns.map((column, idx) => normaliseCell(cells[idx], column)),
+            };
+        }
+
+        function normaliseCell(cell, column) {
+            const source = cell && typeof cell === 'object' ? cell : {};
+            const html = source.html != null ? String(source.html) : null;
+            let text = source.text;
+            if (text == null) {
+                if (html != null) {
+                    text = stripHtmlContent(html);
+                } else if (source.value != null) {
+                    text = source.value;
+                } else {
+                    text = '';
+                }
+            }
+            const sortValue = source.sortValue != null ? source.sortValue : inferSortValue(text, column.type);
+            const filterValue = source.filterValue != null ? source.filterValue : text;
+            const exportValue = source.exportValue != null
+                ? source.exportValue
+                : html != null
+                    ? stripHtmlContent(html)
+                    : text;
+            return {
+                html,
+                text: text != null ? String(text) : '',
+                sortValue,
+                filterValue,
+                exportValue,
+            };
+        }
+
+        function inferSortValue(value, type) {
+            if (type === 'number' || type === 'duration') {
+                const num = Number(value);
+                return Number.isFinite(num) ? num : null;
+            }
+            if (type === 'date') {
+                return safeDateValue(value);
+            }
+            return value;
+        }
+
+        function compareCellValues(cellA, cellB, type) {
+            if (type === 'number' || type === 'date' || type === 'duration') {
+                const a = Number(cellA?.sortValue);
+                const b = Number(cellB?.sortValue);
+                const validA = Number.isFinite(a);
+                const validB = Number.isFinite(b);
+                if (!validA && !validB) return 0;
+                if (!validA) return 1;
+                if (!validB) return -1;
+                if (a === b) return 0;
+                return a - b;
+            }
+            const aStr = String(cellA?.sortValue ?? cellA?.text ?? '').toLowerCase();
+            const bStr = String(cellB?.sortValue ?? cellB?.text ?? '').toLowerCase();
+            return aStr.localeCompare(bStr);
+        }
+
+        const controller = {
+            setRows,
+            showPlaceholder,
+            exportToExcel() {
+                const rowsForExport = state.placeholderMessage != null
+                    ? []
+                    : (state.visibleRows.length ? state.visibleRows : applySort(applyFilters(state.rows)));
+                downloadTableDataAsExcel(columns, rowsForExport, state.exportName);
+            },
+            resetFilters() {
+                state.filters.clear();
+                state.filterControls.forEach((select) => {
+                    select.value = '';
+                });
+                state.placeholderMessage = null;
+                render();
+            },
+            setRenderCallback(callback) {
+                state.onRender = typeof callback === 'function' ? callback : null;
+                if (state.onRender) {
+                    state.onRender(state.visibleRows.slice());
+                }
+            },
+            setExportName(name) {
+                if (name) {
+                    state.exportName = ensureExcelFileName(name);
+                }
+            },
+            refresh() {
+                state.placeholderMessage = null;
+                render();
+            },
+            getVisibleRows() {
+                return state.visibleRows.slice();
+            }
+        };
+
+        tableControllers.set(table, controller);
+        return controller;
+    }
+
+    function setupTableExportButton(root, tableId, controller) {
+        if (!root || !controller) return;
+        const selector = `[data-export-for="${tableId}"]`;
+        const button = root.querySelector(selector) || document.querySelector(selector);
+        if (!button || button.dataset.exportReady === 'true') return;
+        button.addEventListener('click', () => {
+            try {
+                controller.exportToExcel();
+            } catch (err) {
+                console.error('Failed to export table', err);
+            }
+        });
+        button.dataset.exportReady = 'true';
+    }
+
+    function ensureExcelFileName(name) {
+        const fallback = 'table-export';
+        if (!name) return fallback;
+        const base = String(name).trim().replace(/[\\/:*?"<>|]+/g, '_');
+        return base || fallback;
+    }
+
+    function downloadTableDataAsExcel(columns, rows, filename) {
+        const safeName = ensureExcelFileName(filename);
+        const headerHtml = columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join('');
+        const bodyHtml = rows.map((row) => {
+            const cellsHtml = row.cells.map((cell) => `<td>${escapeHtml(cell.exportValue ?? cell.text ?? '')}</td>`).join('');
+            return `<tr>${cellsHtml}</tr>`;
+        }).join('');
+        const tableHtml = `<table><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table>`;
+        const blob = new Blob(['\ufeff' + tableHtml], { type: 'application/vnd.ms-excel' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = safeName.toLowerCase().endsWith('.xls') ? safeName : `${safeName}.xls`;
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => {
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }, 0);
+    }
+
+    function normaliseFilterKey(value) {
+        if (value == null) return '';
+        return toAsciiDigits(String(value)).trim().toLowerCase();
+    }
+
+    function stripHtmlContent(value) {
+        if (value == null) return '';
+        const helper = document.createElement('div');
+        helper.innerHTML = value;
+        const text = helper.textContent || helper.innerText || '';
+        return text;
+    }
+
+    function parseDurationToSeconds(value) {
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return value;
+        }
+        if (typeof value !== 'string') {
+            return null;
+        }
+        const text = value.trim();
+        if (!text) {
+            return null;
+        }
+        let total = 0;
+        let matched = false;
+        const pattern = /([0-9]+(?:\.[0-9]+)?)\s*(w|d|h|m|s)/gi;
+        let match;
+        while ((match = pattern.exec(text)) !== null) {
+            matched = true;
+            const amount = Number.parseFloat(match[1]);
+            if (!Number.isFinite(amount)) {
+                continue;
+            }
+            const unit = match[2].toLowerCase();
+            const multiplier = unit === 'w'
+                ? 604800
+                : unit === 'd'
+                    ? 86400
+                    : unit === 'h'
+                        ? 3600
+                        : unit === 'm'
+                            ? 60
+                            : 1;
+            total += amount * multiplier;
+        }
+        if (matched) {
+            return total;
+        }
+        const numeric = Number.parseFloat(text);
+        return Number.isFinite(numeric) ? numeric : null;
+    }
+
+    function safeDateValue(value) {
+        if (!value) return null;
+        if (value instanceof Date) {
+            const timestamp = value.getTime();
+            return Number.isFinite(timestamp) ? timestamp : null;
+        }
+        const normalised = toAsciiDigits(String(value).trim());
+        if (!normalised) return null;
+        const parsed = Date.parse(normalised);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+        const digits = normalised.replace(/[^0-9]/g, '');
+        if (digits.length >= 8) {
+            const year = Number.parseInt(digits.slice(0, 4), 10);
+            const month = Number.parseInt(digits.slice(4, 6), 10) - 1;
+            const day = Number.parseInt(digits.slice(6, 8), 10);
+            const candidate = new Date(year, month >= 0 ? month : 0, day >= 1 ? day : 1);
+            const timestamp = candidate.getTime();
+            return Number.isFinite(timestamp) ? timestamp : null;
+        }
+        return null;
     }
 
     function buildYearRange(baseYear, ...extra) {

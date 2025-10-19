@@ -1,16 +1,21 @@
 <div class="app">
-    <div class="section-title">Quarter Report</div>
+    <div class="table-header">
+        <div class="section-title">Quarter Report</div>
+        <div class="table-header__actions">
+            <button type="button" class="table-export" data-export-for="quarterReportTable">Export to Excel</button>
+        </div>
+    </div>
     <div class="table-wrap">
         <table id="quarterReportTable">
             <thead>
             <tr>
-                <th>Season</th>
-                <th>Month 1</th>
-                <th>Month 2</th>
-                <th>Month 3</th>
-                <th>Quarter Total</th>
-                <th>Expected</th>
-                <th>Delta</th>
+                <th data-type="string">Season</th>
+                <th data-type="string">Month 1</th>
+                <th data-type="string">Month 2</th>
+                <th data-type="string">Month 3</th>
+                <th data-type="number">Quarter Total</th>
+                <th data-type="number">Expected</th>
+                <th data-type="number">Delta</th>
             </tr>
             </thead>
             <tbody>

@@ -1,17 +1,22 @@
 <div class="app">
-    <div class="section-title">Detailed Worklogs</div>
+    <div class="table-header">
+        <div class="section-title">Detailed Worklogs</div>
+        <div class="table-header__actions">
+            <button type="button" class="table-export" data-export-for="detailedWorklogsTable">Export to Excel</button>
+        </div>
+    </div>
     <div class="table-wrap">
         <table id="detailedWorklogsTable">
             <thead>
             <tr>
-                <th>#</th>
-                <th>Jalaali Date</th>
-                <th>Type</th>
-                <th>Issue</th>
-                <th>Summary</th>
-                <th>Hours</th>
-                <th>Time Spent</th>
-                <th>Comment</th>
+                <th data-type="number">#</th>
+                <th data-type="date">Jalaali Date</th>
+                <th data-type="string" data-filterable="true">Type</th>
+                <th data-type="string">Issue</th>
+                <th data-type="string">Summary</th>
+                <th data-type="number">Hours</th>
+                <th data-type="duration">Time Spent</th>
+                <th data-type="string">Comment</th>
             </tr>
             </thead>
             <tbody>

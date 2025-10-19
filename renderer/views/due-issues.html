@@ -1,19 +1,24 @@
 <div class="app">
-    <div class="section-title">Issues Due This Month</div>
+    <div class="table-header">
+        <div class="section-title">Issues Due This Month</div>
+        <div class="table-header__actions">
+            <button type="button" class="table-export" data-export-for="dueThisMonthTable">Export to Excel</button>
+        </div>
+    </div>
     <div class="table-wrap">
         <table id="dueThisMonthTable">
             <thead>
             <tr>
-                <th>#</th>
-                <th>Due Date (Jalaali)</th>
-                <th>Type</th>
-                <th>Issue</th>
-                <th>Title</th>
-                <th>Sprints</th>
-                <th>Status</th>
-                <th>Estimate (h)</th>
-                <th>Logged (h)</th>
-                <th>Remaining (h)</th>
+                <th data-type="number">#</th>
+                <th data-type="date">Due Date (Jalaali)</th>
+                <th data-type="string" data-filterable="true">Type</th>
+                <th data-type="string">Issue</th>
+                <th data-type="string">Title</th>
+                <th data-type="string">Sprints</th>
+                <th data-type="string" data-filterable="true">Status</th>
+                <th data-type="number">Estimate (h)</th>
+                <th data-type="number">Logged (h)</th>
+                <th data-type="number">Remaining (h)</th>
             </tr>
             </thead>
             <tbody>
