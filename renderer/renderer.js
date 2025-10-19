@@ -1886,8 +1886,7 @@
         const selectedYearMonth = formatJalaaliYearMonth(selection.jYear, selection.jMonth);
         const usernamePart = sanitizeFilenamePart(selection.username, 'unknown-user');
         const tableNamePart = sanitizeFilenamePart(state.exportName || 'table', 'table');
-        const exportYearMonth = formatJalaaliYearMonth(getCurrentJalaaliYear(), getCurrentJalaaliMonth());
-        const fileName = `selectedYearAndMonth(${selectedYearMonth})_${usernamePart}_${tableNamePart}_exportDate(${exportYearMonth}).xls`;
+        const fileName = `${selectedYearMonth}_${usernamePart}_${tableNamePart}.xls`;
         link.href = url;
         link.download = fileName;
         document.body.appendChild(link);
@@ -2054,7 +2053,7 @@
         const safeMonth = Math.min(Math.max(parsedMonth, 1), 12);
         const yearPart = String(parsedYear).padStart(4, '0');
         const monthPart = String(safeMonth).padStart(2, '0');
-        return `${yearPart}j${monthPart}`;
+        return `${yearPart}${monthPart}`;
     }
 
     function sanitizeFilenamePart(value, fallback = 'unknown') {
