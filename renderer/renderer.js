@@ -1850,6 +1850,62 @@
         return (cell.dataset.exportValue || cell.dataset.filterValue || cell.textContent || '').trim();
     }
 
+    function formatJalaaliYearMonth(jYear, jMonth) {
+        const year = parseJalaaliInt(jYear);
+        const month = parseJalaaliInt(jMonth);
+        if (!Number.isFinite(year) || !Number.isFinite(month)) {
+            return null;
+        }
+        const safeYear = Math.max(0, year);
+        const safeMonth = Math.min(Math.max(1, month), 12);
+        return `${safeYear.toString().padStart(4, '0')}${safeMonth.toString().padStart(2, '0')}`;
+    }
+
+    function getCurrentJalaaliYearMonth() {
+        try {
+            const formatter = new Intl.DateTimeFormat('fa-IR-u-ca-persian', {
+                year: 'numeric',
+                month: '2-digit'
+            });
+            const parts = formatter.formatToParts(new Date());
+            const yearPart = parts.find((part) => part.type === 'year')?.value || '';
+            const monthPart = parts.find((part) => part.type === 'month')?.value || '';
+            const year = toAsciiDigits(yearPart).trim();
+            const month = toAsciiDigits(monthPart).trim();
+            if (year && month) {
+                return `${year.padStart(4, '0')}${month.padStart(2, '0')}`;
+            }
+        } catch (err) {
+            console.warn('Unable to determine current Jalaali year/month for export name.', err);
+        }
+        return null;
+    }
+
+    function sanitizeFileNamePart(value, fallback) {
+        const base = String(value ?? '').trim();
+        if (!base) return fallback;
+        const normalized = base.normalize('NFKD');
+        const asciiDigits = toAsciiDigits(normalized);
+        const ascii = asciiDigits.replace(/[^\x00-\x7F]/g, '');
+        const cleaned = ascii
+            .replace(/[^A-Za-z0-9._-]+/g, '_')
+            .replace(/_{2,}/g, '_')
+            .replace(/^_+|_+$/g, '');
+        return cleaned || fallback;
+    }
+
+    function buildExportFileName(state) {
+        const selection = typeof reportState?.getSelection === 'function' ? reportState.getSelection() : {};
+        const selectedYearMonthRaw = formatJalaaliYearMonth(selection?.jYear, selection?.jMonth);
+        const exportYearMonthRaw = getCurrentJalaaliYearMonth() || selectedYearMonthRaw || null;
+        const usernamePart = sanitizeFileNamePart(selection?.username, 'user');
+        const tableNameSource = state.exportName || state.table?.id || 'table';
+        const tablePart = sanitizeFileNamePart(tableNameSource, 'table');
+        const selectedPart = selectedYearMonthRaw || 'unknown';
+        const exportPart = exportYearMonthRaw || 'unknown';
+        return `selectedYearAndMonth(${selectedPart})_${usernamePart}_${tablePart}_exportDate(${exportPart})`;
+    }
+
     function exportTableToExcel(state) {
         const table = state.table;
         const rows = state.displayRows && state.displayRows.length ? state.displayRows : state.rawRows;
@@ -1878,9 +1934,9 @@
         const blob = new Blob([`\ufeff${tableHtml}`], { type: 'application/vnd.ms-excel' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
-        const datePart = new Date().toISOString().slice(0, 10);
         link.href = url;
-        link.download = `${state.exportName || 'table'}-${datePart}.xls`;
+        const exportBaseName = buildExportFileName(state);
+        link.download = `${exportBaseName}.xls`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
