@@ -195,6 +195,90 @@
     const initialActive = Array.from(viewNodes.entries()).find(([, el]) => el.classList.contains('is-active'));
     const defaultRoute = initialActive ? initialActive[0] : (navItems[0]?.dataset.route || 'monthly-summary');
     let activeRoute = null;
+    const navGroupStates = [];
+    const navGroupElements = $$('[data-nav-group]');
+    navGroupElements.forEach((group) => {
+        const toggle = group.querySelector('[data-nav-group-toggle]');
+        const content = group.querySelector('[data-nav-group-content]');
+        if (!toggle || !content) {
+            return;
+        }
+        const routes = $$('[data-route]', content)
+            .map((btn) => btn.dataset.route)
+            .filter(Boolean);
+        const state = { group, toggle, content, routes };
+        const height = content.scrollHeight;
+        content.style.setProperty('--nav-group-items-max', `${height}px`);
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.addEventListener('click', () => {
+            const isOpen = group.classList.contains('is-open');
+            if (isOpen) {
+                if (routes.includes(activeRoute)) {
+                    return;
+                }
+                setGroupOpen(state, false);
+            } else {
+                setExclusiveOpen(state);
+            }
+        });
+        navGroupStates.push(state);
+    });
+
+    function refreshGroupMeasurement(state) {
+        if (!state?.content) return;
+        const height = state.content.scrollHeight;
+        state.content.style.setProperty('--nav-group-items-max', `${Math.max(0, height)}px`);
+    }
+
+    function setGroupOpen(state, open) {
+        if (!state) return;
+        const { group, toggle } = state;
+        if (!group || !toggle) return;
+        refreshGroupMeasurement(state);
+        const wasOpen = group.classList.contains('is-open');
+        if (open === wasOpen) {
+            return;
+        }
+        group.classList.toggle('is-open', open);
+        toggle.setAttribute('aria-expanded', String(Boolean(open)));
+    }
+
+    function setExclusiveOpen(target) {
+        navGroupStates.forEach((state) => {
+            setGroupOpen(state, state === target);
+        });
+    }
+
+    function closeAllNavGroups() {
+        navGroupStates.forEach((state) => setGroupOpen(state, false));
+    }
+
+    function updateNavGroupsForRoute(route) {
+        let matched = null;
+        navGroupStates.forEach((state) => {
+            const hasRoute = state.routes.includes(route);
+            state.group.classList.toggle('has-active', hasRoute);
+            if (hasRoute) {
+                matched = state;
+            }
+        });
+        if (matched) {
+            setExclusiveOpen(matched);
+        } else {
+            closeAllNavGroups();
+        }
+    }
+
+    if (navGroupStates.length > 0) {
+        const recalcNavGroupHeights = () => {
+            navGroupStates.forEach((state) => refreshGroupMeasurement(state));
+        };
+        window.addEventListener('resize', recalcNavGroupHeights);
+        window.addEventListener('load', recalcNavGroupHeights);
+        requestAnimationFrame(recalcNavGroupHeights);
+    }
+
+    let navGroupsReady = false;
 
     function setRoute(route, { pushState = true } = {}) {
         if (!viewNodes.has(route)) {
@@ -232,6 +316,14 @@
 
         const previousRoute = activeRoute;
         activeRoute = route;
+
+        updateNavGroupsForRoute(route);
+        if (!navGroupsReady) {
+            navGroupsReady = true;
+            if (document.body) {
+                document.body.classList.add('nav-groups-ready');
+            }
+        }
 
         if (pushState) {
             window.location.hash = route;
