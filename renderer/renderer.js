@@ -126,6 +126,198 @@
     const routeTitle = $('#viewTitle');
     const defaultTitle = routeTitle?.textContent || 'Alo Worklogs';
     const navItems = $$('[data-route]');
+    const navParents = $$('[data-nav-parent]');
+    const navParentMeta = new Map();
+    const routeParentLookup = new Map();
+    let navAccordionsInitialised = false;
+
+    function getNavRoot(node) {
+        if (!node) return null;
+        return node.closest('[data-nav-root]');
+    }
+
+    function collectNavParentMeta() {
+        navParents.forEach((parent) => {
+            const toggle = parent.querySelector(':scope > [data-nav-toggle]');
+            const sublist = parent.querySelector(':scope > [data-nav-sublist]');
+            if (!toggle || !sublist) return;
+            const meta = { toggle, sublist, transitionHandler: null };
+            navParentMeta.set(parent, meta);
+            toggle.setAttribute('aria-expanded', parent.classList.contains('is-open') ? 'true' : 'false');
+            toggle.addEventListener('click', () => handleNavParentToggle(parent));
+        });
+    }
+
+    function buildRouteParentLookup() {
+        navItems.forEach((btn) => {
+            const route = btn.dataset.route;
+            if (!route) return;
+            const parentsForRoute = [];
+            let current = btn.parentElement;
+            const root = getNavRoot(btn);
+            while (current && current !== root && current !== document.body) {
+                if (current.hasAttribute('data-nav-parent')) {
+                    parentsForRoute.unshift(current);
+                }
+                current = current.parentElement;
+            }
+            routeParentLookup.set(route, parentsForRoute);
+        });
+    }
+
+    function cancelNavTransition(parent) {
+        const meta = navParentMeta.get(parent);
+        if (!meta) return;
+        const { sublist } = meta;
+        if (typeof meta.transitionHandler === 'function') {
+            sublist.removeEventListener('transitionend', meta.transitionHandler);
+            meta.transitionHandler = null;
+        }
+        sublist.classList.remove('is-animating');
+    }
+
+    function expandNavParent(parent, { animate = true } = {}) {
+        const meta = navParentMeta.get(parent);
+        if (!meta) return;
+        const { sublist } = meta;
+        cancelNavTransition(parent);
+        parent.classList.add('is-open');
+        sublist.classList.add('is-open');
+        if (!animate) {
+            sublist.style.height = '';
+            return;
+        }
+        const targetHeight = sublist.scrollHeight;
+        sublist.classList.add('is-animating');
+        sublist.style.height = '0px';
+        sublist.offsetHeight; // force reflow
+        sublist.style.height = `${targetHeight}px`;
+        meta.transitionHandler = (event) => {
+            if (event.target !== sublist) return;
+            sublist.classList.remove('is-animating');
+            sublist.style.height = '';
+            meta.transitionHandler = null;
+        };
+        sublist.addEventListener('transitionend', meta.transitionHandler);
+    }
+
+    function collapseNavParent(parent, { animate = true } = {}) {
+        const meta = navParentMeta.get(parent);
+        if (!meta) return;
+        const { sublist } = meta;
+        cancelNavTransition(parent);
+        if (!animate) {
+            parent.classList.remove('is-open');
+            sublist.classList.remove('is-open');
+            sublist.style.height = '';
+            return;
+        }
+        const currentHeight = sublist.scrollHeight;
+        sublist.classList.add('is-animating');
+        sublist.style.height = `${currentHeight}px`;
+        sublist.offsetHeight; // force reflow
+        sublist.style.height = '0px';
+        meta.transitionHandler = (event) => {
+            if (event.target !== sublist) return;
+            sublist.classList.remove('is-animating');
+            sublist.classList.remove('is-open');
+            parent.classList.remove('is-open');
+            sublist.style.height = '';
+            meta.transitionHandler = null;
+        };
+        sublist.addEventListener('transitionend', meta.transitionHandler);
+    }
+
+    function setNavParentOpen(parent, open, { animate = true, lock = null, force = false } = {}) {
+        if (!parent) return;
+        const meta = navParentMeta.get(parent);
+        if (!meta) return;
+        const { toggle } = meta;
+        const isOpen = parent.classList.contains('is-open');
+        const isLocked = parent.dataset.navLocked === 'true';
+        if (isOpen === open) {
+            if (lock === true) {
+                parent.dataset.navLocked = 'true';
+            } else if (lock === false) {
+                delete parent.dataset.navLocked;
+            }
+            if (toggle) {
+                toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            }
+            return;
+        }
+        if (!force && !open && isLocked) {
+            return;
+        }
+        if (open) {
+            expandNavParent(parent, { animate });
+        } else {
+            collapseNavParent(parent, { animate });
+        }
+        if (toggle) {
+            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        }
+        if (lock === true) {
+            parent.dataset.navLocked = 'true';
+        } else if (lock === false) {
+            delete parent.dataset.navLocked;
+        }
+        if (!open) {
+            parent.classList.remove('has-active-child');
+        }
+    }
+
+    function closeNavDescendants(parent, options = {}) {
+        if (!parent) return;
+        parent.querySelectorAll(':scope [data-nav-parent]').forEach((child) => {
+            if (child === parent) return;
+            child.classList.remove('has-active-child');
+            setNavParentOpen(child, false, { ...options, force: true, lock: false });
+        });
+    }
+
+    function closeOtherNavParents(target) {
+        navParents.forEach((parent) => {
+            if (parent === target) return;
+            if (parent.contains(target)) return;
+            if (parent.dataset.navLocked === 'true') return;
+            setNavParentOpen(parent, false, { animate: true, force: true, lock: false });
+            closeNavDescendants(parent, { animate: true });
+        });
+    }
+
+    function handleNavParentToggle(parent) {
+        if (!parent) return;
+        const isLocked = parent.dataset.navLocked === 'true';
+        if (isLocked) {
+            return;
+        }
+        const shouldOpen = !parent.classList.contains('is-open');
+        if (shouldOpen) {
+            setNavParentOpen(parent, true, { animate: true, lock: null });
+            closeOtherNavParents(parent);
+        } else {
+            setNavParentOpen(parent, false, { animate: true, lock: false });
+            closeNavDescendants(parent, { animate: true });
+        }
+    }
+
+    function syncNavParentsForRoute(route, { animate = true } = {}) {
+        const activeParents = new Set(routeParentLookup.get(route) || []);
+        navParents.forEach((parent) => {
+            const isActive = activeParents.has(parent);
+            if (isActive) {
+                parent.classList.add('has-active-child');
+                setNavParentOpen(parent, true, { animate, lock: true });
+            } else {
+                parent.classList.remove('has-active-child');
+                setNavParentOpen(parent, false, { animate, lock: false, force: true });
+            }
+        });
+    }
+
+    collectNavParentMeta();
+    buildRouteParentLookup();
     const viewNodes = new Map(
         $$('[data-route-view]').map((el) => {
             const route = el.getAttribute('data-route-view');
@@ -221,6 +413,9 @@
                 btn.removeAttribute('aria-current');
             }
         });
+
+        syncNavParentsForRoute(route, { animate: navAccordionsInitialised });
+        navAccordionsInitialised = true;
 
         if (routeTitle) {
             routeTitle.textContent = routeLabels[route] || defaultTitle;
