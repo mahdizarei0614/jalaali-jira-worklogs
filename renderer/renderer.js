@@ -132,6 +132,19 @@
             return route ? [route, el] : null;
         }).filter(Boolean)
     );
+    const navRouteToPath = new Map();
+    navItems.forEach((btn) => {
+        const route = btn?.dataset?.route;
+        if (!route) return;
+        const path = (btn.dataset.accordionPath || '')
+            .split(/\s+/)
+            .map((value) => value.trim())
+            .filter(Boolean);
+        navRouteToPath.set(route, path);
+    });
+    const accordionRegistry = new Map();
+    const accordionChildren = new Map();
+    let activeAccordionPath = new Set();
     const adminExportButton = $('#adminFullReportBtn');
     const adminExportState = {
         isAdmin: false,
@@ -196,7 +209,10 @@
     const defaultRoute = initialActive ? initialActive[0] : (navItems[0]?.dataset.route || 'monthly-summary');
     let activeRoute = null;
 
+    initAccordions();
+
     function setRoute(route, { pushState = true } = {}) {
+        const previousRoute = activeRoute;
         if (!viewNodes.has(route)) {
             route = defaultRoute;
         }
@@ -222,6 +238,8 @@
             }
         });
 
+        syncAccordionsForRoute(route, { immediate: previousRoute === null });
+
         if (routeTitle) {
             routeTitle.textContent = routeLabels[route] || defaultTitle;
         }
@@ -230,7 +248,6 @@
             document.body.dataset.route = route;
         }
 
-        const previousRoute = activeRoute;
         activeRoute = route;
 
         if (pushState) {
@@ -247,6 +264,151 @@
         }
 
         return route;
+    }
+
+    function initAccordions() {
+        const nodes = $$('[data-accordion]');
+        nodes.forEach((root) => {
+            const id = (root.dataset.accordionId || '').trim();
+            if (!id || accordionRegistry.has(id)) {
+                return;
+            }
+            const trigger = root.querySelector('[data-accordion-trigger]');
+            const panel = root.querySelector('[data-accordion-panel]');
+            const parentId = (root.dataset.accordionParent || '').trim() || null;
+            const entry = {
+                id,
+                root,
+                trigger: trigger || null,
+                panel: panel || null,
+                parentId,
+                isOpen: false
+            };
+            accordionRegistry.set(id, entry);
+            if (parentId) {
+                if (!accordionChildren.has(parentId)) {
+                    accordionChildren.set(parentId, new Set());
+                }
+                accordionChildren.get(parentId).add(id);
+            }
+            if (panel) {
+                panel.style.height = '0px';
+            }
+            if (trigger) {
+                if (panel && !panel.id) {
+                    panel.id = `${id}Panel`;
+                }
+                if (!trigger.hasAttribute('aria-controls') && panel?.id) {
+                    trigger.setAttribute('aria-controls', panel.id);
+                }
+                trigger.setAttribute('aria-expanded', 'false');
+                trigger.addEventListener('click', () => handleAccordionToggle(id));
+            }
+        });
+    }
+
+    function handleAccordionToggle(id) {
+        const entry = accordionRegistry.get(id);
+        if (!entry) return;
+        if (entry.isOpen) {
+            if (activeAccordionPath.has(id)) {
+                return;
+            }
+            closeAccordion(id);
+            return;
+        }
+        openAccordion(id);
+        closeSiblings(entry.parentId, { except: new Set([...activeAccordionPath, id]) });
+    }
+
+    function setAccordionOpen(id, open, { immediate = false } = {}) {
+        const entry = accordionRegistry.get(id);
+        if (!entry) return;
+        if (entry.trigger) {
+            entry.trigger.setAttribute('aria-expanded', String(open));
+        }
+        if (entry.isOpen === open) {
+            entry.root.classList.toggle('is-open', open);
+            if (entry.panel && open && entry.panel.style.height !== 'auto') {
+                entry.panel.style.height = 'auto';
+            }
+            return;
+        }
+        entry.isOpen = open;
+        entry.root.classList.toggle('is-open', open);
+        const panel = entry.panel;
+        if (!panel) {
+            return;
+        }
+        if (immediate) {
+            panel.style.transition = 'none';
+            panel.style.height = open ? 'auto' : '0px';
+            panel.offsetHeight;
+            requestAnimationFrame(() => {
+                panel.style.removeProperty('transition');
+            });
+            return;
+        }
+        const onTransitionEnd = (event) => {
+            if (event.target !== panel) return;
+            if (entry.isOpen) {
+                panel.style.height = 'auto';
+            } else {
+                panel.style.height = '0px';
+            }
+            panel.removeEventListener('transitionend', onTransitionEnd);
+        };
+        panel.addEventListener('transitionend', onTransitionEnd, { once: true });
+        if (open) {
+            panel.style.height = '0px';
+            panel.offsetHeight;
+            panel.style.height = `${panel.scrollHeight}px`;
+        } else {
+            if (panel.style.height === 'auto' || panel.style.height === '') {
+                panel.style.height = `${panel.scrollHeight}px`;
+            }
+            panel.offsetHeight;
+            panel.style.height = '0px';
+        }
+    }
+
+    function openAccordion(id, options = {}) {
+        setAccordionOpen(id, true, options);
+    }
+
+    function closeAccordion(id, options = {}) {
+        const entry = accordionRegistry.get(id);
+        if (!entry) return;
+        setAccordionOpen(id, false, options);
+        entry.root.classList.remove('has-active');
+        const children = accordionChildren.get(id);
+        if (children) {
+            children.forEach((childId) => closeAccordion(childId, options));
+        }
+    }
+
+    function closeSiblings(parentId, { except = new Set(), preserveActive = true } = {}) {
+        accordionRegistry.forEach((entry, id) => {
+            if (entry.parentId !== parentId) return;
+            if (except.has(id)) return;
+            if (preserveActive && activeAccordionPath.has(id)) return;
+            closeAccordion(id);
+        });
+    }
+
+    function syncAccordionsForRoute(route, { immediate = false } = {}) {
+        const path = navRouteToPath.get(route) || [];
+        const nextPath = new Set(path);
+        activeAccordionPath = nextPath;
+        accordionRegistry.forEach((entry, id) => {
+            const shouldOpen = nextPath.has(id);
+            entry.root.classList.toggle('has-active', shouldOpen);
+            if (shouldOpen) {
+                openAccordion(id, { immediate });
+            } else {
+                closeAccordion(id, { immediate });
+            }
+        });
     }
 
     function syncFromHash() {

@@ -132,8 +132,8 @@
         .sidebar-action{ width:100%; margin-bottom:12px; }
         .sidebar-divider{ height:1px; border:none; background:var(--border); margin: 12px 0; }
         .nav{ display:flex; flex-direction:column; gap:16px; }
-        .nav-group{ display:flex; flex-direction:column; gap:8px; }
-        .nav-group-label{
+        .nav-section{ display:flex; flex-direction:column; gap:8px; }
+        .nav-section__label{
             font-size:11px;
             font-weight:700;
             text-transform:uppercase;
@@ -144,6 +144,7 @@
         .nav-item{
             display:flex;
             align-items:center;
+            justify-content:space-between;
             gap:8px;
             width:100%;
             padding:10px 14px;
@@ -154,7 +155,7 @@
             font-weight:600;
             color:var(--text);
             cursor:pointer;
-            transition:background .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease;
+            transition:background .2s ease, border-color .2s ease, color .2s ease, box-shadow .2s ease, transform .2s ease;
         }
         .nav-item:hover{ background:var(--soft); border-color:var(--border); }
         .nav-item.is-active{
@@ -164,6 +165,43 @@
             box-shadow:0 10px 30px rgba(0,122,255,.18);
         }
         .nav-item.is-active:hover{ background:var(--accent-press); border-color:var(--accent-press); }
+        .nav-parent{
+            position:relative;
+            padding-right:36px;
+        }
+        .nav-parent::after{
+            content:'';
+            position:absolute;
+            right:14px;
+            top:50%;
+            width:8px;
+            height:8px;
+            border-right:2px solid currentColor;
+            border-bottom:2px solid currentColor;
+            transform:translateY(-50%) rotate(45deg);
+            transition:transform .2s ease;
+        }
+        .nav-parent--nested{ font-size:13px; padding:8px 12px; border-radius:10px; }
+        .nav-parent--nested::after{ right:12px; }
+        .nav-accordion{ display:flex; flex-direction:column; gap:6px; }
+        .nav-accordion.is-open > .nav-parent::after{ transform:translateY(-50%) rotate(-135deg); }
+        .nav-panel{
+            display:flex;
+            flex-direction:column;
+            gap:6px;
+            padding-left:10px;
+            padding-top:0;
+            height:0;
+            overflow:hidden;
+            transition:height .24s ease, padding-top .24s ease;
+        }
+        .nav-accordion.is-open > .nav-panel{ padding-top:6px; }
+        .nav-panel--nested{ padding-left:18px; }
+        .nav-accordion.is-open > .nav-parent{ border-color:var(--border); background:var(--soft); }
+        .nav-accordion.has-active > .nav-parent{
+            border-color:var(--accent);
+            color:var(--accent);
+        }
 
         .main{
             flex:1;
@@ -454,19 +492,80 @@
         </div>
         <hr class="sidebar-divider" />
         <nav class="nav" aria-label="Primary">
-            <div class="nav-group" role="group" aria-labelledby="navGroupGeneralLabel">
-                <div id="navGroupGeneralLabel" class="nav-group-label">General</div>
+            <div class="nav-section" role="group" aria-label="General">
+                <div class="nav-section__label">General</div>
                 <button type="button" class="nav-item" data-route="issues" aria-controls="issuesView">Issues</button>
             </div>
-            <div class="nav-group" role="group" aria-labelledby="navGroupMonthlyReportsLabel">
-                <div id="navGroupMonthlyReportsLabel" class="nav-group-label">Monthly Reports</div>
-                <button type="button" class="nav-item is-active" data-route="monthly-summary" aria-controls="monthlySummaryView">Summary</button>
-                <button type="button" class="nav-item" data-route="detailed-worklogs" aria-controls="detailedWorklogsView">Detailed Worklogs</button>
-                <button type="button" class="nav-item" data-route="due-issues" aria-controls="dueIssuesView">Due This Month</button>
-            </div>
-            <div class="nav-group" role="group" aria-labelledby="navGroupQuarterReportsLabel">
-                <div id="navGroupQuarterReportsLabel" class="nav-group-label">Quarter Reports</div>
-                <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView">Summary</button>
+            <div class="nav-accordion" data-accordion data-accordion-id="reports">
+                <button
+                    type="button"
+                    class="nav-item nav-parent"
+                    data-accordion-trigger
+                    aria-controls="navReportsPanel"
+                    aria-expanded="false"
+                >Reports</button>
+                <div class="nav-panel" id="navReportsPanel" data-accordion-panel>
+                    <div
+                        class="nav-accordion"
+                        data-accordion
+                        data-accordion-id="reports-monthly"
+                        data-accordion-parent="reports"
+                    >
+                        <button
+                            type="button"
+                            class="nav-item nav-parent nav-parent--nested"
+                            data-accordion-trigger
+                            aria-controls="navReportsMonthlyPanel"
+                            aria-expanded="false"
+                        >Monthly</button>
+                        <div class="nav-panel nav-panel--nested" id="navReportsMonthlyPanel" data-accordion-panel>
+                            <button
+                                type="button"
+                                class="nav-item is-active"
+                                data-accordion-path="reports reports-monthly"
+                                data-route="monthly-summary"
+                                aria-controls="monthlySummaryView"
+                            >Summary</button>
+                            <button
+                                type="button"
+                                class="nav-item"
+                                data-accordion-path="reports reports-monthly"
+                                data-route="detailed-worklogs"
+                                aria-controls="detailedWorklogsView"
+                            >Detailed Worklogs</button>
+                            <button
+                                type="button"
+                                class="nav-item"
+                                data-accordion-path="reports reports-monthly"
+                                data-route="due-issues"
+                                aria-controls="dueIssuesView"
+                            >Due This Month</button>
+                        </div>
+                    </div>
+                    <div
+                        class="nav-accordion"
+                        data-accordion
+                        data-accordion-id="reports-quarterly"
+                        data-accordion-parent="reports"
+                    >
+                        <button
+                            type="button"
+                            class="nav-item nav-parent nav-parent--nested"
+                            data-accordion-trigger
+                            aria-controls="navReportsQuarterlyPanel"
+                            aria-expanded="false"
+                        >Quarterly</button>
+                        <div class="nav-panel nav-panel--nested" id="navReportsQuarterlyPanel" data-accordion-panel>
+                            <button
+                                type="button"
+                                class="nav-item"
+                                data-accordion-path="reports reports-quarterly"
+                                data-route="quarter-report"
+                                aria-controls="quarterReportView"
+                            >Summary</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </nav>
         <hr class="sidebar-divider" />
@@ -477,9 +576,30 @@
             hidden
         >Get Full Report</button>
         <nav class="nav" aria-label="Settings">
-            <div class="nav-group" role="group" aria-labelledby="navGroupSettingsLabel">
-                <button type="button" class="nav-item" data-route="configurations" aria-controls="configurationsView">Configurations</button>
-                <button type="button" class="nav-item" data-route="settings" aria-controls="settingsView">Settings</button>
+            <div class="nav-accordion" data-accordion data-accordion-id="settings">
+                <button
+                    type="button"
+                    class="nav-item nav-parent"
+                    data-accordion-trigger
+                    aria-controls="navSettingsPanel"
+                    aria-expanded="false"
+                >Settings</button>
+                <div class="nav-panel" id="navSettingsPanel" data-accordion-panel>
+                    <button
+                        type="button"
+                        class="nav-item"
+                        data-accordion-path="settings"
+                        data-route="configurations"
+                        aria-controls="configurationsView"
+                    >Configurations</button>
+                    <button
+                        type="button"
+                        class="nav-item"
+                        data-accordion-path="settings"
+                        data-route="settings"
+                        aria-controls="settingsView"
+                    >Account</button>
+                </div>
             </div>
         </nav>
     </aside>
@@ -540,7 +660,7 @@
                 id="settingsView"
                 class="view"
                 data-route-view="settings"
-                data-route-title="Settings"
+                data-route-title="Account"
                 data-template="./views/settings.html">
         </section>
     </main>
