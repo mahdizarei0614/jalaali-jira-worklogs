@@ -126,6 +126,185 @@
     const routeTitle = $('#viewTitle');
     const defaultTitle = routeTitle?.textContent || 'Alo Worklogs';
     const navItems = $$('[data-route]');
+    const navItemParents = new Map();
+    navItems.forEach((btn) => {
+        const route = btn?.dataset?.route;
+        if (!route) return;
+        const parents = (btn.dataset.navParents || '')
+            .split(/\s+/)
+            .map((value) => value.trim())
+            .filter(Boolean);
+        navItemParents.set(route, parents);
+        btn.dataset.navDepth = String(parents.length);
+    });
+
+    const navGroups = new Map();
+    $$('[data-nav-group]').forEach((groupEl) => {
+        if (!groupEl) return;
+        const id = groupEl.dataset.navGroup;
+        if (!id) return;
+        const contentEl = groupEl.querySelector(`[data-nav-content="${id}"]`);
+        const toggleEl = groupEl.querySelector(`[data-nav-toggle="${id}"]`);
+        const parentId = groupEl.dataset.navParent || null;
+        if (contentEl) {
+            contentEl.hidden = true;
+            contentEl.style.maxHeight = '0px';
+        }
+        if (toggleEl) {
+            toggleEl.setAttribute('aria-expanded', 'false');
+        }
+        const state = {
+            el: groupEl,
+            parentId,
+            toggleEl,
+            contentEl,
+            isOpen: false,
+            isLocked: false
+        };
+        navGroups.set(id, state);
+    });
+
+    function suppressTransition(el) {
+        if (!el) {
+            return () => {};
+        }
+        const previous = el.style.transition;
+        el.style.transition = 'none';
+        // Force reflow so the transition disabling takes effect immediately.
+        // eslint-disable-next-line no-unused-expressions
+        el.offsetHeight;
+        return () => {
+            el.style.transition = previous;
+        };
+    }
+
+    function setGroupOpen(id, open, { immediate = false } = {}) {
+        const state = navGroups.get(id);
+        if (!state) return;
+        if (!open && state.isLocked) return;
+        if (state.isOpen === open) return;
+
+        const { contentEl } = state;
+        const apply = () => {
+            state.isOpen = open;
+            state.el.classList.toggle('is-open', open);
+            if (state.toggleEl) {
+                state.toggleEl.setAttribute('aria-expanded', open ? 'true' : 'false');
+            }
+            if (!contentEl) return;
+            if (open) {
+                contentEl.hidden = false;
+                const targetHeight = contentEl.scrollHeight;
+                contentEl.style.maxHeight = `${targetHeight}px`;
+                if (immediate) {
+                    contentEl.style.maxHeight = 'none';
+                } else {
+                    const handleEnd = (event) => {
+                        if (event.target !== contentEl) return;
+                        contentEl.style.maxHeight = 'none';
+                        contentEl.removeEventListener('transitionend', handleEnd);
+                    };
+                    contentEl.addEventListener('transitionend', handleEnd);
+                }
+            } else if (immediate) {
+                contentEl.style.maxHeight = '0px';
+                contentEl.hidden = true;
+            } else {
+                const startHeight = contentEl.scrollHeight;
+                contentEl.style.maxHeight = `${startHeight}px`;
+                requestAnimationFrame(() => {
+                    contentEl.style.maxHeight = '0px';
+                });
+                const handleEnd = (event) => {
+                    if (event.target !== contentEl) return;
+                    contentEl.hidden = true;
+                    contentEl.removeEventListener('transitionend', handleEnd);
+                };
+                contentEl.addEventListener('transitionend', handleEnd);
+            }
+        };
+
+        if (immediate && contentEl) {
+            const restore = suppressTransition(contentEl);
+            apply();
+            // Force layout to ensure the updated max-height sticks before restoring transition.
+            // eslint-disable-next-line no-unused-expressions
+            contentEl.offsetHeight;
+            restore();
+            if (open) {
+                contentEl.style.maxHeight = 'none';
+            }
+        } else {
+            apply();
+        }
+
+        if (!open) {
+            collapseDescendants(id, { immediate });
+        }
+    }
+
+    function collapseDescendants(id, options = {}) {
+        navGroups.forEach((state, key) => {
+            if (state.parentId === id && !state.isLocked) {
+                setGroupOpen(key, false, options);
+            }
+        });
+    }
+
+    function closeSiblingGroups(id, options = {}) {
+        const state = navGroups.get(id);
+        if (!state) return;
+        const parentId = state.parentId || null;
+        navGroups.forEach((s, key) => {
+            if (key === id) return;
+            if ((s.parentId || null) === parentId) {
+                if (s.isLocked) {
+                    if (!s.isOpen) {
+                        setGroupOpen(key, true, options);
+                    }
+                    return;
+                }
+                setGroupOpen(key, false, options);
+            }
+        });
+    }
+
+    function handleGroupToggle(id) {
+        const state = navGroups.get(id);
+        if (!state) return;
+        if (state.isOpen) {
+            if (state.isLocked) {
+                return;
+            }
+            setGroupOpen(id, false);
+        } else {
+            closeSiblingGroups(id);
+            setGroupOpen(id, true);
+        }
+    }
+
+    navGroups.forEach((state, id) => {
+        if (state.toggleEl) {
+            state.toggleEl.addEventListener('click', () => handleGroupToggle(id));
+        }
+    });
+
+    function syncNavGroupsForRoute(route, { immediate = false } = {}) {
+        const parents = navItemParents.get(route) || [];
+        const required = new Set(parents);
+        navGroups.forEach((state, id) => {
+            state.isLocked = required.has(id);
+            state.el.classList.toggle('has-active-child', state.isLocked);
+        });
+        parents.forEach((id) => {
+            setGroupOpen(id, true, { immediate });
+        });
+        navGroups.forEach((state, id) => {
+            if (!required.has(id) && !state.isLocked) {
+                setGroupOpen(id, false, { immediate });
+            }
+        });
+    }
     const viewNodes = new Map(
         $$('[data-route-view]').map((el) => {
             const route = el.getAttribute('data-route-view');
@@ -232,6 +411,8 @@
 
         const previousRoute = activeRoute;
         activeRoute = route;
+
+        syncNavGroupsForRoute(route, { immediate: !previousRoute });
 
         if (pushState) {
             window.location.hash = route;
