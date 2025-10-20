@@ -126,6 +126,138 @@
     const routeTitle = $('#viewTitle');
     const defaultTitle = routeTitle?.textContent || 'Alo Worklogs';
     const navItems = $$('[data-route]');
+    const navGroups = $$('[data-nav-group]');
+    const routeToNavGroup = new Map();
+    navItems.forEach((btn) => {
+        const route = btn.dataset.route;
+        if (!route) return;
+        routeToNavGroup.set(route, btn.closest('[data-nav-group]') || null);
+    });
+    const reduceMotionQuery = typeof window.matchMedia === 'function'
+        ? window.matchMedia('(prefers-reduced-motion: reduce)')
+        : null;
+    const prefersReducedMotion = () => Boolean(reduceMotionQuery?.matches);
+    const navGroupControllers = new Map();
+    navGroups.forEach((group) => {
+        const toggle = group.querySelector('[data-nav-toggle]');
+        const items = group.querySelector('[data-nav-items]');
+        if (items) {
+            items.style.height = '0px';
+            items.setAttribute('aria-hidden', 'true');
+        }
+        if (toggle) {
+            toggle.setAttribute('aria-expanded', 'false');
+        }
+        navGroupControllers.set(group, {
+            toggle,
+            items,
+            open: false
+        });
+        if (toggle) {
+            toggle.addEventListener('click', () => {
+                const controller = navGroupControllers.get(group);
+                if (!controller) return;
+                if (controller.open && activeRoute && routeToNavGroup.get(activeRoute) === group) {
+                    return;
+                }
+                const next = !controller.open;
+                setGroupOpen(group, next, { exclusive: next });
+            });
+        }
+    });
+
+    function animateOpen(node) {
+        node.style.height = 'auto';
+        const target = node.scrollHeight;
+        node.style.height = '0px';
+        node.offsetHeight; // force reflow
+        node.style.height = `${target}px`;
+        const handle = (event) => {
+            if (event.target !== node || event.propertyName !== 'height') {
+                return;
+            }
+            node.style.height = 'auto';
+            node.removeEventListener('transitionend', handle);
+        };
+        node.addEventListener('transitionend', handle);
+    }
+
+    function animateClose(node, onDone) {
+        const target = node.scrollHeight;
+        node.style.height = `${target}px`;
+        node.offsetHeight;
+        node.style.height = '0px';
+        const handle = (event) => {
+            if (event.target !== node || event.propertyName !== 'height') {
+                return;
+            }
+            node.removeEventListener('transitionend', handle);
+            if (typeof onDone === 'function') {
+                onDone();
+            }
+        };
+        node.addEventListener('transitionend', handle);
+    }
+
+    function setGroupOpen(group, open, { exclusive = true, immediate = false } = {}) {
+        const controller = navGroupControllers.get(group);
+        if (!controller) return;
+        if (controller.open === open) {
+            if (open && exclusive) {
+                navGroups.forEach((other) => {
+                    if (other !== group) {
+                        setGroupOpen(other, false, { immediate, exclusive: false });
+                    }
+                });
+            }
+            return;
+        }
+        controller.open = open;
+        const { toggle, items } = controller;
+        if (toggle) {
+            toggle.setAttribute('aria-expanded', String(open));
+        }
+        if (open) {
+            group.classList.add('is-open');
+        } else if (immediate || prefersReducedMotion()) {
+            group.classList.remove('is-open');
+        }
+        if (items) {
+            items.setAttribute('aria-hidden', String(!open));
+            if (immediate || prefersReducedMotion()) {
+                items.style.height = open ? 'auto' : '0px';
+                if (!open) {
+                    group.classList.remove('is-open');
+                }
+            } else if (open) {
+                animateOpen(items);
+            } else {
+                animateClose(items, () => {
+                    group.classList.remove('is-open');
+                });
+            }
+        } else if (!open && !(immediate || prefersReducedMotion())) {
+            group.classList.remove('is-open');
+        }
+        if (open && exclusive) {
+            navGroups.forEach((other) => {
+                if (other !== group) {
+                    setGroupOpen(other, false, { immediate, exclusive: false });
+                }
+            });
+        }
+    }
+
+    function syncNavGroupsForRoute(route, { immediate = false } = {}) {
+        const targetGroup = route ? (routeToNavGroup.get(route) || null) : null;
+        navGroups.forEach((group) => {
+            const isActive = group === targetGroup;
+            group.classList.toggle('is-active', isActive);
+            setGroupOpen(group, isActive, { immediate, exclusive: true });
+        });
+    }
+
+    let navGroupInitialSync = true;
     const viewNodes = new Map(
         $$('[data-route-view]').map((el) => {
             const route = el.getAttribute('data-route-view');
@@ -204,6 +336,8 @@
             if (pushState && window.location.hash.replace(/^#/, '') !== route) {
                 window.location.hash = route;
             }
+            syncNavGroupsForRoute(route, { immediate: navGroupInitialSync });
+            navGroupInitialSync = false;
             return route;
         }
 
@@ -229,6 +363,9 @@
         if (document.body) {
             document.body.dataset.route = route;
         }
+
+        syncNavGroupsForRoute(route, { immediate: navGroupInitialSync });
+        navGroupInitialSync = false;
 
         const previousRoute = activeRoute;
         activeRoute = route;
