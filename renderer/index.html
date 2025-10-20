@@ -131,16 +131,7 @@
         .sidebar-control select:focus{ border-color:var(--accent); box-shadow:0 0 0 4px var(--focus-ring); }
         .sidebar-action{ width:100%; margin-bottom:12px; }
         .sidebar-divider{ height:1px; border:none; background:var(--border); margin: 12px 0; }
-        .nav{ display:flex; flex-direction:column; gap:16px; }
-        .nav-group{ display:flex; flex-direction:column; gap:8px; }
-        .nav-group-label{
-            font-size:11px;
-            font-weight:700;
-            text-transform:uppercase;
-            letter-spacing:.4px;
-            color:var(--muted);
-            padding:2px;
-        }
+        .nav{ display:flex; flex-direction:column; gap:12px; }
         .nav-item{
             display:flex;
             align-items:center;
@@ -154,7 +145,7 @@
             font-weight:600;
             color:var(--text);
             cursor:pointer;
-            transition:background .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease;
+            transition:background .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease;
         }
         .nav-item:hover{ background:var(--soft); border-color:var(--border); }
         .nav-item.is-active{
@@ -164,6 +155,77 @@
             box-shadow:0 10px 30px rgba(0,122,255,.18);
         }
         .nav-item.is-active:hover{ background:var(--accent-press); border-color:var(--accent-press); }
+        .nav-group{ display:flex; flex-direction:column; gap:8px; }
+        .nav-group[data-nav-depth="1"]{ gap:6px; }
+        .nav-group-toggle{
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:12px;
+            width:100%;
+            padding:10px 12px;
+            border-radius:10px;
+            border:1px solid transparent;
+            background:transparent;
+            font-size:12px;
+            font-weight:700;
+            text-transform:uppercase;
+            letter-spacing:.32px;
+            color:var(--muted);
+            cursor:pointer;
+            transition:color .18s ease, background .18s ease, border-color .18s ease;
+        }
+        .nav-group-toggle:hover{
+            color:var(--text);
+            background:var(--soft);
+            border-color:var(--border);
+        }
+        .nav-group-toggle:focus-visible{
+            outline:none;
+            border-color:var(--accent);
+            box-shadow:0 0 0 4px var(--focus-ring);
+        }
+        .nav-group-toggle__label{ flex:1; text-align:left; }
+        .nav-group-toggle__icon{
+            width:16px;
+            height:16px;
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+        }
+        .nav-group-toggle__icon::before{
+            content:'';
+            width:7px;
+            height:7px;
+            border-right:2px solid currentColor;
+            border-bottom:2px solid currentColor;
+            transform:rotate(-45deg);
+            transition:transform .2s ease;
+        }
+        .nav-group.is-open > .nav-group-toggle{ color:var(--text); }
+        .nav-group.is-open > .nav-group-toggle .nav-group-toggle__icon::before{ transform:rotate(45deg); }
+        .nav-group.has-active-child > .nav-group-toggle{
+            color:var(--accent);
+            background:rgba(0,122,255,.08);
+            border-color:rgba(0,122,255,.14);
+        }
+        :root[data-theme="dark"] .nav-group.has-active-child > .nav-group-toggle{
+            background:rgba(77,141,255,.12);
+            border-color:rgba(77,141,255,.16);
+        }
+        .nav-group-content{
+            display:flex;
+            flex-direction:column;
+            gap:6px;
+            padding-left:12px;
+            margin-left:4px;
+            border-left:1px solid var(--border);
+            overflow:hidden;
+            max-height:0;
+            transition:max-height .24s ease;
+        }
+        .nav-group[data-nav-depth="1"] > .nav-group-content{ padding-left:16px; }
+        .nav-group-content[hidden]{ display:none; }
 
         .main{
             flex:1;
@@ -454,19 +516,52 @@
         </div>
         <hr class="sidebar-divider" />
         <nav class="nav" aria-label="Primary">
-            <div class="nav-group" role="group" aria-labelledby="navGroupGeneralLabel">
-                <div id="navGroupGeneralLabel" class="nav-group-label">General</div>
-                <button type="button" class="nav-item" data-route="issues" aria-controls="issuesView">Issues</button>
-            </div>
-            <div class="nav-group" role="group" aria-labelledby="navGroupMonthlyReportsLabel">
-                <div id="navGroupMonthlyReportsLabel" class="nav-group-label">Monthly Reports</div>
-                <button type="button" class="nav-item is-active" data-route="monthly-summary" aria-controls="monthlySummaryView">Summary</button>
-                <button type="button" class="nav-item" data-route="detailed-worklogs" aria-controls="detailedWorklogsView">Detailed Worklogs</button>
-                <button type="button" class="nav-item" data-route="due-issues" aria-controls="dueIssuesView">Due This Month</button>
-            </div>
-            <div class="nav-group" role="group" aria-labelledby="navGroupQuarterReportsLabel">
-                <div id="navGroupQuarterReportsLabel" class="nav-group-label">Quarter Reports</div>
-                <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView">Summary</button>
+            <button type="button" class="nav-item" data-route="issues" aria-controls="issuesView">Issues</button>
+            <div class="nav-group" data-nav-group="reports" data-nav-depth="0">
+                <button
+                    type="button"
+                    class="nav-group-toggle"
+                    data-nav-toggle="reports"
+                    aria-expanded="false"
+                    aria-controls="navGroupReports"
+                >
+                    <span class="nav-group-toggle__label">Reports</span>
+                    <span class="nav-group-toggle__icon" aria-hidden="true"></span>
+                </button>
+                <div class="nav-group-content" id="navGroupReports" data-nav-content="reports" hidden>
+                    <div class="nav-group" data-nav-group="reports-monthly" data-nav-parent="reports" data-nav-depth="1">
+                        <button
+                            type="button"
+                            class="nav-group-toggle"
+                            data-nav-toggle="reports-monthly"
+                            aria-expanded="false"
+                            aria-controls="navGroupReportsMonthly"
+                        >
+                            <span class="nav-group-toggle__label">Monthly</span>
+                            <span class="nav-group-toggle__icon" aria-hidden="true"></span>
+                        </button>
+                        <div class="nav-group-content" id="navGroupReportsMonthly" data-nav-content="reports-monthly" hidden>
+                            <button type="button" class="nav-item" data-route="monthly-summary" aria-controls="monthlySummaryView" data-nav-parents="reports reports-monthly">Summary</button>
+                            <button type="button" class="nav-item" data-route="detailed-worklogs" aria-controls="detailedWorklogsView" data-nav-parents="reports reports-monthly">Detailed Worklogs</button>
+                            <button type="button" class="nav-item" data-route="due-issues" aria-controls="dueIssuesView" data-nav-parents="reports reports-monthly">Due This Month</button>
+                        </div>
+                    </div>
+                    <div class="nav-group" data-nav-group="reports-quarterly" data-nav-parent="reports" data-nav-depth="1">
+                        <button
+                            type="button"
+                            class="nav-group-toggle"
+                            data-nav-toggle="reports-quarterly"
+                            aria-expanded="false"
+                            aria-controls="navGroupReportsQuarterly"
+                        >
+                            <span class="nav-group-toggle__label">Quarterly</span>
+                            <span class="nav-group-toggle__icon" aria-hidden="true"></span>
+                        </button>
+                        <div class="nav-group-content" id="navGroupReportsQuarterly" data-nav-content="reports-quarterly" hidden>
+                            <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView" data-nav-parents="reports reports-quarterly">Summary</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </nav>
         <hr class="sidebar-divider" />
@@ -477,9 +572,21 @@
             hidden
         >Get Full Report</button>
         <nav class="nav" aria-label="Settings">
-            <div class="nav-group" role="group" aria-labelledby="navGroupSettingsLabel">
-                <button type="button" class="nav-item" data-route="configurations" aria-controls="configurationsView">Configurations</button>
-                <button type="button" class="nav-item" data-route="settings" aria-controls="settingsView">Settings</button>
+            <div class="nav-group" data-nav-group="settings" data-nav-depth="0">
+                <button
+                    type="button"
+                    class="nav-group-toggle"
+                    data-nav-toggle="settings"
+                    aria-expanded="false"
+                    aria-controls="navGroupSettings"
+                >
+                    <span class="nav-group-toggle__label">Settings</span>
+                    <span class="nav-group-toggle__icon" aria-hidden="true"></span>
+                </button>
+                <div class="nav-group-content" id="navGroupSettings" data-nav-content="settings" hidden>
+                    <button type="button" class="nav-item" data-route="configurations" aria-controls="configurationsView" data-nav-parents="settings">Configuration</button>
+                    <button type="button" class="nav-item" data-route="settings" aria-controls="settingsView" data-nav-parents="settings">Account</button>
+                </div>
             </div>
         </nav>
     </aside>
@@ -532,7 +639,7 @@
                 id="configurationsView"
                 class="view"
                 data-route-view="configurations"
-                data-route-title="Configurations"
+                data-route-title="Configuration"
                 data-template="./views/configurations.html">
         </section>
 
@@ -540,7 +647,7 @@
                 id="settingsView"
                 class="view"
                 data-route-view="settings"
-                data-route-title="Settings"
+                data-route-title="Account"
                 data-template="./views/settings.html">
         </section>
     </main>
