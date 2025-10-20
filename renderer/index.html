@@ -131,16 +131,76 @@
         .sidebar-control select:focus{ border-color:var(--accent); box-shadow:0 0 0 4px var(--focus-ring); }
         .sidebar-action{ width:100%; margin-bottom:12px; }
         .sidebar-divider{ height:1px; border:none; background:var(--border); margin: 12px 0; }
-        .nav{ display:flex; flex-direction:column; gap:16px; }
-        .nav-group{ display:flex; flex-direction:column; gap:8px; }
-        .nav-group-label{
-            font-size:11px;
-            font-weight:700;
-            text-transform:uppercase;
-            letter-spacing:.4px;
+        .nav{ display:flex; flex-direction:column; gap:12px; }
+        .nav-accordion{ display:flex; flex-direction:column; gap:6px; }
+        .nav-accordion--nested{ gap:4px; }
+        .nav-accordion__trigger{
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:8px;
+            width:100%;
+            padding:10px 12px;
+            border-radius:12px;
+            border:1px solid transparent;
+            background:transparent;
             color:var(--muted);
-            padding:2px;
+            font-size:12px;
+            font-weight:700;
+            letter-spacing:.4px;
+            text-transform:uppercase;
+            cursor:pointer;
+            transition:background .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease;
         }
+        .nav-accordion__label{ flex:1; text-align:left; }
+        .nav-accordion__trigger:hover{
+            background:var(--soft);
+            border-color:var(--border);
+            color:var(--text);
+        }
+        .nav-accordion__trigger:focus-visible{
+            outline:2px solid var(--accent);
+            outline-offset:2px;
+        }
+        .nav-accordion.is-open > .nav-accordion__trigger,
+        .nav-accordion.is-child-active > .nav-accordion__trigger{
+            background:var(--soft);
+            border-color:var(--border);
+            color:var(--text);
+            box-shadow:0 6px 20px rgba(15,17,21,.05);
+        }
+        .nav-accordion__trigger--nested{
+            font-size:13px;
+            font-weight:600;
+            letter-spacing:0;
+            text-transform:none;
+            color:var(--text);
+        }
+        .nav-accordion__chevron{
+            font-size:11px;
+            line-height:1;
+            opacity:.7;
+            transition:transform .24s ease;
+        }
+        .nav-accordion.is-open > .nav-accordion__trigger .nav-accordion__chevron{
+            transform:rotate(180deg);
+        }
+        .nav-accordion__content{
+            display:flex;
+            flex-direction:column;
+            gap:6px;
+            overflow:hidden;
+            height:0;
+            padding-left:10px;
+            transition:height .24s ease;
+            will-change:height;
+        }
+        .nav-accordion.is-open > .nav-accordion__content{
+            padding-top:4px;
+        }
+        .nav-accordion__content > .nav-item{ font-size:13px; }
+        .nav-accordion__content > .nav-item + .nav-item{ margin-top:2px; }
+        .nav-accordion__content > .nav-accordion{ padding-left:4px; }
         .nav-item{
             display:flex;
             align-items:center;
@@ -454,19 +514,70 @@
         </div>
         <hr class="sidebar-divider" />
         <nav class="nav" aria-label="Primary">
-            <div class="nav-group" role="group" aria-labelledby="navGroupGeneralLabel">
-                <div id="navGroupGeneralLabel" class="nav-group-label">General</div>
-                <button type="button" class="nav-item" data-route="issues" aria-controls="issuesView">Issues</button>
-            </div>
-            <div class="nav-group" role="group" aria-labelledby="navGroupMonthlyReportsLabel">
-                <div id="navGroupMonthlyReportsLabel" class="nav-group-label">Monthly Reports</div>
-                <button type="button" class="nav-item is-active" data-route="monthly-summary" aria-controls="monthlySummaryView">Summary</button>
-                <button type="button" class="nav-item" data-route="detailed-worklogs" aria-controls="detailedWorklogsView">Detailed Worklogs</button>
-                <button type="button" class="nav-item" data-route="due-issues" aria-controls="dueIssuesView">Due This Month</button>
-            </div>
-            <div class="nav-group" role="group" aria-labelledby="navGroupQuarterReportsLabel">
-                <div id="navGroupQuarterReportsLabel" class="nav-group-label">Quarter Reports</div>
-                <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView">Summary</button>
+            <button type="button" class="nav-item" data-route="issues" aria-controls="issuesView">Issues</button>
+            <div class="nav-accordion is-open" data-accordion="reports">
+                <button
+                    type="button"
+                    class="nav-accordion__trigger"
+                    data-accordion-toggle
+                    aria-controls="navReportsContent"
+                    aria-expanded="true"
+                >
+                    <span class="nav-accordion__label">Reports</span>
+                    <span class="nav-accordion__chevron" aria-hidden="true">▾</span>
+                </button>
+                <div
+                    id="navReportsContent"
+                    class="nav-accordion__content"
+                    data-accordion-content
+                    role="region"
+                    aria-label="Reports navigation"
+                >
+                    <div class="nav-accordion nav-accordion--nested is-open" data-accordion="reports-monthly">
+                        <button
+                            type="button"
+                            class="nav-accordion__trigger nav-accordion__trigger--nested"
+                            data-accordion-toggle
+                            aria-controls="navReportsMonthlyContent"
+                            aria-expanded="true"
+                        >
+                            <span class="nav-accordion__label">Monthly</span>
+                            <span class="nav-accordion__chevron" aria-hidden="true">▾</span>
+                        </button>
+                        <div
+                            id="navReportsMonthlyContent"
+                            class="nav-accordion__content"
+                            data-accordion-content
+                            role="region"
+                            aria-label="Monthly reports"
+                        >
+                            <button type="button" class="nav-item is-active" data-route="monthly-summary" aria-controls="monthlySummaryView">Summary</button>
+                            <button type="button" class="nav-item" data-route="detailed-worklogs" aria-controls="detailedWorklogsView">Detailed Worklogs</button>
+                            <button type="button" class="nav-item" data-route="due-issues" aria-controls="dueIssuesView">Due This Month</button>
+                        </div>
+                    </div>
+                    <div class="nav-accordion nav-accordion--nested" data-accordion="reports-quarterly">
+                        <button
+                            type="button"
+                            class="nav-accordion__trigger nav-accordion__trigger--nested"
+                            data-accordion-toggle
+                            aria-controls="navReportsQuarterlyContent"
+                            aria-expanded="false"
+                        >
+                            <span class="nav-accordion__label">Quarterly</span>
+                            <span class="nav-accordion__chevron" aria-hidden="true">▾</span>
+                        </button>
+                        <div
+                            id="navReportsQuarterlyContent"
+                            class="nav-accordion__content"
+                            data-accordion-content
+                            role="region"
+                            aria-label="Quarterly reports"
+                        >
+                            <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView">Summary</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </nav>
         <hr class="sidebar-divider" />
@@ -477,9 +588,27 @@
             hidden
         >Get Full Report</button>
         <nav class="nav" aria-label="Settings">
-            <div class="nav-group" role="group" aria-labelledby="navGroupSettingsLabel">
-                <button type="button" class="nav-item" data-route="configurations" aria-controls="configurationsView">Configurations</button>
-                <button type="button" class="nav-item" data-route="settings" aria-controls="settingsView">Settings</button>
+            <div class="nav-accordion" data-accordion="settings">
+                <button
+                    type="button"
+                    class="nav-accordion__trigger"
+                    data-accordion-toggle
+                    aria-controls="navSettingsContent"
+                    aria-expanded="false"
+                >
+                    <span class="nav-accordion__label">Settings</span>
+                    <span class="nav-accordion__chevron" aria-hidden="true">▾</span>
+                </button>
+                <div
+                    id="navSettingsContent"
+                    class="nav-accordion__content"
+                    data-accordion-content
+                    role="region"
+                    aria-label="Settings navigation"
+                >
+                    <button type="button" class="nav-item" data-route="configurations" aria-controls="configurationsView">Configuration</button>
+                    <button type="button" class="nav-item" data-route="settings" aria-controls="settingsView">Account</button>
+                </div>
             </div>
         </nav>
     </aside>
@@ -532,7 +661,7 @@
                 id="configurationsView"
                 class="view"
                 data-route-view="configurations"
-                data-route-title="Configurations"
+                data-route-title="Configuration"
                 data-template="./views/configurations.html">
         </section>
 
@@ -540,7 +669,7 @@
                 id="settingsView"
                 class="view"
                 data-route-view="settings"
-                data-route-title="Settings"
+                data-route-title="Account"
                 data-template="./views/settings.html">
         </section>
     </main>

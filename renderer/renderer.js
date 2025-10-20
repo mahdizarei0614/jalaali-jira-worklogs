@@ -126,6 +126,44 @@
     const routeTitle = $('#viewTitle');
     const defaultTitle = routeTitle?.textContent || 'Alo Worklogs';
     const navItems = $$('[data-route]');
+    const navAccordions = $$('.nav-accordion');
+    const accordionEntries = new Map();
+    const routeAncestors = new Map();
+
+    navAccordions.forEach((accordion, index) => {
+        const trigger = accordion.querySelector('[data-accordion-toggle]');
+        const content = accordion.querySelector('[data-accordion-content]');
+        if (!trigger || !content) {
+            return;
+        }
+        if (!content.id) {
+            content.id = `navAccordionContent${index + 1}`;
+        }
+        trigger.setAttribute('aria-controls', content.id);
+        const expanded = accordion.classList.contains('is-open');
+        trigger.setAttribute('aria-expanded', String(expanded));
+        content.setAttribute('aria-hidden', String(!expanded));
+        content.style.height = expanded ? 'auto' : '0px';
+        accordionEntries.set(accordion, { node: accordion, trigger, content });
+        trigger.addEventListener('click', () => handleAccordionToggle(accordion));
+    });
+
+    navItems.forEach((btn) => {
+        const route = btn?.dataset?.route;
+        if (!route) return;
+        const ancestors = [];
+        let current = btn.parentElement;
+        while (current) {
+            if (accordionEntries.has(current)) {
+                ancestors.push(current);
+            }
+            current = current.parentElement;
+        }
+        ancestors.reverse();
+        routeAncestors.set(route, ancestors);
+    });
+
+    updateAccordionActiveState();
     const viewNodes = new Map(
         $$('[data-route-view]').map((el) => {
             const route = el.getAttribute('data-route-view');
@@ -196,7 +234,145 @@
     const defaultRoute = initialActive ? initialActive[0] : (navItems[0]?.dataset.route || 'monthly-summary');
     let activeRoute = null;
 
-    function setRoute(route, { pushState = true } = {}) {
+    function handleAccordionToggle(node) {
+        const entry = accordionEntries.get(node);
+        if (!entry) return;
+        const isOpen = node.classList.contains('is-open');
+        const hasActiveChild = accordionContainsActiveRoute(node);
+        if (isOpen) {
+            if (hasActiveChild) {
+                return;
+            }
+            closeAccordion(entry);
+            updateAccordionActiveState();
+            return;
+        }
+        openAccordion(entry);
+        closeSiblingAccordions(node);
+        updateAccordionActiveState();
+    }
+
+    function closeSiblingAccordions(node) {
+        const parent = node?.parentElement;
+        if (!parent) return;
+        Array.from(parent.children).forEach((sibling) => {
+            if (sibling === node) return;
+            const siblingEntry = accordionEntries.get(sibling);
+            if (!siblingEntry) return;
+            if (accordionContainsActiveRoute(sibling)) {
+                openAccordion(siblingEntry, { immediate: true });
+            } else {
+                closeAccordion(siblingEntry);
+            }
+        });
+    }
+
+    function collapseDescendants(node) {
+        const descendants = Array.from(node.querySelectorAll('.nav-accordion'));
+        descendants.forEach((desc) => {
+            if (desc === node) return;
+            const entry = accordionEntries.get(desc);
+            if (entry) {
+                closeAccordion(entry, { immediate: true });
+            }
+        });
+    }
+
+    function accordionContainsActiveRoute(node) {
+        if (!node) return false;
+        return Boolean(node.querySelector('[data-route].is-active'));
+    }
+
+    function openAccordion(entry, { immediate = false } = {}) {
+        if (!entry) return;
+        const { node, content, trigger } = entry;
+        if (node.classList.contains('is-open')) {
+            trigger.setAttribute('aria-expanded', 'true');
+            content.setAttribute('aria-hidden', 'false');
+            if (immediate) {
+                content.style.height = 'auto';
+            }
+            return;
+        }
+        node.classList.add('is-open');
+        trigger.setAttribute('aria-expanded', 'true');
+        content.setAttribute('aria-hidden', 'false');
+        if (immediate) {
+            content.style.height = 'auto';
+            return;
+        }
+        content.style.height = 'auto';
+        const height = content.scrollHeight;
+        content.style.height = '0px';
+        content.offsetHeight;
+        content.style.height = `${height}px`;
+        const onTransitionEnd = (event) => {
+            if (event.target !== content || event.propertyName !== 'height') {
+                return;
+            }
+            content.style.height = 'auto';
+            content.removeEventListener('transitionend', onTransitionEnd);
+        };
+        content.addEventListener('transitionend', onTransitionEnd);
+    }
+
+    function closeAccordion(entry, { immediate = false } = {}) {
+        if (!entry) return;
+        const { node, content, trigger } = entry;
+        const wasOpen = node.classList.contains('is-open');
+        trigger.setAttribute('aria-expanded', 'false');
+        content.setAttribute('aria-hidden', 'true');
+        if (!wasOpen) {
+            if (immediate) {
+                content.style.height = '0px';
+            }
+            return;
+        }
+        const height = content.scrollHeight;
+        content.style.height = `${height}px`;
+        content.offsetHeight;
+        node.classList.remove('is-open');
+        collapseDescendants(node);
+        if (immediate) {
+            content.style.height = '0px';
+            return;
+        }
+        requestAnimationFrame(() => {
+            content.style.height = '0px';
+        });
+        const onTransitionEnd = (event) => {
+            if (event.target !== content || event.propertyName !== 'height') {
+                return;
+            }
+            content.removeEventListener('transitionend', onTransitionEnd);
+        };
+        content.addEventListener('transitionend', onTransitionEnd);
+    }
+
+    function updateAccordionActiveState() {
+        accordionEntries.forEach((entry) => {
+            const hasActive = accordionContainsActiveRoute(entry.node);
+            entry.node.classList.toggle('is-child-active', hasActive);
+        });
+    }
+
+    function syncAccordionsForRoute(route, { animate = true } = {}) {
+        const ancestors = routeAncestors.get(route) || [];
+        const ancestorSet = new Set(ancestors);
+        accordionEntries.forEach((entry, node) => {
+            if (ancestorSet.has(node)) {
+                openAccordion(entry, { immediate: !animate });
+            } else {
+                closeAccordion(entry, { immediate: !animate });
+            }
+        });
+        updateAccordionActiveState();
+    }
+
+    function setRoute(route, { pushState = true, animate } = {}) {
+        if (typeof animate !== 'boolean') {
+            animate = pushState;
+        }
         if (!viewNodes.has(route)) {
             route = defaultRoute;
         }
@@ -204,6 +380,7 @@
             if (pushState && window.location.hash.replace(/^#/, '') !== route) {
                 window.location.hash = route;
             }
+            syncAccordionsForRoute(route, { animate: false });
             return route;
         }
 
@@ -221,6 +398,8 @@
                 btn.removeAttribute('aria-current');
             }
         });
+
+        syncAccordionsForRoute(route, { animate });
 
         if (routeTitle) {
             routeTitle.textContent = routeLabels[route] || defaultTitle;
@@ -251,7 +430,7 @@
 
     function syncFromHash() {
         const hash = (window.location.hash || '').replace(/^#/, '');
-        return setRoute(hash || defaultRoute, { pushState: false });
+        return setRoute(hash || defaultRoute, { pushState: false, animate: false });
     }
 
     navItems.forEach((btn) => {
