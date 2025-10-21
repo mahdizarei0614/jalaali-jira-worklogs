@@ -7,6 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100..900;1,100..900&family=Rubik:ital,wght@0,300..900;1,300..900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./vendor/fullcalendar/main.min.css" />
     <style>
         :root{
             color-scheme: light;
@@ -517,6 +518,7 @@
         <hr class="sidebar-divider" />
         <nav class="nav" aria-label="Primary">
             <button type="button" class="nav-item" data-route="issues" aria-controls="issuesView">Issues</button>
+            <button type="button" class="nav-item" data-route="worklogs" aria-controls="worklogsView">Worklogs</button>
             <div class="nav-group" data-nav-group="reports" data-nav-depth="0">
                 <button
                     type="button"
@@ -628,6 +630,14 @@
         </section>
 
         <section
+                id="worklogsView"
+                class="view"
+                data-route-view="worklogs"
+                data-route-title="Worklogs"
+                data-template="./views/worklogs.html">
+        </section>
+
+        <section
                 id="quarterReportView"
                 class="view"
                 data-route-view="quarter-report"
@@ -674,6 +684,9 @@
 </div>
 
 <script src="./theme.js"></script>
+<script src="./vendor/moment/moment.min.js"></script>
+<script src="./vendor/moment/moment-jalaali.min.js"></script>
+<script src="./vendor/fullcalendar/main.min.js"></script>
 <script src="./renderer.js"></script>
 </body>
 </html>

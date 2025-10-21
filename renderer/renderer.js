@@ -501,6 +501,7 @@
         registerController('detailed-worklogs', (node) => initDetailedWorklogs(node, reportState)),
         registerController('due-issues', (node) => initDueIssues(node, reportState)),
         registerController('issues', (node) => initIssuesReport(node, reportState)),
+        registerController('worklogs', (node) => initWorklogsCalendar(node, reportState)),
         registerController('quarter-report', (node) => initQuarterReport(node, reportState)),
         registerController('configurations', (node) => initConfigurations(node, reportState, userSelectContext, settingsPromise))
     ]);
@@ -1226,6 +1227,401 @@
         }
 
         return {};
+    }
+
+    function initWorklogsCalendar(root, reportStateInstance) {
+        if (!root || root.dataset.controllerReady === 'true') return {};
+        root.dataset.controllerReady = 'true';
+
+        const calendarEl = root.querySelector('#worklogsCalendar');
+        const statusEl = root.querySelector('[data-calendar-status]');
+        const titleEl = root.querySelector('[data-calendar-title]');
+        const weekTotalEl = root.querySelector('[data-week-total]');
+        const navButtons = {
+            prev: root.querySelector('[data-calendar-nav="prev"]'),
+            today: root.querySelector('[data-calendar-nav="today"]'),
+            next: root.querySelector('[data-calendar-nav="next"]')
+        };
+
+        const FullCalendarLib = window.FullCalendar || null;
+        if (!calendarEl || !FullCalendarLib || typeof FullCalendarLib.Calendar !== 'function') {
+            console.warn('Worklogs view missing calendar dependencies.');
+            if (statusEl) {
+                statusEl.textContent = 'Calendar library failed to load.';
+                statusEl.classList.remove('is-hidden');
+            }
+            return {};
+        }
+
+        const momentLib = typeof window.moment === 'function' ? window.moment : null;
+        if (momentLib && typeof momentLib.loadPersian === 'function') {
+            try {
+                momentLib.loadPersian({ usePersianDigits: false, dialect: 'persian-modern' });
+            } catch (err) {
+                console.warn('Unable to initialise Persian locale for moment.', err);
+            }
+        }
+
+        const PERSIAN_WEEKDAYS = ['یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه'];
+        const pad2 = (value) => String(Math.trunc(value)).padStart(2, '0');
+
+        function formatLocalDateTime(dateObj) {
+            if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) {
+                return '';
+            }
+            return `${dateObj.getFullYear()}-${pad2(dateObj.getMonth() + 1)}-${pad2(dateObj.getDate())}T${pad2(dateObj.getHours())}:${pad2(dateObj.getMinutes())}:${pad2(dateObj.getSeconds())}`;
+        }
+
+        function formatLocalDate(dateObj) {
+            if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) {
+                return '';
+            }
+            return `${dateObj.getFullYear()}-${pad2(dateObj.getMonth() + 1)}-${pad2(dateObj.getDate())}`;
+        }
+        let calendarInstance = null;
+        let latestWorklogs = [];
+        let latestDays = [];
+        let latestBaseUrl = null;
+        let currentMonthKey = null;
+
+        function addNavHandler(btn, action) {
+            if (!btn) return;
+            btn.addEventListener('click', () => {
+                if (!calendarInstance) return;
+                switch (action) {
+                    case 'prev':
+                        calendarInstance.prev();
+                        break;
+                    case 'next':
+                        calendarInstance.next();
+                        break;
+                    case 'today':
+                        calendarInstance.today();
+                        break;
+                    default:
+                        break;
+                }
+                updateWeekTotal();
+                updateRangeTitle();
+            });
+        }
+
+        function setStatus(message) {
+            if (!statusEl) return;
+            if (!message) {
+                statusEl.textContent = '';
+                statusEl.classList.add('is-hidden');
+            } else {
+                statusEl.textContent = message;
+                statusEl.classList.remove('is-hidden');
+            }
+        }
+
+        function formatRange(startDate, endDate) {
+            if (!startDate || !endDate) return '—';
+            if (momentLib) {
+                const start = momentLib(startDate);
+                const end = momentLib(endDate);
+                if (start.isValid() && end.isValid()) {
+                    const sameYear = start.jYear() === end.jYear();
+                    const sameMonth = sameYear && start.jMonth() === end.jMonth();
+                    if (sameMonth) {
+                        return `${start.format('jYYYY jMMMM jDD')} – ${end.format('jDD')}`;
+                    }
+                    if (sameYear) {
+                        return `${start.format('jYYYY jMMMM jDD')} – ${end.format('jMMMM jDD')}`;
+                    }
+                    return `${start.format('jYYYY jMMMM jDD')} – ${end.format('jYYYY jMMMM jDD')}`;
+                }
+            }
+            try {
+                const fmt = new Intl.DateTimeFormat('fa-IR-u-ca-persian', { year: 'numeric', month: 'long', day: '2-digit' });
+                const startLabel = fmt.format(startDate);
+                const endLabel = fmt.format(endDate);
+                return `${startLabel} – ${endLabel}`;
+            } catch (err) {
+                return `${startDate.toLocaleDateString()} – ${endDate.toLocaleDateString()}`;
+            }
+        }
+
+        function formatDayHeader(date) {
+            if (momentLib) {
+                const m = momentLib(date);
+                if (m.isValid()) {
+                    const weekday = PERSIAN_WEEKDAYS[date.getDay()] || '';
+                    const label = m.format('jMM/jDD');
+                    return { html: `<strong>${weekday}</strong><span>${label}</span>` };
+                }
+            }
+            try {
+                const weekday = new Intl.DateTimeFormat('fa-IR-u-ca-persian', { weekday: 'long' }).format(date);
+                const label = new Intl.DateTimeFormat('fa-IR-u-ca-persian', { month: '2-digit', day: '2-digit' }).format(date);
+                return { html: `<strong>${weekday}</strong><span>${label}</span>` };
+            } catch (err) {
+                return { text: date.toDateString() };
+            }
+        }
+
+        function buildEventContent(arg) {
+            const container = document.createElement('div');
+            container.className = 'worklogs-event__content';
+            const title = document.createElement('strong');
+            title.textContent = arg.event.title;
+            container.appendChild(title);
+
+            const logs = Array.isArray(arg.event.extendedProps.logs) ? arg.event.extendedProps.logs : [];
+            if (logs.length) {
+                const subtitle = document.createElement('span');
+                subtitle.className = 'worklogs-event__subtitle';
+                if (logs.length === 1) {
+                    const hours = Number.parseFloat(logs[0].hours || logs[0].hoursLogged || 0) || 0;
+                    const key = logs[0].issueKey || '';
+                    subtitle.textContent = key ? `${key} (${hours.toFixed(2)}h)` : `${hours.toFixed(2)}h`;
+                } else {
+                    subtitle.textContent = `${logs.length} entries`;
+                }
+                container.appendChild(subtitle);
+            }
+
+            return { domNodes: [container] };
+        }
+
+        function buildEvents() {
+            if (!Array.isArray(latestWorklogs) || latestWorklogs.length === 0) {
+                return [];
+            }
+            const grouped = new Map();
+            latestWorklogs.forEach((log) => {
+                const dateStr = (log?.date || '').trim();
+                if (!dateStr) return;
+                if (!grouped.has(dateStr)) {
+                    grouped.set(dateStr, []);
+                }
+                grouped.get(dateStr).push(log);
+            });
+
+            const events = [];
+            grouped.forEach((logs, dateStr) => {
+                const totalHours = logs.reduce((sum, log) => {
+                    const hrs = Number.parseFloat(log?.hours ?? 0) || 0;
+                    return sum + hrs;
+                }, 0);
+                const durationHours = Math.max(totalHours, 0.25);
+                const startMoment = momentLib ? momentLib(`${dateStr} 09:00`, 'YYYY-MM-DD HH:mm', true) : null;
+                const start = startMoment && startMoment.isValid()
+                    ? startMoment.format('YYYY-MM-DDTHH:mm:ss')
+                    : `${dateStr}T09:00:00`;
+                const end = startMoment && startMoment.isValid()
+                    ? startMoment.clone().add(durationHours, 'hours').format('YYYY-MM-DDTHH:mm:ss')
+                    : (() => {
+                        const fallbackStart = new Date(`${dateStr}T09:00:00`);
+                        if (!Number.isNaN(fallbackStart.getTime())) {
+                            const millis = durationHours * 60 * 60 * 1000;
+                            fallbackStart.setTime(fallbackStart.getTime() + millis);
+                            return formatLocalDateTime(fallbackStart);
+                        }
+                        return `${dateStr}T09:15:00`;
+                    })();
+                const tooltip = logs
+                    .map((log) => {
+                        const key = log?.issueKey || '—';
+                        const hrs = Number.parseFloat(log?.hours ?? 0) || 0;
+                        return `${key} (${hrs.toFixed(2)}h)`;
+                    })
+                    .join('\n');
+
+                events.push({
+                    title: `${totalHours.toFixed(2)} h`,
+                    start,
+                    end,
+                    allDay: false,
+                    classNames: ['worklogs-event'],
+                    extendedProps: { logs, tooltip }
+                });
+            });
+
+            return events;
+        }
+
+        function buildBackgroundEvents() {
+            if (!Array.isArray(latestDays) || latestDays.length === 0) {
+                return [];
+            }
+            return latestDays
+                .map((day) => {
+                    const dateStr = (day?.g || '').trim();
+                    if (!dateStr) return null;
+                    const color = (day?.color || '').toLowerCase();
+                    const validColor = ['gray', 'red', 'yellow', 'green'].includes(color) ? color : null;
+                    const startMoment = momentLib ? momentLib(dateStr, 'YYYY-MM-DD', true) : null;
+                    const start = startMoment && startMoment.isValid() ? startMoment.format('YYYY-MM-DD') : dateStr;
+                    const end = startMoment && startMoment.isValid()
+                        ? startMoment.clone().add(1, 'day').format('YYYY-MM-DD')
+                        : (() => {
+                            const fallback = new Date(`${dateStr}T00:00:00`);
+                            if (!Number.isNaN(fallback.getTime())) {
+                                fallback.setDate(fallback.getDate() + 1);
+                                return formatLocalDate(fallback);
+                            }
+                            return undefined;
+                        })();
+                    return {
+                        start,
+                        end: end || undefined,
+                        display: 'background',
+                        classNames: validColor ? [`worklogs-bg-${validColor}`] : []
+                    };
+                })
+                .filter(Boolean);
+        }
+
+        function refreshCalendar() {
+            if (!calendarInstance) return;
+            const events = buildEvents();
+            const backgroundEvents = buildBackgroundEvents();
+            calendarInstance.batchRendering(() => {
+                calendarInstance.removeAllEvents();
+                backgroundEvents.forEach((event) => calendarInstance.addEvent(event));
+                events.forEach((event) => calendarInstance.addEvent(event));
+            });
+            updateWeekTotal();
+        }
+
+        function updateRangeTitle() {
+            if (!calendarInstance || !titleEl) return;
+            const view = calendarInstance.view;
+            if (!view) return;
+            const start = view.activeStart;
+            const end = new Date(view.activeEnd.getTime() - 1);
+            titleEl.textContent = formatRange(start, end);
+        }
+
+        function updateWeekTotal() {
+            if (!calendarInstance || !weekTotalEl) return;
+            const view = calendarInstance.view;
+            if (!view) return;
+            const start = view.activeStart;
+            const end = view.activeEnd;
+            let total = 0;
+            if (Array.isArray(latestWorklogs)) {
+                latestWorklogs.forEach((log) => {
+                    const dateStr = (log?.date || '').trim();
+                    if (!dateStr) return;
+                    const dateMoment = momentLib ? momentLib(dateStr, 'YYYY-MM-DD', true) : null;
+                    let include = false;
+                    if (dateMoment && dateMoment.isValid()) {
+                        include = dateMoment.isSameOrAfter(start, 'day') && dateMoment.isBefore(end, 'day');
+                    } else {
+                        const dateObj = new Date(`${dateStr}T00:00:00`);
+                        include = !Number.isNaN(dateObj.getTime()) && dateObj >= start && dateObj < end;
+                    }
+                    if (include) {
+                        total += Number.parseFloat(log?.hours ?? 0) || 0;
+                    }
+                });
+            }
+            weekTotalEl.textContent = `${total.toFixed(2)} h`;
+        }
+
+        calendarInstance = new FullCalendarLib.Calendar(calendarEl, {
+            height: 'auto',
+            initialView: 'timeGridWeek',
+            firstDay: 6,
+            slotEventOverlap: false,
+            headerToolbar: false,
+            allDaySlot: false,
+            slotMinTime: '06:00:00',
+            slotMaxTime: '22:00:00',
+            dayHeaderContent: ({ date }) => formatDayHeader(date),
+            eventContent: (arg) => buildEventContent(arg),
+            eventDidMount: (info) => {
+                if (info?.event?.extendedProps?.tooltip) {
+                    info.el.setAttribute('title', info.event.extendedProps.tooltip);
+                }
+            },
+            datesSet: () => {
+                updateRangeTitle();
+                updateWeekTotal();
+            },
+            eventClick: (info) => {
+                const logs = Array.isArray(info?.event?.extendedProps?.logs) ? info.event.extendedProps.logs : [];
+                if (logs.length !== 1) return;
+                const issueKey = logs[0]?.issueKey;
+                const url = buildIssueUrl(latestBaseUrl, issueKey);
+                if (!url) return;
+                if (typeof window.appApi?.openExternal === 'function') {
+                    window.appApi.openExternal(url).catch((err) => {
+                        console.error('Failed to open issue from calendar', err);
+                        window.open(url, '_blank', 'noopener,noreferrer');
+                    });
+                } else {
+                    window.open(url, '_blank', 'noopener,noreferrer');
+                }
+            }
+        });
+
+        calendarInstance.render();
+        updateRangeTitle();
+        setStatus('Loading…');
+
+        addNavHandler(navButtons.prev, 'prev');
+        addNavHandler(navButtons.next, 'next');
+        addNavHandler(navButtons.today, 'today');
+
+        reportStateInstance.subscribe((state) => {
+            if (state.isFetching && !state.result) {
+                latestWorklogs = [];
+                latestDays = [];
+                latestBaseUrl = null;
+                setStatus('Loading…');
+                calendarInstance.removeAllEvents();
+                updateWeekTotal();
+                return;
+            }
+
+            const res = state.result;
+            if (!res || !res.ok) {
+                latestWorklogs = [];
+                latestDays = [];
+                latestBaseUrl = null;
+                const message = res ? (res.reason || 'Unable to load worklogs.') : 'No data yet.';
+                setStatus(message);
+                calendarInstance.removeAllEvents();
+                updateWeekTotal();
+                return;
+            }
+
+            latestWorklogs = Array.isArray(res.worklogs) ? res.worklogs : [];
+            latestDays = Array.isArray(res.days) ? res.days : [];
+            latestBaseUrl = res.baseUrl || null;
+
+            if (momentLib && Number.isFinite(res.jYear) && Number.isFinite(res.jMonth)) {
+                const monthKey = `${res.jYear}-${res.jMonth}`;
+                if (monthKey !== currentMonthKey) {
+                    const firstDay = momentLib(`${res.jYear}/${res.jMonth}/1`, 'jYYYY/jM/jD', true);
+                    if (firstDay.isValid()) {
+                        calendarInstance.gotoDate(firstDay.format('YYYY-MM-DD'));
+                        currentMonthKey = monthKey;
+                    }
+                }
+            }
+
+            if (!latestWorklogs.length) {
+                setStatus('No worklogs found for the selected user and month.');
+                calendarInstance.removeAllEvents();
+                updateWeekTotal();
+                updateRangeTitle();
+                return;
+            }
+
+            setStatus('');
+            refreshCalendar();
+            updateRangeTitle();
+        });
+
+        return {
+            onShow: () => reportStateInstance.refresh()
+        };
     }
 
     function initDetailedWorklogs(root, reportStateInstance) {

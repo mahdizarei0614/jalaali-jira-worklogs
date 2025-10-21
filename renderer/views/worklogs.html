@@ -1,0 +1,168 @@
+<div class="app worklogs-view">
+    <div class="calendar-card">
+        <div class="calendar-header">
+            <div class="section-title">Worklogs Calendar</div>
+            <div class="calendar-controls" role="toolbar" aria-label="Calendar navigation">
+                <button type="button" class="btn btn-outline" data-calendar-nav="prev">◀</button>
+                <button type="button" class="btn btn-outline" data-calendar-nav="today">Today</button>
+                <button type="button" class="btn btn-outline" data-calendar-nav="next">▶</button>
+            </div>
+        </div>
+        <div class="calendar-meta">
+            <div class="calendar-range" data-calendar-title>—</div>
+            <div class="calendar-week-total">Weekly total: <span data-week-total>0 h</span></div>
+        </div>
+        <div class="calendar-status" data-calendar-status>Loading…</div>
+        <div class="calendar-wrapper">
+            <div id="worklogsCalendar" class="worklogs-calendar" aria-live="polite"></div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .worklogs-view .calendar-card {
+        background: var(--card);
+        border-radius: 16px;
+        border: 1px solid var(--border);
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        box-shadow: 0 12px 45px rgba(15, 17, 21, 0.08);
+    }
+    .worklogs-view .calendar-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+    }
+    .worklogs-view .calendar-controls {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .worklogs-view .calendar-controls .btn {
+        min-width: 72px;
+        justify-content: center;
+    }
+    .worklogs-view .calendar-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 8px;
+        color: var(--muted);
+        font-weight: 600;
+    }
+    .worklogs-view .calendar-range {
+        font-size: 15px;
+        color: var(--text);
+    }
+    .worklogs-view .calendar-status {
+        font-size: 14px;
+        color: var(--muted);
+    }
+    .worklogs-view .calendar-status.is-hidden {
+        display: none;
+    }
+    .worklogs-view .calendar-wrapper {
+        position: relative;
+    }
+    .worklogs-view .worklogs-calendar {
+        background: var(--card);
+        border-radius: 12px;
+        overflow: hidden;
+    }
+    .worklogs-view .fc {
+        --fc-border-color: var(--border);
+        --fc-page-bg-color: var(--card);
+        --fc-neutral-bg-color: var(--soft);
+        --fc-today-bg-color: rgba(0, 122, 255, 0.16);
+        --fc-highlight-color: rgba(0, 122, 255, 0.18);
+        font-family: inherit;
+        color: var(--text);
+    }
+    .worklogs-view .fc-toolbar-chunk {
+        display: none;
+    }
+    .worklogs-view .fc-scrollgrid {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+    }
+    .worklogs-view .fc-timegrid-slot {
+        height: 48px;
+    }
+    .worklogs-view .fc-timegrid-axis-cushion,
+    .worklogs-view .fc-col-header-cell-cushion {
+        font-weight: 600;
+        color: var(--muted);
+    }
+    .worklogs-view .fc-col-header-cell-cushion {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        align-items: center;
+        justify-content: center;
+    }
+    .worklogs-view .fc-col-header-cell-cushion strong {
+        font-size: 15px;
+        color: var(--text);
+        font-weight: 700;
+    }
+    .worklogs-view .worklogs-event {
+        background: rgba(0, 122, 255, 0.12);
+        border: 1px solid rgba(0, 122, 255, 0.4);
+        color: var(--text);
+        border-radius: 10px;
+        padding: 4px 6px;
+        font-weight: 600;
+        box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
+    }
+    .worklogs-view .worklogs-event__content {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+    .worklogs-view .worklogs-event .fc-event-main {
+        color: inherit;
+    }
+    .worklogs-view .worklogs-event__subtitle {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 2px;
+        display: block;
+    }
+    .worklogs-view .worklogs-bg-gray {
+        background-color: rgba(108, 117, 125, 0.12);
+    }
+    .worklogs-view .worklogs-bg-red {
+        background-color: rgba(255, 59, 48, 0.12);
+    }
+    .worklogs-view .worklogs-bg-yellow {
+        background-color: rgba(255, 204, 0, 0.12);
+    }
+    .worklogs-view .worklogs-bg-green {
+        background-color: rgba(52, 199, 89, 0.12);
+    }
+    .worklogs-view .fc .worklogs-bg-gray,
+    .worklogs-view .fc .worklogs-bg-red,
+    .worklogs-view .fc .worklogs-bg-yellow,
+    .worklogs-view .fc .worklogs-bg-green {
+        opacity: 1;
+    }
+    .worklogs-view .calendar-empty {
+        font-size: 14px;
+        color: var(--muted);
+        text-align: center;
+        padding: 16px;
+    }
+    @media (max-width: 1200px) {
+        .worklogs-view .calendar-card {
+            padding: 16px;
+        }
+        .worklogs-view .fc-timegrid-slot {
+            height: 60px;
+        }
+    }
+</style>
