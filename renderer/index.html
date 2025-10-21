@@ -389,6 +389,15 @@
             opacity:.35;
             pointer-events:none;
         }
+        [data-calendar-container].is-message-visible.is-message-soft .calendar-message{
+            pointer-events:none;
+            opacity:.9;
+        }
+        [data-calendar-container].is-message-visible.is-message-soft .calendar-area__grid{
+            filter:none;
+            opacity:1;
+            pointer-events:auto;
+        }
         [data-calendar-container] .fc{
             background:transparent;
             color:var(--text);
@@ -489,6 +498,61 @@
             color:var(--muted);
             font-weight:500;
         }
+        .calendar-event--creation{
+            background:rgba(58,134,255,.12) !important;
+            border:1px solid rgba(58,134,255,.35) !important;
+            box-shadow:0 8px 20px rgba(58,134,255,.18) !important;
+        }
+        .calendar-event__creation{
+            display:flex;
+            flex-direction:column;
+            gap:8px;
+            font-size:12px;
+            width:100%;
+        }
+        .calendar-event__creation-time{
+            font-weight:700;
+            color:var(--accent);
+            font-size:13px;
+        }
+        .calendar-event__creation select,
+        .calendar-event__creation textarea{
+            width:100%;
+            border:1px solid var(--border);
+            border-radius:8px;
+            background:var(--input-bg);
+            color:var(--text);
+            font-size:12px;
+            padding:6px 8px;
+            resize:vertical;
+            min-height:32px;
+        }
+        .calendar-event__creation textarea{
+            min-height:56px;
+        }
+        .calendar-event__creation select:disabled,
+        .calendar-event__creation textarea:disabled{
+            opacity:.6;
+            cursor:not-allowed;
+        }
+        .calendar-event__creation .btn{
+            font-size:11px;
+            padding:6px 10px;
+            border-radius:8px;
+        }
+        .calendar-event__creation-actions{
+            display:flex;
+            gap:8px;
+            justify-content:flex-end;
+        }
+        .calendar-event__creation-status{
+            font-size:11px;
+            line-height:1.4;
+            color:var(--muted);
+        }
+        .calendar-event__creation-status.is-error{ color:var(--red); }
+        .calendar-event__creation-status.is-success{ color:var(--green); }
+        .calendar-event__creation-status.is-loading{ color:var(--accent); }
         [data-calendar-container] .fc-timegrid-slot{
             height:48px;
         }

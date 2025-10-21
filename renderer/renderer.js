@@ -1359,6 +1359,23 @@
         let calendar = null;
         let eventSource = null;
         let lastSelectionKey = null;
+        let lastSelectedUsername = null;
+        let selfUsername = null;
+        let selfUsernamePromise = null;
+        const creationCtx = {
+            event: null,
+            state: defaultCreationState(),
+        };
+
+        ensureSelfUsername()
+            .then(() => {
+                const selection = reportStateInstance.getSelection?.() || {};
+                const username = (selection.username || '').trim();
+                if (username && selfUsername && username !== selfUsername) {
+                    destroyCreation();
+                }
+            })
+            .catch(() => {});
 
         function ensureCalendar() {
             if (calendar) return calendar;
@@ -1377,12 +1394,294 @@
                 dayHeaderContent: (args) => formatDayHeader(args.date),
                 titleFormat: () => '',
                 datesSet: (info) => updateToolbarTitle(info.start, info.end),
+                editable: false,
+                eventStartEditable: false,
+                eventDurationEditable: false,
+                selectable: true,
+                selectMirror: true,
+                selectAllow: (info) => allowSelection(info),
+                select: (info) => {
+                    Promise.resolve(handleCalendarSelect(info)).catch((err) => {
+                        console.warn('Failed to handle calendar selection', err);
+                    });
+                },
+                eventAllow: (_dropInfo, draggedEvent) => isCreationEvent(draggedEvent),
+                eventDrop: (info) => handleCalendarEventChange(info),
+                eventResize: (info) => handleCalendarEventChange(info),
                 eventContent: (arg) => renderEventContent(arg.event),
                 eventDidMount: (info) => applyEventMetadata(info.el, info.event.extendedProps)
             });
             calendar.render();
             updateToolbarTitle(calendar.view.currentStart, calendar.view.currentEnd);
             return calendar;
+        }
+
+        function defaultCreationState() {
+            return {
+                isLoadingIssues: false,
+                isSaving: false,
+                issueOptions: [],
+                selectedIssueKey: '',
+                comment: '',
+                error: null,
+                success: null,
+            };
+        }
+
+        function ensureSelfUsername() {
+            if (selfUsername !== null) {
+                return Promise.resolve(selfUsername);
+            }
+            if (selfUsernamePromise) {
+                return selfUsernamePromise;
+            }
+            if (typeof window.appApi?.whoami !== 'function') {
+                selfUsername = '';
+                return Promise.resolve(selfUsername);
+            }
+            selfUsernamePromise = window.appApi
+                .whoami()
+                .then((res) => {
+                    const value = res?.ok && res.username ? res.username.trim() : '';
+                    selfUsername = value;
+                    return value;
+                })
+                .catch((err) => {
+                    console.warn('Failed to resolve current user for calendar interactions.', err);
+                    selfUsername = '';
+                    return selfUsername;
+                })
+                .finally(() => {
+                    selfUsernamePromise = null;
+                });
+            return selfUsernamePromise;
+        }
+
+        function canCreateForCurrentSelection() {
+            const selection = reportStateInstance.getSelection?.() || {};
+            const username = (selection.username || '').trim();
+            if (!username) return false;
+            if (selfUsername === null) return false;
+            if (!selfUsername) return false;
+            return username === selfUsername;
+        }
+
+        function isCreationEvent(event) {
+            return !!event && creationCtx.event === event;
+        }
+
+        function rerenderCreationEvent() {
+            if (calendar && creationCtx.event) {
+                calendar.rerenderEvents();
+            }
+        }
+
+        function destroyCreation() {
+            if (creationCtx.event) {
+                try {
+                    creationCtx.event.remove();
+                } catch (err) {
+                    console.warn('Failed to remove pending calendar event', err);
+                }
+            }
+            creationCtx.event = null;
+            creationCtx.state = defaultCreationState();
+        }
+
+        function allowSelection(info) {
+            if (info?.allDay) return false;
+            if (selfUsername === null) return false;
+            if (!canCreateForCurrentSelection()) return false;
+            return true;
+        }
+
+        async function handleCalendarSelect(info) {
+            const cal = ensureCalendar();
+            cal.unselect();
+            await ensureSelfUsername();
+            if (!canCreateForCurrentSelection()) {
+                destroyCreation();
+                return;
+            }
+            if (!info?.start || info.allDay) {
+                return;
+            }
+            const start = new Date(info.start.valueOf());
+            const endRaw = info.end ? new Date(info.end.valueOf()) : null;
+            let end = endRaw && endRaw > start ? endRaw : new Date(start.getTime() + 30 * 60 * 1000);
+            if (end <= start) {
+                end = new Date(start.getTime() + 15 * 60 * 1000);
+            }
+
+            destroyCreation();
+            creationCtx.state = defaultCreationState();
+            creationCtx.state.isLoadingIssues = true;
+
+            const event = cal.addEvent({
+                start,
+                end,
+                allDay: false,
+                display: 'block',
+                classNames: ['calendar-event--creation'],
+                extendedProps: { mode: 'creation' },
+                editable: true,
+                startEditable: true,
+                durationEditable: true,
+            });
+            creationCtx.event = event;
+            rerenderCreationEvent();
+            await loadCreationIssues();
+        }
+
+        function handleCalendarEventChange(info) {
+            if (!isCreationEvent(info?.event)) {
+                if (typeof info?.revert === 'function') {
+                    info.revert();
+                }
+                return;
+            }
+            creationCtx.state.success = null;
+            rerenderCreationEvent();
+        }
+
+        async function loadCreationIssues() {
+            const targetEvent = creationCtx.event;
+            creationCtx.state.issueOptions = [];
+            creationCtx.state.error = null;
+            creationCtx.state.success = null;
+            creationCtx.state.isLoadingIssues = true;
+            rerenderCreationEvent();
+
+            const selection = reportStateInstance.getSelection?.() || {};
+            const username = (selection.username || '').trim();
+            if (!username) {
+                if (creationCtx.event !== targetEvent) {
+                    return;
+                }
+                creationCtx.state.isLoadingIssues = false;
+                creationCtx.state.error = 'No user is selected.';
+                rerenderCreationEvent();
+                return;
+            }
+            if (typeof window.appApi?.fetchActiveSprintIssues !== 'function') {
+                if (creationCtx.event !== targetEvent) {
+                    return;
+                }
+                creationCtx.state.isLoadingIssues = false;
+                creationCtx.state.error = 'Unable to load active sprint issues.';
+                rerenderCreationEvent();
+                return;
+            }
+
+            try {
+                const res = await window.appApi.fetchActiveSprintIssues({ username });
+                if (creationCtx.event !== targetEvent) {
+                    return;
+                }
+                if (!res?.ok) {
+                    creationCtx.state.error = res?.reason || 'Unable to load active sprint issues.';
+                    creationCtx.state.issueOptions = Array.isArray(res?.issues) ? res.issues : [];
+                } else {
+                    creationCtx.state.issueOptions = Array.isArray(res.issues) ? res.issues : [];
+                    if (!creationCtx.state.selectedIssueKey && creationCtx.state.issueOptions.length === 1) {
+                        creationCtx.state.selectedIssueKey = creationCtx.state.issueOptions[0]?.issueKey || '';
+                    }
+                }
+            } catch (err) {
+                if (creationCtx.event !== targetEvent) {
+                    return;
+                }
+                creationCtx.state.error = err?.message || 'Failed to load active sprint issues.';
+                creationCtx.state.issueOptions = [];
+            } finally {
+                if (creationCtx.event !== targetEvent) {
+                    return;
+                }
+                creationCtx.state.isLoadingIssues = false;
+                rerenderCreationEvent();
+            }
+        }
+
+        function formatDurationLabel(seconds) {
+            const totalSeconds = Number.isFinite(seconds) ? seconds : 0;
+            if (totalSeconds <= 0) return '';
+            const totalMinutes = Math.max(1, Math.round(totalSeconds / 60));
+            const hours = Math.floor(totalMinutes / 60);
+            const minutes = totalMinutes % 60;
+            const parts = [];
+            if (hours) parts.push(`${hours}h`);
+            if (minutes) parts.push(`${minutes}m`);
+            if (!parts.length) parts.push('1m');
+            return parts.join(' ');
+        }
+
+        function formatCreationTiming(event) {
+            if (!event) return '';
+            const startMoment = event.start ? createMoment(event.start) : null;
+            const endMoment = event.end ? createMoment(event.end) : null;
+            const parts = [];
+            if (startMoment) parts.push(startMoment.format('HH:mm'));
+            if (endMoment) parts.push(endMoment.format('HH:mm'));
+            let label = parts.length === 2 ? `${parts[0]} — ${parts[1]}` : parts[0] || '';
+            const durationSeconds = event.end && event.start ? (event.end.valueOf() - event.start.valueOf()) / 1000 : 0;
+            const durationLabel = formatDurationLabel(durationSeconds);
+            if (durationLabel) {
+                label = label ? `${label} (${durationLabel})` : durationLabel;
+            }
+            return label || 'New worklog';
+        }
+
+        async function handleCreationSave() {
+            const event = creationCtx.event;
+            if (!event || creationCtx.state.isSaving) return;
+            if (!creationCtx.state.selectedIssueKey) {
+                creationCtx.state.error = 'Please select an issue to log work.';
+                rerenderCreationEvent();
+                return;
+            }
+            if (!event.start) {
+                creationCtx.state.error = 'Invalid start time for the worklog.';
+                rerenderCreationEvent();
+                return;
+            }
+            if (typeof window.appApi?.addWorklog !== 'function') {
+                creationCtx.state.error = 'Worklog API is not available in this build.';
+                rerenderCreationEvent();
+                return;
+            }
+            const end = event.end ? new Date(event.end.valueOf()) : new Date(event.start.valueOf() + 15 * 60 * 1000);
+            const durationSeconds = Math.max(60, Math.round((end.valueOf() - event.start.valueOf()) / 1000));
+            const startMoment = createMoment(event.start);
+            const started = startMoment
+                ? startMoment.format('YYYY-MM-DDTHH:mm:ss.SSSZZ')
+                : event.start.toISOString().replace(/\.\d{3}Z$/, '.000+0000');
+            const comment = creationCtx.state.comment || '';
+
+            creationCtx.state.isSaving = true;
+            creationCtx.state.error = null;
+            creationCtx.state.success = null;
+            rerenderCreationEvent();
+
+            try {
+                const res = await window.appApi.addWorklog({
+                    issueKey: creationCtx.state.selectedIssueKey,
+                    started,
+                    timeSpentSeconds: durationSeconds,
+                    comment,
+                });
+                if (!res?.ok) {
+                    throw new Error(res?.reason || 'Failed to add worklog.');
+                }
+                destroyCreation();
+                await reportStateInstance.refresh({ force: true });
+            } catch (err) {
+                creationCtx.state.error = err?.message || 'Failed to add worklog.';
+            } finally {
+                if (creationCtx.event) {
+                    creationCtx.state.isSaving = false;
+                    rerenderCreationEvent();
+                }
+            }
         }
 
         function formatDayHeader(date) {
@@ -1415,6 +1714,9 @@
         }
 
         function renderEventContent(event) {
+            if (event?.extendedProps?.mode === 'creation' && isCreationEvent(event)) {
+                return renderCreationEvent(event);
+            }
             const props = event.extendedProps || {};
             const pieces = [];
             if (props.issueKey) {
@@ -1443,6 +1745,114 @@
             return { html };
         }
 
+        function renderCreationEvent(event) {
+            const state = creationCtx.state;
+            const rootEl = document.createElement('div');
+            rootEl.className = 'calendar-event__creation';
+
+            const timeEl = document.createElement('div');
+            timeEl.className = 'calendar-event__creation-time';
+            timeEl.textContent = formatCreationTiming(event);
+            rootEl.appendChild(timeEl);
+
+            const selectEl = document.createElement('select');
+            selectEl.disabled = state.isLoadingIssues || state.isSaving || !state.issueOptions.length;
+            const placeholderOption = document.createElement('option');
+            placeholderOption.value = '';
+            placeholderOption.textContent = state.isLoadingIssues
+                ? 'Loading issues…'
+                : (state.issueOptions.length ? 'Select an issue' : 'No active sprint issues found');
+            placeholderOption.disabled = true;
+            placeholderOption.hidden = false;
+            if (!state.selectedIssueKey) {
+                placeholderOption.selected = true;
+            }
+            selectEl.appendChild(placeholderOption);
+            state.issueOptions.forEach((issue) => {
+                const option = document.createElement('option');
+                option.value = issue?.issueKey || '';
+                const summary = (issue?.summary || '').toString().trim();
+                const labelParts = [issue?.issueKey || '', summary].filter(Boolean);
+                option.textContent = labelParts.join(' — ');
+                selectEl.appendChild(option);
+            });
+            if (state.selectedIssueKey) {
+                selectEl.value = state.selectedIssueKey;
+            }
+            selectEl.addEventListener('change', (ev) => {
+                ev.stopPropagation();
+                state.selectedIssueKey = selectEl.value || '';
+                state.success = null;
+                rerenderCreationEvent();
+            });
+            rootEl.appendChild(selectEl);
+
+            const textarea = document.createElement('textarea');
+            textarea.placeholder = 'Worklog comment';
+            textarea.value = state.comment;
+            textarea.disabled = state.isSaving;
+            textarea.addEventListener('input', (ev) => {
+                ev.stopPropagation();
+                state.comment = textarea.value;
+            });
+            rootEl.appendChild(textarea);
+
+            const statusMessages = [];
+            let statusClass = '';
+            if (state.error) {
+                statusMessages.push(state.error);
+                statusClass = 'is-error';
+            } else if (state.isSaving) {
+                statusMessages.push('Saving worklog…');
+                statusClass = 'is-loading';
+            } else if (state.isLoadingIssues) {
+                statusMessages.push('Loading issues…');
+                statusClass = 'is-loading';
+            }
+            if (state.success) {
+                statusMessages.push(state.success);
+                statusClass = 'is-success';
+            }
+            if (statusMessages.length) {
+                const statusEl = document.createElement('div');
+                statusEl.className = `calendar-event__creation-status ${statusClass}`.trim();
+                statusEl.textContent = statusMessages.join(' ');
+                rootEl.appendChild(statusEl);
+            }
+
+            const actionsEl = document.createElement('div');
+            actionsEl.className = 'calendar-event__creation-actions';
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.type = 'button';
+            cancelBtn.className = 'btn btn-ghost';
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.disabled = state.isSaving;
+            cancelBtn.addEventListener('click', (ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                destroyCreation();
+                rerenderCreationEvent();
+            });
+            actionsEl.appendChild(cancelBtn);
+
+            const saveBtn = document.createElement('button');
+            saveBtn.type = 'button';
+            saveBtn.className = 'btn btn-primary';
+            saveBtn.textContent = state.isSaving ? 'Saving…' : 'Log Work';
+            saveBtn.disabled = state.isSaving || state.isLoadingIssues || !state.selectedIssueKey;
+            saveBtn.addEventListener('click', (ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                handleCreationSave();
+            });
+            actionsEl.appendChild(saveBtn);
+
+            rootEl.appendChild(actionsEl);
+
+            return { domNodes: [rootEl] };
+        }
+
         function applyEventMetadata(el, props = {}) {
             const tooltipParts = [];
             if (props.jalaaliDate) tooltipParts.push(props.jalaaliDate);
@@ -1460,13 +1870,20 @@
             return `${jYear}-${jMonth}`;
         }
 
-        function showMessage(text) {
+        function showMessage(text, options = {}) {
+            const { allowInteraction = false } = options;
             messageEl.textContent = text;
+            if (allowInteraction) {
+                container.classList.add('is-message-soft');
+            } else {
+                container.classList.remove('is-message-soft');
+            }
             container.classList.add('is-message-visible');
         }
 
         function hideMessage() {
             container.classList.remove('is-message-visible');
+            container.classList.remove('is-message-soft');
         }
 
         function clearEvents() {
@@ -1479,7 +1896,11 @@
                 }
                 eventSource = null;
             }
-            calendar.removeAllEvents();
+            calendar.getEvents().forEach((evt) => {
+                if (!isCreationEvent(evt)) {
+                    evt.remove();
+                }
+            });
         }
 
         function setEvents(events) {
@@ -1493,9 +1914,14 @@
                     }
                     eventSource = null;
                 }
-                cal.removeAllEvents();
                 if (Array.isArray(events) && events.length) {
-                    eventSource = cal.addEventSource(events);
+                    const normalisedEvents = events.map((evt) => ({
+                        ...evt,
+                        editable: false,
+                        startEditable: false,
+                        durationEditable: false,
+                    }));
+                    eventSource = cal.addEventSource(normalisedEvents);
                 }
             });
         }
@@ -1546,6 +1972,15 @@
         reportStateInstance.subscribe((state) => {
             const selection = state?.selection || {};
             const selectionKey = selectionKeyOf(selection);
+            const currentUsername = (selection?.username || '').trim();
+            if (currentUsername !== lastSelectedUsername) {
+                lastSelectedUsername = currentUsername || null;
+                if (!currentUsername) {
+                    destroyCreation();
+                } else if (selfUsername && currentUsername !== selfUsername) {
+                    destroyCreation();
+                }
+            }
             if (selectionKey && selectionKey !== lastSelectionKey) {
                 lastSelectionKey = selectionKey;
                 const targetMoment = createMoment(`${selection.jYear}/${selection.jMonth}/1`, 'jYYYY/jM/jD');
@@ -1561,12 +1996,13 @@
             if (!selectionKey || !selection?.username) {
                 clearEvents();
                 showMessage('Select a user and month to see worklogs.');
+                destroyCreation();
                 return;
             }
 
             if (state.isFetching && !state.result) {
                 clearEvents();
-                showMessage('Loading…');
+                showMessage('Loading…', { allowInteraction: !!creationCtx.event });
                 return;
             }
 
@@ -1574,14 +2010,15 @@
             if (!res || !res.ok) {
                 clearEvents();
                 const message = res ? (res.reason || 'Unable to load worklogs.') : 'No data yet.';
-                showMessage(message);
+                const allowInteraction = !!creationCtx.event;
+                showMessage(message, { allowInteraction });
                 return;
             }
 
             const events = buildEvents(res.worklogs, res.baseUrl);
             if (!events.length) {
                 clearEvents();
-                showMessage('No worklogs found for this period.');
+                showMessage('No worklogs found for this period.', { allowInteraction: true });
                 return;
             }
 
