@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('appApi', {
     updateSelection: (payload) => ipcRenderer.invoke('ui:update-selection', payload),
     loadViewTemplate: (relPath) => ipcRenderer.invoke('views:load', relPath),
     onScanResult: (cb) => ipcRenderer.on('scan-result', (_e, data) => cb(data)),
+    fetchActiveSprintIssues: (payload) => ipcRenderer.invoke('worklog:list-active-issues', payload),
+    createWorklog: (payload) => ipcRenderer.invoke('worklog:create', payload),
     // auth
     hasToken: () => ipcRenderer.invoke('auth:has'),
     authorize: (token) => ipcRenderer.invoke('auth:authorize', { token }),

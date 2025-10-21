@@ -34,6 +34,7 @@
     const TEAM_VALUES = TEAM_OPTIONS.map((option) => option.value);
     const TEAM_USERS = new Map();
     const USER_TEAM = new Map();
+    let SELF_USERNAME = null;
     TEAM_DATA.forEach(({ value, users }) => {
         const list = Array.isArray(users)
             ? users.map((user) => normalizeUserOption(user)).filter(Boolean)
@@ -501,7 +502,7 @@
         registerController('detailed-worklogs', (node) => initDetailedWorklogs(node, reportState)),
         registerController('due-issues', (node) => initDueIssues(node, reportState)),
         registerController('issues', (node) => initIssuesReport(node, reportState)),
-        registerController('issues-worklogs', (node) => initIssuesWorklogs(node, reportState)),
+        registerController('issues-worklogs', (node) => initIssuesWorklogs(node, reportState, userSelectContext)),
         registerController('quarter-report', (node) => initQuarterReport(node, reportState)),
         registerController('configurations', (node) => initConfigurations(node, reportState, userSelectContext, settingsPromise))
     ]);
@@ -825,6 +826,7 @@
                 }
                 const self = (who.username || '').trim();
                 if (!self) return;
+                SELF_USERNAME = self;
                 const displayName = (who.raw?.displayName || '').trim() || self;
 
                 const currentSelection = reportStateInstance.getSelection();
@@ -895,7 +897,7 @@
 
         const ready = enforceUserVisibility();
 
-        return { enforceUserVisibility, ready, selectEl, teamSelectEl };
+        return { enforceUserVisibility, ready, selectEl, teamSelectEl, getSelfUser: () => SELF_USERNAME };
 
         function renderUserOptions(team, selectedUser) {
             const normalizedTeam = team || '';
@@ -1302,7 +1304,7 @@
         };
     }
 
-    function initIssuesWorklogs(root, reportStateInstance) {
+    function initIssuesWorklogs(root, reportStateInstance, userSelectCtx) {
         if (!root || root.dataset.controllerReady === 'true') return {};
         root.dataset.controllerReady = 'true';
 
@@ -1311,9 +1313,24 @@
         const container = root.querySelector('[data-calendar-container]');
         const calendarEl = root.querySelector('#issuesWorklogsCalendar');
         const messageEl = root.querySelector('[data-calendar-message]');
+        const modal = root.querySelector('[data-worklog-modal]');
+        const issueSelectEl = modal?.querySelector('[data-issue-select]');
+        const commentEl = modal?.querySelector('[data-worklog-comment]');
+        const confirmBtn = modal?.querySelector('[data-modal-confirm]');
+        const cancelButtons = Array.from(modal?.querySelectorAll('[data-modal-cancel]') || []);
+        const modalStatusEl = modal?.querySelector('[data-modal-status]');
+        const issuesStatusEl = modal?.querySelector('[data-modal-issues-status]');
+        const modalStartEl = modal?.querySelector('[data-modal-start]');
+        const modalDurationEl = modal?.querySelector('[data-modal-duration]');
+
         if (!container || !calendarEl || !messageEl) {
             console.warn('Issues worklogs view missing required elements.');
             return {};
+        }
+
+        const hasModal = Boolean(modal && issueSelectEl && commentEl && confirmBtn);
+        if (!hasModal) {
+            console.warn('Worklog planning modal missing; interactive planning disabled.');
         }
 
         const fullCalendarGlobal = window.FullCalendar || null;
@@ -1335,9 +1352,7 @@
         function createMoment(input, format) {
             if (!momentRef) return null;
             if (input == null || input === '') return null;
-            const instance = format
-                ? momentRef(input, format, true)
-                : momentRef(input);
+            const instance = format ? momentRef(input, format, true) : momentRef(input);
             if (!instance?.isValid()) {
                 return null;
             }
@@ -1359,6 +1374,67 @@
         let calendar = null;
         let eventSource = null;
         let lastSelectionKey = null;
+        let lastSelectionUsername = selectionSnapshot?.username || null;
+        let modalOpen = false;
+
+        const activeIssuesCache = new Map();
+        let pendingDraft = null;
+
+        const hasWorklogApis = Boolean(
+            typeof window.appApi?.fetchActiveSprintIssues === 'function'
+            && typeof window.appApi?.createWorklog === 'function'
+        );
+
+        function getSelfUsername() {
+            if (typeof userSelectCtx?.getSelfUser === 'function') {
+                return userSelectCtx.getSelfUser();
+            }
+            return SELF_USERNAME;
+        }
+
+        function canPlanForSelection(selection) {
+            if (!hasModal || !hasWorklogApis) return false;
+            const self = getSelfUsername();
+            const username = selection?.username || null;
+            return Boolean(self && username && username === self);
+        }
+
+        function toDate(value) {
+            if (!value) return null;
+            if (value instanceof Date) return value;
+            const date = new Date(value);
+            return Number.isNaN(date.getTime()) ? null : date;
+        }
+
+        function computeDurationText(startDate, endDate) {
+            const start = toDate(startDate);
+            const end = toDate(endDate);
+            if (!start || !end) return '';
+            const diffMs = end.getTime() - start.getTime();
+            if (diffMs <= 0) return '0m';
+            const totalMinutes = Math.round(diffMs / 60000);
+            const hours = Math.floor(totalMinutes / 60);
+            const minutes = totalMinutes % 60;
+            if (hours && minutes) return `${hours}h ${minutes}m`;
+            if (hours) return `${hours}h`;
+            return `${minutes}m`;
+        }
+
+        function formatModalStart(startDate) {
+            const start = toDate(startDate);
+            if (!start) return '';
+            const m = createMoment(start);
+            if (m) {
+                return `${m.format('dddd jD jMMMM HH:mm')}`;
+            }
+            return new Intl.DateTimeFormat('fa-IR', {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long',
+                hour: '2-digit',
+                minute: '2-digit'
+            }).format(start);
+        }
 
         function ensureCalendar() {
             if (calendar) return calendar;
@@ -1374,11 +1450,16 @@
                 nowIndicator: true,
                 slotLabelFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
                 eventTimeFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
+                selectable: true,
+                selectMirror: true,
+                unselectAuto: false,
                 dayHeaderContent: (args) => formatDayHeader(args.date),
                 titleFormat: () => '',
                 datesSet: (info) => updateToolbarTitle(info.start, info.end),
+                select: handleCalendarSelect,
                 eventContent: (arg) => renderEventContent(arg.event),
-                eventDidMount: (info) => applyEventMetadata(info.el, info.event.extendedProps)
+                eventDidMount: (info) => handleEventDidMount(info),
+                eventChange: (info) => handleEventChange(info.event)
             });
             calendar.render();
             updateToolbarTitle(calendar.view.currentStart, calendar.view.currentEnd);
@@ -1414,8 +1495,61 @@
             titleEl.textContent = `${formatter.format(start)} — ${formatter.format(inclusiveEnd)}`;
         }
 
+        function pendingEventMeta(props) {
+            const parts = [];
+            if (props?.durationText) {
+                parts.push(`⏱ ${escapeHtml(props.durationText)}`);
+            }
+            if (Number.isFinite(props?.remainingHours)) {
+                parts.push(`Remaining: ${escapeHtml(formatHours(props.remainingHours))}h`);
+            }
+            return parts.join(' • ');
+        }
+
+        function renderPendingEventContent(event, props) {
+            const metaHtml = pendingEventMeta(props);
+            const issueLabel = props?.issueKey
+                ? `<span class="calendar-event__issue">${escapeHtml(props.issueKey)}</span>`
+                : '<span class="calendar-event__issue">Select an issue…</span>';
+            const summary = props?.summary
+                ? `<span class="calendar-event__summary">${escapeHtml(props.summary)}</span>`
+                : '';
+            const comment = props?.comment
+                ? `<div class="calendar-event__note">📝 ${escapeHtml(props.comment)}</div>`
+                : '';
+            const statusNote = props?.pendingError
+                ? `<div class="calendar-event__note">⚠️ ${escapeHtml(props.pendingError)}</div>`
+                : !props?.awaitingConfirmation
+                    ? '<div class="calendar-event__note">Select an issue to continue.</div>'
+                    : '';
+            const confirmAction = props?.pendingError ? 'retry' : 'confirm';
+            const confirmLabel = props?.isSubmitting ? 'Saving…' : (props?.pendingError ? 'Retry' : '✓ Log work');
+            const confirmDisabled = !props?.awaitingConfirmation || props?.isSubmitting;
+            const cancelDisabled = props?.isSubmitting;
+            const actions = `
+                <div class="calendar-event__actions">
+                    <button type="button" class="calendar-event__action" data-pending-action="${confirmAction}" ${confirmDisabled ? 'disabled' : ''}>${escapeHtml(confirmLabel)}</button>
+                    <button type="button" class="calendar-event__action" data-pending-action="cancel" ${cancelDisabled ? 'disabled' : ''}>✕ Cancel</button>
+                </div>
+            `;
+            return {
+                html: `
+                    <div class="calendar-event__content calendar-event__content--pending">
+                        <div>${issueLabel}${summary ? '<span class="calendar-event__separator">•</span>' + summary : ''}</div>
+                        ${metaHtml ? `<div class="calendar-event__meta">${metaHtml}</div>` : ''}
+                        ${comment}
+                        ${statusNote}
+                        ${actions}
+                    </div>
+                `
+            };
+        }
+
         function renderEventContent(event) {
             const props = event.extendedProps || {};
+            if (props.pending) {
+                return renderPendingEventContent(event, props);
+            }
             const pieces = [];
             if (props.issueKey) {
                 const issueLabel = escapeHtml(props.issueKey);
@@ -1448,8 +1582,25 @@
             if (props.jalaaliDate) tooltipParts.push(props.jalaaliDate);
             if (props.timeSpent) tooltipParts.push(props.timeSpent);
             if (props.comment) tooltipParts.push(props.comment);
+            if (props.durationText && props.pending) tooltipParts.push(`Duration: ${props.durationText}`);
             if (tooltipParts.length) {
                 el.setAttribute('title', tooltipParts.join('\n'));
+            }
+        }
+
+        function handleEventDidMount(info) {
+            applyEventMetadata(info.el, info.event.extendedProps);
+            if (info.event.extendedProps?.pending) {
+                info.el.classList.add('calendar-event--pending');
+                const buttons = info.el.querySelectorAll('[data-pending-action]');
+                buttons.forEach((btn) => {
+                    btn.addEventListener('click', (evt) => {
+                        evt.preventDefault();
+                        evt.stopPropagation();
+                        const action = btn.getAttribute('data-pending-action');
+                        handlePendingAction(action);
+                    });
+                });
             }
         }
 
@@ -1469,6 +1620,34 @@
             container.classList.remove('is-message-visible');
         }
 
+        function restorePendingEvent() {
+            if (!pendingDraft) {
+                return;
+            }
+            const cal = ensureCalendar();
+            let event = pendingDraft.id ? cal.getEventById(pendingDraft.id) : null;
+            const start = toDate(pendingDraft.startIso);
+            const end = toDate(pendingDraft.endIso);
+            if (!event) {
+                if (!start) {
+                    pendingDraft = null;
+                    return;
+                }
+                event = cal.addEvent({
+                    id: pendingDraft.id,
+                    start,
+                    end: end && end > start ? end : new Date(start.getTime() + 30 * 60000),
+                    allDay: false,
+                    display: 'block',
+                    classNames: ['calendar-event--pending'],
+                    extendedProps: { pending: true }
+                });
+                event.setProp('editable', true);
+            }
+            pendingDraft.event = event;
+            updatePendingEventProps();
+        }
+
         function clearEvents() {
             if (!calendar) return;
             if (eventSource) {
@@ -1480,6 +1659,7 @@
                 eventSource = null;
             }
             calendar.removeAllEvents();
+            restorePendingEvent();
         }
 
         function setEvents(events) {
@@ -1497,6 +1677,7 @@
                 if (Array.isArray(events) && events.length) {
                     eventSource = cal.addEventSource(events);
                 }
+                restorePendingEvent();
             });
         }
 
@@ -1541,11 +1722,362 @@
             }).filter(Boolean);
         }
 
+        function resetModal() {
+            if (!hasModal) return;
+            issueSelectEl.innerHTML = '';
+            issueSelectEl.disabled = true;
+            commentEl.value = '';
+            confirmBtn.disabled = true;
+            if (modalStatusEl) {
+                modalStatusEl.textContent = '';
+                modalStatusEl.classList.remove('is-error');
+            }
+            if (issuesStatusEl) {
+                issuesStatusEl.textContent = '';
+                issuesStatusEl.classList.remove('is-error');
+            }
+        }
+
+        function hideModal() {
+            if (!hasModal) return;
+            modal.hidden = true;
+            modalOpen = false;
+        }
+
+        function openModalForDraft() {
+            if (!hasModal || !pendingDraft) return;
+            resetModal();
+            const start = toDate(pendingDraft.startIso);
+            const end = toDate(pendingDraft.endIso);
+            if (modalStartEl) {
+                modalStartEl.textContent = start ? `Start: ${formatModalStart(start)}` : '';
+            }
+            if (modalDurationEl) {
+                modalDurationEl.textContent = end ? `Duration: ${computeDurationText(start, end)}` : '';
+            }
+            modal.hidden = false;
+            modalOpen = true;
+            void loadActiveIssues();
+        }
+
+        function updateModalFromEvent() {
+            if (!modalOpen || !pendingDraft) return;
+            const start = toDate(pendingDraft.startIso);
+            const end = toDate(pendingDraft.endIso);
+            if (modalStartEl && start) {
+                modalStartEl.textContent = `Start: ${formatModalStart(start)}`;
+            }
+            if (modalDurationEl && start && end) {
+                modalDurationEl.textContent = `Duration: ${computeDurationText(start, end)}`;
+            }
+        }
+
+        function renderIssueOptions(issues, selectedKey) {
+            if (!hasModal) return;
+            const options = ['<option value="">Select an issue…</option>'];
+            issues.forEach((issue) => {
+                const labelParts = [
+                    `${issue.issueKey || ''}`,
+                ];
+                if (Number.isFinite(issue.remainingHours)) {
+                    labelParts.push(`Remaining ${formatHours(issue.remainingHours)}h`);
+                }
+                if (Number.isFinite(issue.estimateHours)) {
+                    labelParts.push(`Est. ${formatHours(issue.estimateHours)}h`);
+                }
+                const summary = (issue.summary || '').toString().trim();
+                const combined = `${labelParts.join(' • ')} — ${summary}`;
+                options.push(`<option value="${issue.issueKey}">${escapeHtml(combined)}</option>`);
+            });
+            issueSelectEl.innerHTML = options.join('');
+            if (selectedKey) {
+                issueSelectEl.value = selectedKey;
+            }
+            issueSelectEl.disabled = false;
+            updateModalConfirmState();
+        }
+
+        async function loadActiveIssues() {
+            if (!hasModal || !pendingDraft) return;
+            const selection = reportStateInstance.getSelection();
+            const username = selection?.username || '';
+            if (!username) {
+                if (issuesStatusEl) {
+                    issuesStatusEl.textContent = 'Select a user first.';
+                }
+                issueSelectEl.disabled = true;
+                return;
+            }
+            const cached = activeIssuesCache.get(username);
+            if (cached) {
+                renderIssueOptions(cached.issues, pendingDraft.issue?.issueKey || '');
+                if (issuesStatusEl) {
+                    issuesStatusEl.textContent = cached.issues.length
+                        ? `${cached.issues.length} active sprint issues found.`
+                        : 'No active sprint issues for this user.';
+                    issuesStatusEl.classList.remove('is-error');
+                }
+                return;
+            }
+            if (issuesStatusEl) {
+                issuesStatusEl.textContent = 'Loading issues…';
+                issuesStatusEl.classList.remove('is-error');
+            }
+            issueSelectEl.disabled = true;
+            try {
+                const res = await window.appApi.fetchActiveSprintIssues({ username });
+                if (!res?.ok) {
+                    if (issuesStatusEl) {
+                        issuesStatusEl.textContent = res?.reason || 'Unable to load issues.';
+                        issuesStatusEl.classList.add('is-error');
+                    }
+                    issueSelectEl.disabled = true;
+                    return;
+                }
+                const issues = Array.isArray(res.issues) ? res.issues : [];
+                activeIssuesCache.set(username, { issues, timestamp: Date.now() });
+                renderIssueOptions(issues, pendingDraft.issue?.issueKey || '');
+                if (issuesStatusEl) {
+                    issuesStatusEl.textContent = issues.length
+                        ? `${issues.length} active sprint issues found.`
+                        : 'No active sprint issues for this user.';
+                    issuesStatusEl.classList.remove('is-error');
+                }
+            } catch (err) {
+                console.error('Failed to load active sprint issues', err);
+                if (issuesStatusEl) {
+                    issuesStatusEl.textContent = err?.message || 'Unable to load issues.';
+                    issuesStatusEl.classList.add('is-error');
+                }
+            } finally {
+                issueSelectEl.disabled = false;
+            }
+        }
+
+        function updateModalConfirmState() {
+            if (!hasModal || !pendingDraft) return;
+            const selectedKey = issueSelectEl.value || '';
+            confirmBtn.disabled = !selectedKey;
+        }
+
+        function updatePendingEventProps() {
+            if (!pendingDraft?.event) return;
+            const event = pendingDraft.event;
+            const start = toDate(pendingDraft.startIso);
+            const end = toDate(pendingDraft.endIso);
+            const durationText = computeDurationText(start, end);
+            const props = {
+                pending: true,
+                durationText,
+                issueKey: pendingDraft.issue?.issueKey || null,
+                summary: pendingDraft.issue?.summary || null,
+                remainingHours: Number.isFinite(pendingDraft.issue?.remainingHours)
+                    ? pendingDraft.issue.remainingHours
+                    : null,
+                comment: pendingDraft.comment || '',
+                awaitingConfirmation: Boolean(pendingDraft.issue),
+                pendingError: pendingDraft.error || null,
+                isSubmitting: Boolean(pendingDraft.submitting)
+            };
+            event.setExtendedProp('pending', true);
+            Object.entries(props).forEach(([key, value]) => {
+                event.setExtendedProp(key, value);
+            });
+            if (event.el) {
+                applyEventMetadata(event.el, props);
+            }
+        }
+
+        function handleCalendarSelect(info) {
+            const selection = reportStateInstance.getSelection();
+            const cal = ensureCalendar();
+            cal.unselect();
+            if (!canPlanForSelection(selection)) {
+                showMessage('You can only add worklogs for your own account.');
+                return;
+            }
+            const start = info.start ? new Date(info.start) : null;
+            const end = info.end && info.end > info.start
+                ? new Date(info.end)
+                : new Date(info.start.getTime() + 30 * 60000);
+            if (!start) return;
+            const id = `pending-${Date.now()}`;
+            if (pendingDraft?.event) {
+                pendingDraft.event.remove();
+            }
+            const event = cal.addEvent({
+                id,
+                start,
+                end,
+                allDay: false,
+                display: 'block',
+                classNames: ['calendar-event--pending'],
+                extendedProps: { pending: true }
+            });
+            event.setProp('editable', true);
+            pendingDraft = {
+                id,
+                startIso: start.toISOString(),
+                endIso: end.toISOString(),
+                issue: null,
+                comment: '',
+                error: null,
+                submitting: false,
+                username: selection?.username || null,
+                event
+            };
+            updatePendingEventProps();
+            openModalForDraft();
+        }
+
+        function handleEventChange(event) {
+            if (!pendingDraft || event.id !== pendingDraft.id) return;
+            pendingDraft.startIso = event.start ? event.start.toISOString() : pendingDraft.startIso;
+            pendingDraft.endIso = event.end ? event.end.toISOString() : pendingDraft.endIso;
+            updatePendingEventProps();
+            updateModalFromEvent();
+        }
+
+        function handlePendingAction(action) {
+            if (!pendingDraft) return;
+            if (action === 'cancel') {
+                cancelPendingDraft();
+                return;
+            }
+            if (action === 'confirm' || action === 'retry') {
+                finalizePendingDraft();
+            }
+        }
+
+        async function finalizePendingDraft() {
+            if (!pendingDraft || pendingDraft.submitting) return;
+            const event = pendingDraft.event;
+            if (!event || !pendingDraft.issue) {
+                pendingDraft.error = 'Select an issue before logging work.';
+                updatePendingEventProps();
+                return;
+            }
+            const start = toDate(pendingDraft.startIso);
+            const end = toDate(pendingDraft.endIso);
+            if (!start || !end || end <= start) {
+                pendingDraft.error = 'Adjust the duration before logging work.';
+                updatePendingEventProps();
+                return;
+            }
+            pendingDraft.submitting = true;
+            pendingDraft.error = null;
+            updatePendingEventProps();
+            try {
+                const durationSeconds = Math.round((end.getTime() - start.getTime()) / 1000);
+                const payload = {
+                    issueKey: pendingDraft.issue.issueKey,
+                    started: start.toISOString(),
+                    durationSeconds,
+                    comment: pendingDraft.comment || ''
+                };
+                const res = await window.appApi.createWorklog(payload);
+                if (!res?.ok) {
+                    throw new Error(res?.reason || 'Unable to create worklog.');
+                }
+                const username = pendingDraft.username;
+                cancelPendingDraft({ silent: true });
+                await reportStateInstance.refresh({ force: true });
+                const currentSelection = reportStateInstance.getSelection();
+                if (currentSelection?.username === username) {
+                    hideMessage();
+                }
+            } catch (err) {
+                pendingDraft.submitting = false;
+                pendingDraft.error = err?.message || 'Unable to create worklog.';
+                updatePendingEventProps();
+            }
+        }
+
+        function cancelPendingDraft(options = {}) {
+            if (pendingDraft?.event) {
+                try {
+                    pendingDraft.event.remove();
+                } catch (err) {
+                    console.warn('Failed to remove pending event', err);
+                }
+            }
+            pendingDraft = null;
+            hideModal();
+            if (!options.silent && modalStatusEl) {
+                modalStatusEl.textContent = '';
+                modalStatusEl.classList.remove('is-error');
+            }
+        }
+
+        if (hasModal) {
+            issueSelectEl.addEventListener('change', () => {
+                if (!pendingDraft) return;
+                const selection = reportStateInstance.getSelection();
+                const username = selection?.username || '';
+                const cache = activeIssuesCache.get(username);
+                const selectedKey = issueSelectEl.value || '';
+                updateModalConfirmState();
+                if (!selectedKey) {
+                    pendingDraft.issue = null;
+                    updatePendingEventProps();
+                    return;
+                }
+                const issue = cache?.issues?.find((item) => item.issueKey === selectedKey);
+                if (issue) {
+                    pendingDraft.issue = issue;
+                } else {
+                    pendingDraft.issue = { issueKey: selectedKey };
+                }
+                updatePendingEventProps();
+            });
+
+            confirmBtn.addEventListener('click', () => {
+                if (!pendingDraft) return;
+                const selectedKey = issueSelectEl.value || '';
+                if (!selectedKey) {
+                    if (modalStatusEl) {
+                        modalStatusEl.textContent = 'Please choose an issue first.';
+                        modalStatusEl.classList.add('is-error');
+                    }
+                    return;
+                }
+                const selection = reportStateInstance.getSelection();
+                const username = selection?.username || '';
+                const cache = activeIssuesCache.get(username);
+                const issue = cache?.issues?.find((item) => item.issueKey === selectedKey) || { issueKey: selectedKey };
+                pendingDraft.issue = issue;
+                pendingDraft.comment = commentEl.value.trim();
+                pendingDraft.error = null;
+                pendingDraft.submitting = false;
+                updatePendingEventProps();
+                hideModal();
+            });
+
+            cancelButtons.forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    cancelPendingDraft();
+                });
+            });
+
+            modal.addEventListener('click', (evt) => {
+                if (evt.target === modal) {
+                    cancelPendingDraft();
+                }
+            });
+        }
+
         showMessage('Select a user and month to see worklogs.');
 
         reportStateInstance.subscribe((state) => {
             const selection = state?.selection || {};
             const selectionKey = selectionKeyOf(selection);
+            const selectionChanged = selection?.username !== lastSelectionUsername;
+            if (selectionChanged) {
+                lastSelectionUsername = selection?.username || null;
+                if (pendingDraft && pendingDraft.username !== selection?.username) {
+                    cancelPendingDraft({ silent: true });
+                }
+            }
             if (selectionKey && selectionKey !== lastSelectionKey) {
                 lastSelectionKey = selectionKey;
                 const targetMoment = createMoment(`${selection.jYear}/${selection.jMonth}/1`, 'jYYYY/jM/jD');
@@ -1559,6 +2091,7 @@
             }
 
             if (!selectionKey || !selection?.username) {
+                cancelPendingDraft({ silent: true });
                 clearEvents();
                 showMessage('Select a user and month to see worklogs.');
                 return;
@@ -1579,14 +2112,12 @@
             }
 
             const events = buildEvents(res.worklogs, res.baseUrl);
-            if (!events.length) {
-                clearEvents();
-                showMessage('No worklogs found for this period.');
-                return;
-            }
-
             setEvents(events);
             hideMessage();
+            if (!events.length) {
+                messageEl.textContent = 'No worklogs found for this period.';
+                container.classList.add('is-message-visible');
+            }
         });
 
         return {

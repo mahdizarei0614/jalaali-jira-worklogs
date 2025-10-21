@@ -375,19 +375,17 @@
             font-size:14px;
             font-weight:600;
             line-height:1.6;
-            pointer-events:none;
             opacity:0;
             transition:opacity .18s ease;
             z-index:2;
+            pointer-events:none;
         }
         [data-calendar-container].is-message-visible .calendar-message{
             opacity:1;
-            pointer-events:auto;
         }
         [data-calendar-container].is-message-visible .calendar-area__grid{
             filter:blur(1px);
             opacity:.35;
-            pointer-events:none;
         }
         [data-calendar-container] .fc{
             background:transparent;
@@ -489,8 +487,173 @@
             color:var(--muted);
             font-weight:500;
         }
+        .calendar-event--pending{
+            border-style:dashed;
+            background:rgba(86,121,255,.12);
+        }
+        :root[data-theme="dark"] .calendar-event--pending{
+            background:rgba(86,121,255,.24);
+        }
+        .calendar-event__content--pending{
+            display:flex;
+            flex-direction:column;
+            gap:4px;
+        }
+        .calendar-event__meta{
+            display:flex;
+            flex-wrap:wrap;
+            align-items:center;
+            gap:6px;
+            font-size:12px;
+            color:var(--muted);
+        }
+        .calendar-event__actions{
+            margin-top:2px;
+            display:flex;
+            align-items:center;
+            gap:6px;
+        }
+        .calendar-event__action{
+            border:1px solid var(--border);
+            border-radius:6px;
+            padding:2px 6px;
+            font-size:12px;
+            font-weight:600;
+            cursor:pointer;
+            background:var(--card);
+            color:var(--text);
+            transition:background .18s ease, color .18s ease, border-color .18s ease;
+        }
+        .calendar-event__action[data-pending-action="confirm"]{
+            color:#0b6a0b;
+            border-color:#0b6a0b33;
+        }
+        .calendar-event__action[data-pending-action="cancel"]{
+            color:#9f1f1f;
+            border-color:#9f1f1f33;
+        }
+        .calendar-event__action[data-pending-action="retry"]{
+            color:#b36b00;
+            border-color:#b36b0033;
+        }
+        .calendar-event__action:disabled{
+            opacity:.6;
+            cursor:not-allowed;
+        }
+        .calendar-event__note{
+            font-size:12px;
+            color:var(--muted);
+        }
         [data-calendar-container] .fc-timegrid-slot{
             height:48px;
+        }
+        .worklog-modal{
+            position:fixed;
+            inset:0;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            padding:24px;
+            background:rgba(9,13,22,.45);
+            backdrop-filter:blur(3px);
+            z-index:999;
+        }
+        .worklog-modal[hidden]{
+            display:none;
+        }
+        .worklog-modal__dialog{
+            position:relative;
+            width:100%;
+            max-width:480px;
+            background:var(--card);
+            border-radius:16px;
+            border:1px solid var(--border);
+            box-shadow:0 18px 50px rgba(0,0,0,.18);
+            padding:20px 24px 24px;
+            color:var(--text);
+        }
+        .worklog-modal__header{
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            margin-bottom:12px;
+        }
+        .worklog-modal__title{
+            font-size:18px;
+            font-weight:700;
+            margin:0;
+        }
+        .worklog-modal__close{
+            background:none;
+            border:none;
+            color:var(--muted);
+            font-size:20px;
+            cursor:pointer;
+        }
+        .worklog-modal__body{
+            display:flex;
+            flex-direction:column;
+            gap:12px;
+        }
+        .worklog-modal__meta{
+            display:flex;
+            flex-wrap:wrap;
+            gap:8px 16px;
+            font-size:13px;
+            color:var(--muted);
+        }
+        .worklog-modal__field label{
+            font-size:13px;
+            font-weight:600;
+            display:block;
+            margin-bottom:4px;
+        }
+        .worklog-modal__field select,
+        .worklog-modal__field textarea{
+            width:100%;
+            border-radius:10px;
+            border:1px solid var(--border);
+            background:var(--surface);
+            color:var(--text);
+            padding:8px 10px;
+            font-size:13px;
+            resize:vertical;
+            min-height:42px;
+        }
+        .worklog-modal__field textarea{
+            min-height:90px;
+        }
+        .worklog-modal__footer{
+            margin-top:18px;
+            display:flex;
+            justify-content:flex-end;
+            gap:10px;
+        }
+        .worklog-modal__footer button{
+            border-radius:10px;
+            border:1px solid var(--border);
+            padding:8px 16px;
+            font-size:13px;
+            font-weight:600;
+            cursor:pointer;
+            background:var(--surface);
+            color:var(--text);
+        }
+        .worklog-modal__footer button[data-modal-confirm]{
+            background:#2c4de9;
+            border-color:#2c4de9;
+            color:#fff;
+        }
+        .worklog-modal__footer button:disabled{
+            opacity:.6;
+            cursor:not-allowed;
+        }
+        .worklog-modal__status{
+            font-size:12px;
+            color:var(--muted);
+        }
+        .worklog-modal__status.is-error{
+            color:#b3261e;
         }
         .table-toolbar{
             display:flex; justify-content:flex-end; align-items:center; gap:8px;

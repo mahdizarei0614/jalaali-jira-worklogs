@@ -6,4 +6,32 @@
             Select a user and month to see worklogs.
         </div>
     </div>
+    <div class="worklog-modal" data-worklog-modal hidden>
+        <div class="worklog-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="worklogModalTitle">
+            <div class="worklog-modal__header">
+                <h2 id="worklogModalTitle" class="worklog-modal__title">Plan worklog</h2>
+                <button type="button" class="worklog-modal__close" data-modal-cancel aria-label="Close">×</button>
+            </div>
+            <div class="worklog-modal__body">
+                <div class="worklog-modal__meta">
+                    <span data-modal-start></span>
+                    <span data-modal-duration></span>
+                </div>
+                <div class="worklog-modal__field">
+                    <label for="worklogIssueSelect">Issue</label>
+                    <select id="worklogIssueSelect" data-issue-select></select>
+                    <div class="worklog-modal__status" data-modal-issues-status></div>
+                </div>
+                <div class="worklog-modal__field">
+                    <label for="worklogComment">Log comment</label>
+                    <textarea id="worklogComment" data-worklog-comment placeholder="Describe what you worked on..."></textarea>
+                </div>
+            </div>
+            <div class="worklog-modal__footer">
+                <div class="worklog-modal__status" data-modal-status></div>
+                <button type="button" data-modal-cancel>Cancel</button>
+                <button type="button" data-modal-confirm disabled>Confirm</button>
+            </div>
+        </div>
+    </div>
 </div>

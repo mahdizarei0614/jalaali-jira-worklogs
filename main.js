@@ -495,6 +495,114 @@
             .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
     }
 
+    async function fetchActiveSprintIssues({ baseUrl, headers, username }) {
+        if (!baseUrl || !username) return [];
+
+        const fields = [
+            'key',
+            'summary',
+            'timetracking',
+            'timeoriginalestimate',
+            'timespent',
+            'timeestimate',
+            'aggregatetimeoriginalestimate',
+            'aggregatetimespent',
+            'aggregatetimeestimate',
+            'customfield_10020',
+            'customfield_10016',
+            'customfield_10007',
+            'sprint',
+            'sprints',
+            'project'
+        ].join(',');
+
+        const jql = `assignee = "${username}" AND sprint in openSprints() ORDER BY updated DESC`;
+        const issues = await searchIssuesPaged(baseUrl, headers, jql, fields);
+
+        return issues
+            .map((issue) => {
+                const fields = issue?.fields ?? {};
+                const times = extractTimeTracking(issue);
+                return {
+                    issueKey: issue?.key || null,
+                    issueId: issue?.id || null,
+                    summary: fields.summary || '',
+                    estimateHours: secsToHours(times.originalSeconds),
+                    loggedHours: secsToHours(times.spentSeconds),
+                    remainingHours: secsToHours(times.remainingSeconds),
+                    sprints: extractSprintNames(issue),
+                    project: fields.project?.name || fields.project?.key || null
+                };
+            })
+            .filter((issue) => issue?.issueKey);
+    }
+
+    function buildWorklogCommentDoc(comment) {
+        const text = (comment || '').toString().trim();
+        if (!text) {
+            return undefined;
+        }
+        const lines = text.replace(/\r\n/g, '\n').split('\n');
+        const content = lines.map((line) => {
+            const trimmed = line.trim();
+            if (!trimmed) {
+                return { type: 'paragraph', content: [] };
+            }
+            return {
+                type: 'paragraph',
+                content: [
+                    {
+                        type: 'text',
+                        text: trimmed
+                    }
+                ]
+            };
+        });
+        return {
+            type: 'doc',
+            version: 1,
+            content
+        };
+    }
+
+    async function createIssueWorklog({ baseUrl, headers, issueKey, started, seconds, comment }) {
+        if (!baseUrl || !issueKey) {
+            return { ok: false, reason: 'Missing Jira configuration or issue key.' };
+        }
+        const secs = Math.round(Number(seconds) || 0);
+        if (!Number.isFinite(secs) || secs <= 0) {
+            return { ok: false, reason: 'Duration must be greater than zero.' };
+        }
+
+        const startMoment = moment(started);
+        if (!startMoment.isValid()) {
+            return { ok: false, reason: 'Invalid start time.' };
+        }
+
+        const payload = {
+            started: startMoment.format('YYYY-MM-DD[T]HH:mm:ss.SSSZZ'),
+            timeSpentSeconds: secs
+        };
+
+        const commentDoc = buildWorklogCommentDoc(comment);
+        if (commentDoc) {
+            payload.comment = commentDoc;
+        }
+
+        try {
+            await axios.post(
+                `${baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}/worklog`,
+                payload,
+                { headers }
+            );
+            return { ok: true };
+        } catch (err) {
+            const reason = err?.response?.data?.errorMessages?.join(', ') ||
+                (err?.response?.status ? `${err.response.status} ${err.response.statusText}` : err?.message);
+            return { ok: false, reason: reason || 'Unable to create worklog.' };
+        }
+    }
+
     async function getFullIssueWorklogs(baseUrl, headers, issueKey, initialContainer) {
         const collected = Array.isArray(initialContainer?.worklogs) ? [...initialContainer.worklogs] : [];
         const total = initialContainer?.total ?? collected.length;
@@ -1087,6 +1195,46 @@
         } catch (err) {
             console.error('Failed to generate full report archive', err);
             return { ok: false, reason: err?.message || 'Unable to generate archive' };
+        }
+    });
+
+    ipcMain.handle('worklog:list-active-issues', async (_evt, payload) => {
+        try {
+            const username = typeof payload?.username === 'string' ? payload.username.trim() : '';
+            const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
+            const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
+            if (!baseUrl || !token) {
+                return { ok: false, reason: 'Missing Jira base URL or token.' };
+            }
+            if (!username) {
+                return { ok: false, reason: 'Missing username.' };
+            }
+            const headers = buildHeaders(baseUrl, token);
+            const issues = await fetchActiveSprintIssues({ baseUrl, headers, username });
+            return { ok: true, issues };
+        } catch (err) {
+            console.error('Failed to load active sprint issues', err);
+            return { ok: false, reason: err?.message || 'Unable to load active sprint issues.' };
+        }
+    });
+
+    ipcMain.handle('worklog:create', async (_evt, payload) => {
+        try {
+            const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
+            const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
+            if (!baseUrl || !token) {
+                return { ok: false, reason: 'Missing Jira base URL or token.' };
+            }
+            const issueKey = typeof payload?.issueKey === 'string' ? payload.issueKey.trim() : '';
+            const started = payload?.started;
+            const seconds = payload?.durationSeconds ?? payload?.seconds ?? payload?.timeSpentSeconds;
+            const comment = typeof payload?.comment === 'string' ? payload.comment : '';
+            const headers = buildHeaders(baseUrl, token);
+            const result = await createIssueWorklog({ baseUrl, headers, issueKey, started, seconds, comment });
+            return result;
+        } catch (err) {
+            console.error('Failed to create worklog', err);
+            return { ok: false, reason: err?.message || 'Unable to create worklog.' };
         }
     });
 
