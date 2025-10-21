@@ -1122,13 +1122,29 @@
         }
 
         try {
-            const { data } = await axios.post(
+            const response = await axios.post(
                 `${auth.baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}/worklog`,
                 body,
                 { headers: auth.headers }
             );
+            const data = response?.data;
+            console.log('[jira:create-worklog] Success', {
+                issueKey,
+                status: response?.status,
+                statusText: response?.statusText,
+                worklogId: data?.id || data?.worklogId || null,
+                data
+            });
             return { ok: true, worklogId: data?.id || data?.worklogId || null };
         } catch (err) {
+            const errorPayload = {
+                issueKey,
+                status: err?.response?.status,
+                statusText: err?.response?.statusText,
+                data: err?.response?.data,
+                message: err?.message
+            };
+            console.error('[jira:create-worklog] Failure', errorPayload);
             const reason = err?.response?.data?.errorMessages?.join(', ')
                 ?? err?.response?.statusText
                 ?? err?.message
