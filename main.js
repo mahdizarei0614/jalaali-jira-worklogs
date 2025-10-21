@@ -77,6 +77,8 @@
     let tray;
     const lastUI = { jYear: null, jMonth: null, username: null };
     const PROJECT_BOARD_CACHE = new Map();
+    let cachedSelfProfile = null;
+    let cachedSelfProfileExpiry = 0;
 
     const mtNow = () => moment().utcOffset(TEHRAN_OFFSET_MIN);
     const mj = (jYear, jMonth, jDay) =>
@@ -121,6 +123,78 @@
         if (/^(Bearer|Basic)\s/i.test(tokenRaw)) h.Authorization = tokenRaw;
         else h.Authorization = `Bearer ${tokenRaw}`;
         return h;
+    }
+
+    function describeAxiosError(err, fallback = 'Request failed') {
+        if (!err) return fallback;
+        const parts = [];
+        if (err?.response) {
+            const statusPart = [err.response.status, err.response.statusText].filter(Boolean).join(' ').trim();
+            if (statusPart) parts.push(statusPart);
+            const data = err.response.data;
+            if (Array.isArray(data?.errorMessages) && data.errorMessages.length) {
+                parts.push(data.errorMessages.join('; '));
+            } else if (typeof data?.message === 'string' && data.message.trim()) {
+                parts.push(data.message.trim());
+            } else if (typeof data === 'string' && data.trim()) {
+                parts.push(data.trim());
+            }
+        } else if (err?.message) {
+            parts.push(err.message);
+        }
+        const text = parts.join(' — ').trim();
+        return text || fallback;
+    }
+
+    function buildAdfComment(text) {
+        const raw = (text ?? '').toString();
+        if (!raw.trim()) {
+            return null;
+        }
+        const lines = raw.replace(/\r\n/g, '\n').split('\n');
+        const content = [];
+        lines.forEach((line, idx) => {
+            if (idx > 0) {
+                content.push({ type: 'hardBreak' });
+            }
+            if (line.length > 0) {
+                content.push({ type: 'text', text: line });
+            }
+        });
+        if (!content.length) {
+            content.push({ type: 'text', text: '' });
+        }
+        return {
+            type: 'doc',
+            version: 1,
+            content: [
+                {
+                    type: 'paragraph',
+                    content
+                }
+            ]
+        };
+    }
+
+    function resetSelfProfileCache() {
+        cachedSelfProfile = null;
+        cachedSelfProfileExpiry = 0;
+    }
+
+    async function fetchSelfProfile({ baseUrl, headers, force = false }) {
+        const now = Date.now();
+        if (!force && cachedSelfProfile && now < cachedSelfProfileExpiry) {
+            return cachedSelfProfile;
+        }
+        try {
+            const { data } = await axios.get(`${baseUrl}/rest/api/latest/myself`, { headers });
+            cachedSelfProfile = data;
+            cachedSelfProfileExpiry = now + 5 * 60 * 1000;
+            return data;
+        } catch (err) {
+            resetSelfProfileCache();
+            throw err;
+        }
     }
 
     const DEFAULT_SEARCH_FIELDS = [
@@ -320,7 +394,7 @@
     }
 
     async function fetchAssignedIssues({ baseUrl, headers, username }) {
-        if (!baseUrl || !username) return [];
+        if (!baseUrl || !headers || !username) return [];
 
         const fields = [
             'key',
@@ -418,6 +492,41 @@
         });
 
         return normalized.map(({ updatedMs, ...rest }) => rest);
+    }
+
+    async function fetchActiveSprintIssues({ baseUrl, headers, username }) {
+        if (!baseUrl || !headers || !username) return [];
+
+        const fields = [
+            'key',
+            'summary',
+            'project',
+            'issuetype',
+            'status',
+            'customfield_10020',
+            'customfield_10016',
+            'customfield_10007',
+            'sprint',
+            'sprints'
+        ].join(',');
+
+        const jql = `assignee = "${username}" AND sprint in openSprints() ORDER BY updated DESC`;
+        const issues = await searchIssuesPaged(baseUrl, headers, jql, fields);
+
+        return issues
+            .map((issue) => {
+                const fields = issue?.fields ?? {};
+                return {
+                    issueKey: issue?.key || null,
+                    summary: fields.summary || '',
+                    status: fields.status?.name || null,
+                    issueType: fields.issuetype?.name || null,
+                    projectKey: fields.project?.key || null,
+                    projectName: fields.project?.name || null,
+                    sprints: extractSprintNames(issue)
+                };
+            })
+            .filter((entry) => entry.issueKey);
     }
 
     async function fetchIssuesDueThisMonth({ baseUrl, headers, username, start, end }) {
@@ -522,26 +631,26 @@
 
         const headers = buildHeaders(baseUrl, token);
         try {
-            const { data } = await axios.get(`${baseUrl}/rest/api/latest/myself`, { headers });
+            const profile = await fetchSelfProfile({ baseUrl, headers, force: false });
             const username =
-                data?.name ||
-                data?.emailAddress ||
-                data?.accountId ||
-                data?.displayName ||
+                profile?.name ||
+                profile?.emailAddress ||
+                profile?.accountId ||
+                profile?.displayName ||
                 '';
 
             return {
                 ok: true,
                 username,
                 raw: {
-                    name: data?.name,
-                    emailAddress: data?.emailAddress,
-                    accountId: data?.accountId,
-                    displayName: data?.displayName,
+                    name: profile?.name,
+                    emailAddress: profile?.emailAddress,
+                    accountId: profile?.accountId,
+                    displayName: profile?.displayName,
                 }
             };
         } catch (e) {
-            const msg = e?.response ? `${e.response.status} ${e.response.statusText}` : (e?.message || 'whoami failed');
+            const msg = describeAxiosError(e, 'whoami failed');
             return { ok: false, reason: msg };
         }
     }
@@ -829,6 +938,25 @@
         return { ok: true, jYear, seasons };
     }
 
+    async function addWorklogEntry({ baseUrl, headers, issueKey, started, timeSpentSeconds, comment }) {
+        if (!baseUrl || !headers || !issueKey || !started || !Number.isFinite(timeSpentSeconds)) {
+            throw new Error('Invalid worklog parameters.');
+        }
+
+        const payload = {
+            started,
+            timeSpentSeconds: Math.max(1, Math.floor(timeSpentSeconds))
+        };
+        const adfComment = buildAdfComment(comment);
+        if (adfComment) {
+            payload.comment = adfComment;
+        }
+
+        const url = `${baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}/worklog`;
+        const { data } = await axios.post(url, payload, { headers });
+        return data;
+    }
+
     async function computeScan(opts) {
         const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
         const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
@@ -993,6 +1121,7 @@
     });
     ipcMain.handle('settings:save', async (_evt, { baseUrl }) => {
         if (typeof baseUrl === 'string') STORE.set('jiraBaseUrl', baseUrl.trim().replace(/\/+$/, ''));
+        resetSelfProfileCache();
         return { ok: true };
     });
     ipcMain.handle('ui:update-selection', (_evt, { jYear, jMonth, username }) => {
@@ -1010,12 +1139,14 @@
     ipcMain.handle('auth:authorize', async (_evt, { token }) => {
         if (!token || !token.trim()) return { ok: false, reason: 'Empty token' };
         await keytar.setPassword(SERVICE_NAME, TOKEN_ACCOUNT, token.trim());
+        resetSelfProfileCache();
         await (async () => mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html')))();
         return { ok: true };
     });
     ipcMain.handle('auth:logout', async () => {
         await keytar.deletePassword(SERVICE_NAME, TOKEN_ACCOUNT);
         lastUI.username = null;
+        resetSelfProfileCache();
         await (async () => mainWindow.loadFile(path.join(__dirname, 'renderer', 'login.html')))();
         return { ok: true };
     });
@@ -1087,6 +1218,77 @@
         } catch (err) {
             console.error('Failed to generate full report archive', err);
             return { ok: false, reason: err?.message || 'Unable to generate archive' };
+        }
+    });
+
+    ipcMain.handle('worklog:get-active-sprint-issues', async () => {
+        const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
+        const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
+        if (!baseUrl || !token) {
+            return { ok: false, reason: 'Missing Jira base URL or token.' };
+        }
+
+        const headers = buildHeaders(baseUrl, token);
+        try {
+            const profile = await fetchSelfProfile({ baseUrl, headers, force: false });
+            const username =
+                profile?.name ||
+                profile?.emailAddress ||
+                profile?.accountId ||
+                '';
+            if (!username) {
+                return { ok: false, reason: 'Unable to determine current user.' };
+            }
+            const issues = await fetchActiveSprintIssues({ baseUrl, headers, username });
+            return { ok: true, issues };
+        } catch (err) {
+            const reason = describeAxiosError(err, 'Unable to load active sprint issues.');
+            console.error('Failed to fetch active sprint issues:', reason);
+            return { ok: false, reason };
+        }
+    });
+
+    ipcMain.handle('worklog:add', async (_evt, payload) => {
+        const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
+        const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
+        if (!baseUrl || !token) {
+            return { ok: false, reason: 'Missing Jira base URL or token.' };
+        }
+
+        const { issueKey, started, timeSpentSeconds, comment } = payload || {};
+        const key = typeof issueKey === 'string' ? issueKey.trim() : '';
+        if (!key) {
+            return { ok: false, reason: 'Issue key is required.' };
+        }
+
+        const secondsNumber = Number(timeSpentSeconds);
+        if (!Number.isFinite(secondsNumber) || secondsNumber <= 0) {
+            return { ok: false, reason: 'Invalid duration.' };
+        }
+
+        const startedMoment = moment(started);
+        if (!startedMoment.isValid()) {
+            return { ok: false, reason: 'Invalid start time.' };
+        }
+
+        const headers = buildHeaders(baseUrl, token);
+        try {
+            await fetchSelfProfile({ baseUrl, headers, force: false });
+            const roundedSeconds = Math.max(60, Math.round(secondsNumber));
+            const formattedStarted = startedMoment.format('YYYY-MM-DDTHH:mm:ss.SSSZZ');
+            const worklog = await addWorklogEntry({
+                baseUrl,
+                headers,
+                issueKey: key,
+                started: formattedStarted,
+                timeSpentSeconds: roundedSeconds,
+                comment
+            });
+            return { ok: true, worklog };
+        } catch (err) {
+            const reason = describeAxiosError(err, 'Unable to add worklog.');
+            console.error(`Failed to add worklog for ${key}:`, reason);
+            return { ok: false, reason };
         }
     });
 

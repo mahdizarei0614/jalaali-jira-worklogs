@@ -469,6 +469,13 @@
             gap:6px;
             font-size:12px;
         }
+        .calendar-event--draft .calendar-event__content{
+            flex-wrap:nowrap;
+            flex-direction:column;
+            align-items:stretch;
+            gap:10px;
+            font-size:12px;
+        }
         .calendar-event__issue{
             color:var(--accent);
             font-weight:700;
@@ -489,6 +496,96 @@
             color:var(--muted);
             font-weight:500;
         }
+        [data-calendar-container] .fc .calendar-event--draft{
+            background:var(--card);
+            border-color:var(--accent);
+            box-shadow:0 8px 16px rgba(0,122,255,.12);
+        }
+        :root[data-theme="dark"] [data-calendar-container] .fc .calendar-event--draft{
+            background:var(--soft);
+            border-color:var(--accent);
+            box-shadow:0 8px 16px rgba(77,141,255,.18);
+        }
+        .calendar-draft{
+            display:flex;
+            flex-direction:column;
+            gap:10px;
+        }
+        .calendar-draft__field{
+            display:flex;
+            flex-direction:column;
+            gap:4px;
+        }
+        .calendar-draft__label{
+            font-size:11px;
+            font-weight:600;
+            color:var(--muted);
+        }
+        .calendar-draft__select,
+        .calendar-draft__comment{
+            width:100%;
+            padding:6px 8px;
+            border-radius:8px;
+            border:1px solid var(--border);
+            background:var(--input-bg);
+            color:var(--text);
+            font:inherit;
+            font-size:12px;
+            line-height:1.4;
+            transition:border-color .18s ease, box-shadow .18s ease;
+        }
+        .calendar-draft__select:focus,
+        .calendar-draft__comment:focus{
+            outline:none;
+            border-color:var(--accent);
+            box-shadow:0 0 0 3px var(--focus-ring);
+        }
+        .calendar-draft__select:disabled,
+        .calendar-draft__comment:disabled{
+            opacity:.65;
+            cursor:not-allowed;
+        }
+        .calendar-draft__comment{
+            min-height:72px;
+            resize:vertical;
+        }
+        .calendar-draft__actions{
+            display:flex;
+            flex-wrap:wrap;
+            gap:8px;
+            align-items:center;
+        }
+        .calendar-draft__submit,
+        .calendar-draft__cancel{
+            border:none;
+            border-radius:8px;
+            padding:6px 14px;
+            font-size:12px;
+            font-weight:600;
+            cursor:pointer;
+            transition:opacity .18s ease, transform .18s ease;
+        }
+        .calendar-draft__submit{
+            background:var(--accent);
+            color:var(--accent-foreground);
+        }
+        .calendar-draft__cancel{
+            background:var(--pill-bg);
+            color:var(--text);
+        }
+        .calendar-draft__submit:disabled,
+        .calendar-draft__cancel:disabled{
+            opacity:.65;
+            cursor:not-allowed;
+        }
+        .calendar-draft__status{
+            min-height:16px;
+            font-size:11px;
+            font-weight:500;
+            color:var(--muted);
+        }
+        .calendar-draft__status.is-error{ color:var(--red); }
+        .calendar-draft__status.is-success{ color:var(--green); }
         [data-calendar-container] .fc-timegrid-slot{
             height:48px;
         }
