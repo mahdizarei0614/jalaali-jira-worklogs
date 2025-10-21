@@ -478,13 +478,14 @@
             display:flex;
             flex-direction:column;
             gap:6px;
+            position:relative;
+            padding-top:32px;
         }
         .calendar-draft-event__header{
             display:flex;
             gap:6px;
-            flex-wrap:wrap;
+            flex-direction:column;
             align-items:flex-start;
-            justify-content:space-between;
         }
         .calendar-draft-event__title{
             display:flex;
@@ -520,6 +521,9 @@
             display:flex;
             gap:8px;
             align-items:center;
+            position:absolute;
+            top:6px;
+            right:6px;
         }
         .calendar-draft-event__action{
             border:none;
@@ -599,6 +603,14 @@
         .calendar-event__separator{
             color:var(--muted);
             font-weight:500;
+        }
+        [data-calendar-container] .calendar-event--recent{
+            background:rgba(16,185,129,.18);
+            border-color:rgba(5,150,105,.6);
+        }
+        :root[data-theme="dark"] [data-calendar-container] .calendar-event--recent{
+            background:rgba(16,185,129,.32);
+            border-color:rgba(45,212,191,.6);
         }
         .calendar-modal{
             position:fixed;

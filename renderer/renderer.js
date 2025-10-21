@@ -1396,6 +1396,32 @@
         let activeIssues = [];
         let activeIssueMap = new Map();
         const issuesCache = new Map();
+        const recentWorklogIds = new Set();
+        const recentWorklogFingerprints = new Set();
+
+        function createWorklogFingerprint({ issueKey, started, durationSeconds }) {
+            const key = (issueKey || '').toString().trim();
+            if (!key) return null;
+            let startIso = '';
+            if (started instanceof Date) {
+                if (Number.isFinite(started.getTime())) {
+                    startIso = started.toISOString();
+                }
+            } else if (started) {
+                const startDate = new Date(started);
+                if (Number.isFinite(startDate?.getTime())) {
+                    startIso = startDate.toISOString();
+                } else if (typeof started === 'string') {
+                    startIso = started;
+                }
+            }
+            if (!startIso) return null;
+            const duration = Number.isFinite(durationSeconds)
+                ? Math.max(60, Math.round(durationSeconds))
+                : null;
+            if (!duration) return null;
+            return `${key}|${startIso}|${duration}`;
+        }
 
         function ensureCalendar() {
             if (calendar) return calendar;
@@ -1504,14 +1530,18 @@
                 ? 'Select an issue to continue.'
                 : (stage === 'submitting' ? 'Submitting worklog…' : '');
 
+            const actionsHtml = actions.length
+                ? `<div class="calendar-draft-event__actions" role="group" aria-label="Pending worklog actions">${actions.join('')}</div>`
+                : '';
+
             return `
                 <div class="calendar-draft-event">
+                    ${actionsHtml}
                     <div class="calendar-draft-event__header">
                         <div class="calendar-draft-event__title">
                             ${issueLabel}
                             ${summaryHtml ? `<span class="calendar-event__separator">•</span>${summaryHtml}` : ''}
                         </div>
-                        <div class="calendar-draft-event__actions">${actions.join('')}</div>
                     </div>
                     ${metaHtml}
                     ${comment ? `<div class="calendar-draft-event__comment">${comment}</div>` : ''}
@@ -1563,6 +1593,7 @@
                 } else {
                     el.classList.remove('calendar-event--pending');
                 }
+                el.classList.remove('calendar-event--recent');
                 const confirmBtn = el.querySelector('[data-calendar-draft-action="confirm"]');
                 if (confirmBtn && !confirmBtn.dataset.draftActionBound) {
                     confirmBtn.dataset.draftActionBound = 'true';
@@ -1582,6 +1613,11 @@
                     });
                 }
                 return;
+            }
+            if (props.isRecent) {
+                el.classList.add('calendar-event--recent');
+            } else {
+                el.classList.remove('calendar-event--recent');
             }
             const tooltipParts = [];
             if (props.jalaaliDate) tooltipParts.push(props.jalaaliDate);
@@ -1982,6 +2018,18 @@
                 if (!res?.ok) {
                     throw new Error(res?.reason || 'Failed to add worklog.');
                 }
+                if (res.worklogId) {
+                    recentWorklogIds.add(String(res.worklogId));
+                } else {
+                    const fingerprint = createWorklogFingerprint({
+                        issueKey,
+                        started: start,
+                        durationSeconds
+                    });
+                    if (fingerprint) {
+                        recentWorklogFingerprints.add(fingerprint);
+                    }
+                }
                 setFeedback('Worklog added successfully. Refreshing data…', { variant: 'success', timeout: 5000 });
                 clearPendingDraft({ silent: true });
                 closeModal({ discard: false, silent: true });
@@ -2091,16 +2139,33 @@
                 if (!startMoment) {
                     return null;
                 }
+                const startDate = startMoment.toDate();
                 const hoursValue = Number.parseFloat(worklog?.hours);
                 const hours = Number.isFinite(hoursValue) ? hoursValue : 0;
                 const durationHours = hours > 0 ? hours : 0.25;
                 const endMoment = startMoment.clone().add(durationHours, 'hours');
+                const endDate = endMoment.toDate();
+                const durationSeconds = Math.max(60, Math.round((endDate.getTime() - startDate.getTime()) / 1000));
                 const summary = (worklog?.summary || '').toString().replace(/\s+/g, ' ').trim();
                 const issueKey = (worklog?.issueKey || '').toString().trim();
                 const titleParts = [issueKey, summary].filter(Boolean);
                 const hoursText = Number.isFinite(hoursValue) ? formatHours(hoursValue) : null;
+                const eventId = String(worklog?.worklogId ?? worklog?.id ?? `worklog-${idx}`);
+                const fingerprint = createWorklogFingerprint({
+                    issueKey,
+                    started: startDate,
+                    durationSeconds
+                });
+                const isRecent = recentWorklogIds.has(eventId)
+                    || (fingerprint ? recentWorklogFingerprints.has(fingerprint) : false);
+                if (isRecent) {
+                    recentWorklogIds.delete(eventId);
+                    if (fingerprint) {
+                        recentWorklogFingerprints.delete(fingerprint);
+                    }
+                }
                 return {
-                    id: String(worklog?.worklogId ?? worklog?.id ?? `worklog-${idx}`),
+                    id: eventId,
                     title: titleParts.join(' — ') || (worklog?.persianDate || ''),
                     start: startMoment.toISOString(),
                     end: endMoment.toISOString(),
@@ -2113,7 +2178,8 @@
                         jalaaliDate: worklog?.persianDate || '',
                         hours,
                         hoursText,
-                        issueUrl: buildIssueUrl(baseUrl, issueKey)
+                        issueUrl: buildIssueUrl(baseUrl, issueKey),
+                        isRecent
                     }
                 };
             }).filter(Boolean);
