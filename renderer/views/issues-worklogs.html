@@ -6,4 +6,34 @@
             Select a user and month to see worklogs.
         </div>
     </div>
+    <div class="worklog-modal" data-worklog-modal hidden>
+        <div class="worklog-modal__backdrop" data-worklog-close></div>
+        <div class="worklog-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="worklogModalTitle" tabindex="-1" data-worklog-dialog>
+            <div class="worklog-modal__header">
+                <div class="worklog-modal__title" id="worklogModalTitle">Log work</div>
+                <button type="button" class="worklog-modal__close" data-worklog-close aria-label="Close dialog">×</button>
+            </div>
+            <div class="worklog-modal__body">
+                <div class="worklog-modal__section">
+                    <label class="worklog-modal__label" for="worklogIssueSelect">Issue</label>
+                    <select id="worklogIssueSelect" class="worklog-modal__select" data-worklog-issue disabled>
+                        <option value="">Loading…</option>
+                    </select>
+                    <div class="worklog-modal__issue-meta" data-worklog-issue-meta></div>
+                </div>
+                <div class="worklog-modal__section">
+                    <div class="worklog-modal__slot" data-worklog-slot></div>
+                </div>
+                <div class="worklog-modal__section">
+                    <label class="worklog-modal__label" for="worklogComment">Worklog comment</label>
+                    <textarea id="worklogComment" class="worklog-modal__textarea" rows="4" data-worklog-comment placeholder="Describe your work…"></textarea>
+                </div>
+                <div class="worklog-modal__status" data-worklog-status></div>
+            </div>
+            <div class="worklog-modal__footer">
+                <button type="button" class="btn btn-outline" data-worklog-cancel>Cancel</button>
+                <button type="button" class="btn btn-primary" data-worklog-confirm disabled>Confirm</button>
+            </div>
+        </div>
+    </div>
 </div>

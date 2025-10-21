@@ -420,6 +420,132 @@
         return normalized.map(({ updatedMs, ...rest }) => rest);
     }
 
+    async function fetchActiveSprintIssuesForCurrentUser() {
+        const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
+        const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
+
+        if (!baseUrl || !token) {
+            return { ok: false, reason: 'Missing Jira base URL or token.' };
+        }
+
+        const headers = buildHeaders(baseUrl, token);
+        const fields = [
+            'key',
+            'summary',
+            'issuetype',
+            'status',
+            'timetracking',
+            'timeoriginalestimate',
+            'timeestimate',
+            'timespent',
+            'aggregatetimeestimate',
+            'aggregatetimespent',
+            'aggregatetimeoriginalestimate',
+            'customfield_10020',
+            'customfield_10016',
+            'customfield_10007',
+            'sprint',
+            'sprints'
+        ].join(',');
+
+        try {
+            const jql = 'assignee = currentUser() AND sprint in openSprints() ORDER BY Rank';
+            const issues = await searchIssuesPaged(baseUrl, headers, jql, fields);
+            const normalized = issues
+                .map((issue) => {
+                    if (!issue?.key) return null;
+                    const times = extractTimeTracking(issue);
+                    const fields = issue.fields || {};
+                    return {
+                        issueKey: issue.key,
+                        summary: fields.summary || '',
+                        issueType: fields.issuetype?.name || null,
+                        status: fields.status?.name || null,
+                        estimateHours: secsToHours(times.originalSeconds),
+                        remainingHours: secsToHours(times.remainingSeconds),
+                        loggedHours: secsToHours(times.spentSeconds),
+                        sprints: extractSprintNames(issue)
+                    };
+                })
+                .filter(Boolean);
+
+            return { ok: true, baseUrl, issues: normalized };
+        } catch (err) {
+            const reason = err?.response?.status
+                ? `${err.response.status} ${err.response.statusText}`
+                : (err?.message || 'Unable to load active sprint issues.');
+            return { ok: false, reason };
+        }
+    }
+
+    function buildAdfComment(text) {
+        const content = (text || '').toString();
+        if (!content.trim()) {
+            return null;
+        }
+        return {
+            type: 'doc',
+            version: 1,
+            content: [
+                {
+                    type: 'paragraph',
+                    content: [
+                        {
+                            type: 'text',
+                            text: content
+                        }
+                    ]
+                }
+            ]
+        };
+    }
+
+    async function createWorklogEntry({ issueKey, started, timeSpentSeconds, comment }) {
+        const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
+        const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
+
+        const key = (issueKey || '').trim();
+        const startedIso = (started || '').trim();
+        const durationSeconds = Number.parseInt(timeSpentSeconds, 10);
+
+        if (!baseUrl || !token) {
+            return { ok: false, reason: 'Missing Jira base URL or token.' };
+        }
+        if (!key) {
+            return { ok: false, reason: 'Issue key is required.' };
+        }
+        if (!startedIso) {
+            return { ok: false, reason: 'Start time is required.' };
+        }
+        if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+            return { ok: false, reason: 'Time spent must be greater than zero.' };
+        }
+
+        const headers = buildHeaders(baseUrl, token);
+        const payload = {
+            started: startedIso,
+            timeSpentSeconds: Math.max(60, durationSeconds)
+        };
+        const adfComment = buildAdfComment(comment);
+        if (adfComment) {
+            payload.comment = adfComment;
+        }
+
+        try {
+            const url = `${baseUrl}/rest/api/3/issue/${encodeURIComponent(key)}/worklog`;
+            const response = await axios.post(url, payload, {
+                headers,
+                params: { notifyUsers: false, adjustEstimate: 'AUTO' }
+            });
+            return { ok: true, worklogId: response?.data?.id || null };
+        } catch (err) {
+            const reason = err?.response?.status
+                ? `${err.response.status} ${err.response.statusText}`
+                : (err?.message || 'Failed to create worklog.');
+            return { ok: false, reason };
+        }
+    }
+
     async function fetchIssuesDueThisMonth({ baseUrl, headers, username, start, end }) {
         function normalizeYMD(value) {
             if (!value) return null;
@@ -1091,4 +1217,6 @@
     });
 
     ipcMain.handle('scan:now', (_evt, opts) => computeScan(opts || {}));
+    ipcMain.handle('jira:active-sprint-issues', async () => fetchActiveSprintIssuesForCurrentUser());
+    ipcMain.handle('jira:create-worklog', async (_evt, payload) => createWorklogEntry(payload || {}));
 })();

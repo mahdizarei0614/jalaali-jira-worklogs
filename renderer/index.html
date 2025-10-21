@@ -489,8 +489,194 @@
             color:var(--muted);
             font-weight:500;
         }
+        .calendar-event--pending{
+            border-style:dashed !important;
+            background:color-mix(in srgb, var(--calendar-event-bg) 85%, var(--accent) 15%) !important;
+        }
+        .calendar-event__content--pending{
+            width:100%;
+            display:flex;
+            flex-direction:column;
+            gap:6px;
+        }
+        .calendar-event__details{
+            display:flex;
+            flex-wrap:wrap;
+            align-items:center;
+            gap:6px;
+        }
+        .calendar-event__comment{
+            font-size:11px;
+            color:var(--muted);
+            line-height:1.4;
+        }
+        .calendar-event__actions{
+            display:flex;
+            gap:8px;
+            justify-content:flex-end;
+        }
+        .calendar-event__action{
+            width:26px;
+            height:26px;
+            border-radius:999px;
+            border:1px solid var(--border);
+            background:var(--card);
+            color:var(--text);
+            font-size:14px;
+            font-weight:700;
+            line-height:1;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            cursor:pointer;
+            transition:background .15s ease, border-color .15s ease, transform .02s ease;
+        }
+        .calendar-event__action:hover{
+            background:var(--soft);
+        }
+        .calendar-event__action:active{
+            transform:translateY(1px);
+        }
+        .calendar-event__action[disabled]{
+            opacity:.5;
+            cursor:default;
+        }
+        .calendar-event__action--confirm{
+            border-color:var(--accent);
+            color:var(--accent);
+        }
+        .calendar-event__action--confirm:hover{
+            background:color-mix(in srgb, var(--accent) 12%, transparent);
+        }
+        .calendar-event__action--cancel{
+            border-color:var(--red);
+            color:var(--red);
+        }
+        .calendar-event__action--cancel:hover{
+            background:color-mix(in srgb, var(--red) 12%, transparent);
+        }
+        .calendar-event__pending-note{
+            font-size:10px;
+            text-transform:uppercase;
+            letter-spacing:.08em;
+            color:var(--muted);
+            font-weight:700;
+        }
         [data-calendar-container] .fc-timegrid-slot{
             height:48px;
+        }
+        .worklog-modal{
+            position:fixed;
+            inset:0;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            padding:24px;
+            background:rgba(15,17,23,.55);
+            backdrop-filter:blur(6px);
+            z-index:60;
+        }
+        .worklog-modal__backdrop{
+            position:absolute;
+            inset:0;
+        }
+        .worklog-modal__dialog{
+            position:relative;
+            width:min(480px, 100%);
+            border-radius:18px;
+            background:var(--card);
+            border:1px solid var(--border);
+            box-shadow:0 24px 60px rgba(12,17,29,.28);
+            padding:20px 22px;
+            display:flex;
+            flex-direction:column;
+            gap:18px;
+            outline:none;
+        }
+        .worklog-modal__header{
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:12px;
+        }
+        .worklog-modal__title{
+            font-size:18px;
+            font-weight:700;
+        }
+        .worklog-modal__close{
+            border:none;
+            background:transparent;
+            color:var(--muted);
+            font-size:22px;
+            font-weight:700;
+            cursor:pointer;
+            line-height:1;
+            padding:4px;
+        }
+        .worklog-modal__body{
+            display:flex;
+            flex-direction:column;
+            gap:16px;
+        }
+        .worklog-modal__section{
+            display:flex;
+            flex-direction:column;
+            gap:6px;
+        }
+        .worklog-modal__label{
+            font-size:12px;
+            font-weight:600;
+            color:var(--muted);
+            text-transform:uppercase;
+            letter-spacing:.08em;
+        }
+        .worklog-modal__select,
+        .worklog-modal__textarea{
+            width:100%;
+            border-radius:12px;
+            border:1px solid var(--border);
+            background:var(--input-bg);
+            color:var(--text);
+            padding:10px 12px;
+            font-family:inherit;
+            font-size:13px;
+            resize:vertical;
+        }
+        .worklog-modal__select:focus,
+        .worklog-modal__textarea:focus{
+            border-color:var(--accent);
+            box-shadow:0 0 0 3px var(--focus-ring);
+            outline:none;
+        }
+        .worklog-modal__issue-meta{
+            font-size:12px;
+            color:var(--muted);
+            display:flex;
+            flex-wrap:wrap;
+            gap:8px;
+        }
+        .worklog-modal__slot{
+            font-size:13px;
+            font-weight:600;
+            background:var(--soft);
+            border-radius:10px;
+            padding:10px 12px;
+        }
+        .worklog-modal__status{
+            font-size:12px;
+            min-height:16px;
+            color:var(--muted);
+        }
+        .worklog-modal__status[data-state="error"]{
+            color:var(--red);
+        }
+        .worklog-modal__footer{
+            display:flex;
+            justify-content:flex-end;
+            gap:10px;
+        }
+        body.is-worklog-modal-open{
+            overflow:hidden;
         }
         .table-toolbar{
             display:flex; justify-content:flex-end; align-items:center; gap:8px;

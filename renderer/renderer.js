@@ -1316,6 +1316,16 @@
             return {};
         }
 
+        const modalEl = root.querySelector('[data-worklog-modal]');
+        const issueSelectEl = root.querySelector('[data-worklog-issue]');
+        const commentInputEl = root.querySelector('[data-worklog-comment]');
+        const statusEl = root.querySelector('[data-worklog-status]');
+        const issueMetaEl = root.querySelector('[data-worklog-issue-meta]');
+        const slotPreviewEl = root.querySelector('[data-worklog-slot]');
+        const confirmBtn = root.querySelector('[data-worklog-confirm]');
+        const cancelBtn = root.querySelector('[data-worklog-cancel]');
+        const closeButtons = root.querySelectorAll('[data-worklog-close]');
+
         const fullCalendarGlobal = window.FullCalendar || null;
         const CalendarCtor = fullCalendarGlobal?.Calendar;
         if (typeof CalendarCtor !== 'function') {
@@ -1359,6 +1369,225 @@
         let calendar = null;
         let eventSource = null;
         let lastSelectionKey = null;
+        let pendingEvent = null;
+        let pendingDraft = null;
+        let issuesLoadingPromise = null;
+        let activeSprintIssues = [];
+        const activeIssueMap = new Map();
+        let selfIdentifiers = new Set();
+        let selfUserLoaded = false;
+        let selectionWarningShown = false;
+
+        (async () => {
+            if (typeof window.appApi?.whoami !== 'function') {
+                selfUserLoaded = true;
+                return;
+            }
+            try {
+                const who = await window.appApi.whoami();
+                if (who?.ok) {
+                    const identifiers = new Set();
+                    const push = (value) => {
+                        const trimmed = (value || '').trim();
+                        if (trimmed) {
+                            identifiers.add(trimmed);
+                        }
+                    };
+                    push(who.username);
+                    push(who.raw?.name);
+                    push(who.raw?.accountId);
+                    push(who.raw?.emailAddress);
+                    selfIdentifiers = identifiers;
+                }
+            } catch (err) {
+                console.warn('Failed to determine current user for worklog modal.', err);
+            } finally {
+                selfUserLoaded = true;
+                selectionWarningShown = false;
+            }
+        })();
+
+        function selectionAllowsWorklog(options = {}) {
+            const { showWarning = false } = options || {};
+            const selection = typeof reportStateInstance.getSelection === 'function'
+                ? reportStateInstance.getSelection()
+                : {};
+            const username = (selection?.username || '').trim();
+            if (!selfUserLoaded) {
+                if (showWarning && !selectionWarningShown) {
+                    window.alert('Still loading your Jira profile. Please try again in a moment.');
+                    selectionWarningShown = true;
+                }
+                return false;
+            }
+            if (!username) {
+                if (showWarning && !selectionWarningShown) {
+                    window.alert('Select your own user to add a worklog.');
+                    selectionWarningShown = true;
+                }
+                return false;
+            }
+            if (selfIdentifiers.has(username)) {
+                selectionWarningShown = false;
+                return true;
+            }
+            if (showWarning && !selectionWarningShown) {
+                window.alert('You can only add worklogs for yourself. Please switch back to your user.');
+                selectionWarningShown = true;
+            }
+            return false;
+        }
+
+        function setModalStatus(text, state = '') {
+            if (!statusEl) return;
+            statusEl.textContent = text || '';
+            if (state === 'error') {
+                statusEl.dataset.state = 'error';
+            } else {
+                delete statusEl.dataset.state;
+            }
+        }
+
+        function setModalOpen(open) {
+            if (!modalEl) return;
+            if (open) {
+                modalEl.hidden = false;
+                modalEl.setAttribute('aria-hidden', 'false');
+                document.body.classList.add('is-worklog-modal-open');
+                requestAnimationFrame(() => {
+                    if (modalEl && typeof modalEl.focus === 'function') {
+                        modalEl.focus({ preventScroll: true });
+                    }
+                    if (issueSelectEl && typeof issueSelectEl.focus === 'function') {
+                        issueSelectEl.focus({ preventScroll: true });
+                    }
+                });
+            } else {
+                modalEl.hidden = true;
+                modalEl.setAttribute('aria-hidden', 'true');
+                document.body.classList.remove('is-worklog-modal-open');
+            }
+        }
+
+        function updateSlotPreview(range) {
+            if (!slotPreviewEl) return;
+            if (!range?.start || !range?.end) {
+                slotPreviewEl.textContent = '';
+                return;
+            }
+            const startMoment = createMoment(range.start);
+            const endMoment = createMoment(range.end);
+            const startText = startMoment ? startMoment.format('HH:mm') : new Intl.DateTimeFormat('fa-IR', {
+                hour: '2-digit',
+                minute: '2-digit'
+            }).format(range.start);
+            const endText = endMoment ? endMoment.format('HH:mm') : new Intl.DateTimeFormat('fa-IR', {
+                hour: '2-digit',
+                minute: '2-digit'
+            }).format(range.end);
+            const minutes = Math.max(1, Math.round((range.end.getTime() - range.start.getTime()) / 60000));
+            slotPreviewEl.textContent = `${startText} — ${endText} • ${formatDurationLabel(minutes)}`;
+        }
+
+        function populateIssueOptions(issues) {
+            if (!issueSelectEl) return;
+            activeIssueMap.clear();
+            const safeIssues = Array.isArray(issues) ? issues : [];
+            const options = ['<option value="">Select an issue…</option>'];
+            safeIssues.forEach((issue) => {
+                if (!issue?.issueKey) return;
+                activeIssueMap.set(issue.issueKey, issue);
+                const baseLabel = [issue.issueKey, issue.summary].filter(Boolean).join(' — ');
+                const metaParts = [];
+                if (Number.isFinite(issue.remainingHours)) {
+                    metaParts.push(`Remaining ${formatHours(issue.remainingHours)} h`);
+                }
+                if (Number.isFinite(issue.estimateHours)) {
+                    metaParts.push(`Estimate ${formatHours(issue.estimateHours)} h`);
+                }
+                const suffix = metaParts.length ? ` (${metaParts.join(' • ')})` : '';
+                options.push(`<option value="${escapeHtml(issue.issueKey)}">${escapeHtml(baseLabel + suffix)}</option>`);
+            });
+            issueSelectEl.innerHTML = options.join('');
+            issueSelectEl.disabled = safeIssues.length === 0;
+            if (confirmBtn) {
+                confirmBtn.disabled = true;
+            }
+        }
+
+        function updateIssueMeta(issue) {
+            if (!issueMetaEl) return;
+            if (!issue) {
+                issueMetaEl.textContent = '';
+                return;
+            }
+            const pieces = [];
+            if (Number.isFinite(issue.remainingHours)) {
+                pieces.push(`Remaining ${formatHours(issue.remainingHours)} h`);
+            }
+            if (Number.isFinite(issue.estimateHours)) {
+                pieces.push(`Estimate ${formatHours(issue.estimateHours)} h`);
+            }
+            if (issue.status) {
+                pieces.push(`Status ${issue.status}`);
+            }
+            if (Array.isArray(issue.sprints) && issue.sprints.length) {
+                pieces.push(`Sprint ${issue.sprints.join(', ')}`);
+            }
+            issueMetaEl.textContent = pieces.join(' • ');
+        }
+
+        async function ensureActiveIssues(force = false) {
+            if (!modalEl) return [];
+            if (!force && Array.isArray(activeSprintIssues) && activeSprintIssues.length && !issuesLoadingPromise) {
+                populateIssueOptions(activeSprintIssues);
+                setModalStatus(activeSprintIssues.length ? '' : 'No active sprint issues found.', activeSprintIssues.length ? '' : 'error');
+                return activeSprintIssues;
+            }
+            if (issuesLoadingPromise && !force) {
+                return issuesLoadingPromise;
+            }
+            if (!selectionAllowsWorklog()) {
+                populateIssueOptions([]);
+                setModalStatus('Select yourself to view active sprint issues.', 'error');
+                return [];
+            }
+            if (issueSelectEl) {
+                issueSelectEl.disabled = true;
+                issueSelectEl.innerHTML = '<option value="">Loading…</option>';
+            }
+            setModalStatus('Loading active sprint issues…');
+            if (typeof window.appApi?.fetchActiveSprintIssues !== 'function') {
+                setModalStatus('Active sprint issues are unavailable in this build.', 'error');
+                return [];
+            }
+            const promise = (async () => {
+                try {
+                    const res = await window.appApi.fetchActiveSprintIssues();
+                    if (!res?.ok) {
+                        throw new Error(res?.reason || 'Unable to load active sprint issues.');
+                    }
+                    activeSprintIssues = Array.isArray(res.issues) ? res.issues : [];
+                    populateIssueOptions(activeSprintIssues);
+                    if (!activeSprintIssues.length) {
+                        setModalStatus('No active sprint issues found for you.', 'error');
+                    } else {
+                        setModalStatus('');
+                    }
+                    return activeSprintIssues;
+                } catch (err) {
+                    console.error('Failed to load active sprint issues', err);
+                    populateIssueOptions([]);
+                    setModalStatus(err?.message || 'Unable to load active sprint issues.', 'error');
+                    activeSprintIssues = [];
+                    throw err;
+                } finally {
+                    issuesLoadingPromise = null;
+                }
+            })();
+            issuesLoadingPromise = promise;
+            return promise;
+        }
 
         function ensureCalendar() {
             if (calendar) return calendar;
@@ -1374,11 +1603,21 @@
                 nowIndicator: true,
                 slotLabelFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
                 eventTimeFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
+                selectable: true,
+                selectMirror: true,
+                unselectAuto: false,
+                selectAllow: () => selectionAllowsWorklog({ showWarning: true }),
+                select: (info) => handleCalendarSelect(info),
+                editable: true,
+                eventResizableFromStart: false,
+                eventOverlap: true,
                 dayHeaderContent: (args) => formatDayHeader(args.date),
                 titleFormat: () => '',
                 datesSet: (info) => updateToolbarTitle(info.start, info.end),
                 eventContent: (arg) => renderEventContent(arg.event),
-                eventDidMount: (info) => applyEventMetadata(info.el, info.event.extendedProps)
+                eventDidMount: (info) => handleEventDidMount(info),
+                eventDrop: (info) => handleEventDrop(info),
+                eventResize: (info) => handleEventResize(info)
             });
             calendar.render();
             updateToolbarTitle(calendar.view.currentStart, calendar.view.currentEnd);
@@ -1416,6 +1655,39 @@
 
         function renderEventContent(event) {
             const props = event.extendedProps || {};
+            if (props.isPending) {
+                const detailPieces = [];
+                if (props.issueKey) {
+                    detailPieces.push(`<span class="calendar-event__issue">${escapeHtml(props.issueKey)}</span>`);
+                }
+                if (props.summary) {
+                    detailPieces.push(`<span class="calendar-event__summary">${escapeHtml(props.summary)}</span>`);
+                }
+                if (props.durationLabel) {
+                    detailPieces.push(`<span class="calendar-event__hours">${escapeHtml(props.durationLabel)}</span>`);
+                } else if (props.hoursText) {
+                    detailPieces.push(`<span class="calendar-event__hours">${escapeHtml(`${props.hoursText} h`)}</span>`);
+                }
+                const commentHtml = props.comment
+                    ? `<div class="calendar-event__comment">${escapeHtml(props.comment).replace(/\n/g, '<br>')}</div>`
+                    : '';
+                const confirmDisabled = props.isBusy ? ' disabled' : '';
+                const cancelDisabled = props.isBusy ? ' disabled' : '';
+                const html = `
+                    <div class="calendar-event__content calendar-event__content--pending">
+                        <div class="calendar-event__pending-note">Pending worklog</div>
+                        <div class="calendar-event__details">
+                            ${detailPieces.join('<span class="calendar-event__separator">•</span>')}
+                        </div>
+                        ${commentHtml}
+                        <div class="calendar-event__actions">
+                            <button type="button" class="calendar-event__action calendar-event__action--confirm" data-pending-action="confirm"${confirmDisabled} title="Submit worklog">✓</button>
+                            <button type="button" class="calendar-event__action calendar-event__action--cancel" data-pending-action="cancel"${cancelDisabled} title="Discard">✕</button>
+                        </div>
+                    </div>
+                `;
+                return { html };
+            }
             const pieces = [];
             if (props.issueKey) {
                 const issueLabel = escapeHtml(props.issueKey);
@@ -1443,6 +1715,34 @@
             return { html };
         }
 
+        function handleEventDidMount(info) {
+            if (!info?.el || !info?.event) return;
+            const props = info.event.extendedProps || {};
+            applyEventMetadata(info.el, props);
+            if (!props.isPending) return;
+            info.el.classList.add('calendar-event--pending');
+            const confirmBtnEl = info.el.querySelector('[data-pending-action="confirm"]');
+            const cancelBtnEl = info.el.querySelector('[data-pending-action="cancel"]');
+            if (confirmBtnEl) {
+                confirmBtnEl.addEventListener('click', (evt) => {
+                    evt.preventDefault();
+                    evt.stopPropagation();
+                    if (info.event === pendingEvent) {
+                        submitPendingWorklog();
+                    }
+                });
+            }
+            if (cancelBtnEl) {
+                cancelBtnEl.addEventListener('click', (evt) => {
+                    evt.preventDefault();
+                    evt.stopPropagation();
+                    if (info.event === pendingEvent) {
+                        removePendingEvent();
+                    }
+                });
+            }
+        }
+
         function applyEventMetadata(el, props = {}) {
             const tooltipParts = [];
             if (props.jalaaliDate) tooltipParts.push(props.jalaaliDate);
@@ -1450,6 +1750,229 @@
             if (props.comment) tooltipParts.push(props.comment);
             if (tooltipParts.length) {
                 el.setAttribute('title', tooltipParts.join('\n'));
+            }
+        }
+
+        function handleCalendarSelect(info) {
+            const cal = ensureCalendar();
+            cal.unselect();
+            if (!selectionAllowsWorklog({ showWarning: true })) {
+                return;
+            }
+            const start = info.start ? new Date(info.start) : null;
+            const end = info.end ? new Date(info.end) : null;
+            if (!start || !end || end <= start) {
+                window.alert('Please choose a valid time range.');
+                return;
+            }
+            pendingDraft = {
+                start,
+                end,
+                issueKey: null,
+                summary: '',
+                comment: '',
+                remainingHours: null,
+                estimateHours: null,
+                status: null
+            };
+            if (pendingEvent) {
+                removePendingEvent({ keepDraft: true });
+            }
+            updateSlotPreview(pendingDraft);
+            updateIssueMeta(null);
+            if (commentInputEl) {
+                commentInputEl.value = '';
+            }
+            if (issueSelectEl) {
+                issueSelectEl.value = '';
+            }
+            if (confirmBtn) {
+                confirmBtn.disabled = true;
+            }
+            setModalStatus('');
+            populateIssueOptions(activeSprintIssues);
+            setModalOpen(true);
+            ensureActiveIssues().catch(() => {});
+        }
+
+        function closeWorklogModal(options = {}) {
+            const { clearDraft = false } = options || {};
+            if (!modalEl) return;
+            setModalOpen(false);
+            setModalStatus('');
+            updateIssueMeta(null);
+            if (issueSelectEl) {
+                issueSelectEl.value = '';
+                issueSelectEl.disabled = false;
+            }
+            if (commentInputEl) {
+                commentInputEl.value = '';
+            }
+            if (clearDraft) {
+                pendingDraft = null;
+            }
+            if (confirmBtn) {
+                confirmBtn.disabled = true;
+            }
+        }
+
+        function createPendingEventFromDraft(draft) {
+            const cal = ensureCalendar();
+            if (!draft?.start || !draft?.end) {
+                return null;
+            }
+            if (pendingEvent) {
+                try { pendingEvent.remove(); } catch (err) {}
+            }
+            const start = new Date(draft.start);
+            const end = new Date(draft.end);
+            const minutes = Math.max(1, Math.round((end.getTime() - start.getTime()) / 60000));
+            const hours = minutes / 60;
+            const durationLabel = formatDurationLabel(minutes);
+            const event = cal.addEvent({
+                start,
+                end,
+                allDay: false,
+                title: draft.issueKey ? `${draft.issueKey} — ${draft.summary || ''}` : 'Pending worklog',
+                classNames: ['calendar-event--pending'],
+                extendedProps: {
+                    isPending: true,
+                    issueKey: draft.issueKey || '',
+                    summary: draft.summary || '',
+                    comment: draft.comment || '',
+                    hoursText: formatHours(hours),
+                    durationMinutes: minutes,
+                    durationLabel,
+                    isBusy: false
+                }
+            });
+            event.setProp('editable', true);
+            pendingEvent = event;
+            pendingDraft = {
+                start,
+                end,
+                issueKey: draft.issueKey || '',
+                summary: draft.summary || '',
+                comment: draft.comment || '',
+                remainingHours: draft.remainingHours ?? null,
+                estimateHours: draft.estimateHours ?? null,
+                status: draft.status ?? null
+            };
+            return event;
+        }
+
+        function detachPendingEvent() {
+            if (!pendingEvent || !pendingDraft) return null;
+            const snapshot = {
+                ...pendingDraft,
+                start: new Date(pendingDraft.start),
+                end: new Date(pendingDraft.end),
+                isBusy: Boolean(pendingEvent.extendedProps?.isBusy)
+            };
+            try { pendingEvent.remove(); } catch (err) {}
+            pendingEvent = null;
+            pendingDraft = snapshot;
+            return snapshot;
+        }
+
+        function restorePendingEvent(snapshot) {
+            if (!snapshot) return;
+            const event = createPendingEventFromDraft(snapshot);
+            if (snapshot.isBusy && event) {
+                event.setExtendedProp('isBusy', true);
+            }
+        }
+
+        function removePendingEvent(options = {}) {
+            const { keepDraft = false } = options || {};
+            if (pendingEvent) {
+                try { pendingEvent.remove(); } catch (err) {}
+            }
+            pendingEvent = null;
+            if (!keepDraft) {
+                pendingDraft = null;
+            }
+        }
+
+        function updatePendingEventRange(event) {
+            if (!pendingEvent || event !== pendingEvent || !pendingDraft) return;
+            const start = event.start ? new Date(event.start) : pendingDraft.start;
+            const end = event.end ? new Date(event.end) : start;
+            if (!start || !end) {
+                return;
+            }
+            pendingDraft.start = start;
+            pendingDraft.end = end;
+            const minutes = Math.max(1, Math.round((end.getTime() - start.getTime()) / 60000));
+            const hours = minutes / 60;
+            event.setExtendedProp('durationMinutes', minutes);
+            event.setExtendedProp('durationLabel', formatDurationLabel(minutes));
+            event.setExtendedProp('hoursText', formatHours(hours));
+        }
+
+        function handleEventDrop(info) {
+            if (info?.event?.extendedProps?.isPending) {
+                updatePendingEventRange(info.event);
+            } else {
+                info.revert();
+            }
+        }
+
+        function handleEventResize(info) {
+            if (info?.event?.extendedProps?.isPending) {
+                updatePendingEventRange(info.event);
+            } else {
+                info.revert();
+            }
+        }
+
+        function setPendingEventBusy(isBusy) {
+            if (!pendingEvent) return;
+            pendingEvent.setExtendedProp('isBusy', Boolean(isBusy));
+        }
+
+        async function submitPendingWorklog() {
+            if (!pendingEvent || !pendingDraft) return;
+            if (!selectionAllowsWorklog({ showWarning: true })) {
+                return;
+            }
+            const start = pendingDraft.start ? new Date(pendingDraft.start) : null;
+            const end = pendingDraft.end ? new Date(pendingDraft.end) : null;
+            if (!start || !end || end <= start) {
+                window.alert('Pending worklog has an invalid time range.');
+                return;
+            }
+            const issueKey = (pendingDraft.issueKey || '').trim();
+            if (!issueKey) {
+                window.alert('Select an issue before submitting.');
+                return;
+            }
+            const durationSeconds = Math.max(60, Math.round((end.getTime() - start.getTime()) / 1000));
+            const startMoment = createMoment(start) || (momentRef ? momentRef(start) : null);
+            const startedIso = startMoment
+                ? startMoment.format('YYYY-MM-DD[T]HH:mm:ss.SSSZZ')
+                : new Date(start.getTime()).toISOString();
+            setPendingEventBusy(true);
+            try {
+                if (typeof window.appApi?.createWorklog !== 'function') {
+                    throw new Error('Worklog API is not available.');
+                }
+                const res = await window.appApi.createWorklog({
+                    issueKey,
+                    started: startedIso,
+                    timeSpentSeconds: durationSeconds,
+                    comment: pendingDraft.comment || ''
+                });
+                if (!res?.ok) {
+                    throw new Error(res?.reason || 'Unable to create worklog.');
+                }
+                removePendingEvent();
+                closeWorklogModal({ clearDraft: true });
+                await reportStateInstance.refresh({ force: true });
+            } catch (err) {
+                console.error('Failed to create worklog', err);
+                window.alert(err?.message || 'Failed to create worklog.');
+                setPendingEventBusy(false);
             }
         }
 
@@ -1471,6 +1994,7 @@
 
         function clearEvents() {
             if (!calendar) return;
+            const snapshot = detachPendingEvent();
             if (eventSource) {
                 try {
                     eventSource.remove();
@@ -1480,11 +2004,15 @@
                 eventSource = null;
             }
             calendar.removeAllEvents();
+            if (snapshot && selectionAllowsWorklog()) {
+                restorePendingEvent(snapshot);
+            }
         }
 
         function setEvents(events) {
             const cal = ensureCalendar();
             cal.batchRendering(() => {
+                const snapshot = detachPendingEvent();
                 if (eventSource) {
                     try {
                         eventSource.remove();
@@ -1496,6 +2024,95 @@
                 cal.removeAllEvents();
                 if (Array.isArray(events) && events.length) {
                     eventSource = cal.addEventSource(events);
+                }
+                if (snapshot && selectionAllowsWorklog()) {
+                    restorePendingEvent(snapshot);
+                }
+            });
+        }
+
+        if (issueSelectEl) {
+            issueSelectEl.addEventListener('change', () => {
+                const key = issueSelectEl.value || '';
+                const issue = key ? activeIssueMap.get(key) : null;
+                updateIssueMeta(issue || null);
+                if (confirmBtn) {
+                    confirmBtn.disabled = !issue;
+                }
+                if (pendingDraft && issue) {
+                    pendingDraft.issueKey = issue.issueKey;
+                    pendingDraft.summary = issue.summary || '';
+                    pendingDraft.remainingHours = issue.remainingHours ?? null;
+                    pendingDraft.estimateHours = issue.estimateHours ?? null;
+                    pendingDraft.status = issue.status ?? null;
+                } else if (pendingDraft && !issue) {
+                    pendingDraft.issueKey = null;
+                    pendingDraft.summary = '';
+                    pendingDraft.remainingHours = null;
+                    pendingDraft.estimateHours = null;
+                    pendingDraft.status = null;
+                }
+                if (issue) {
+                    setModalStatus('');
+                }
+            });
+        }
+
+        if (commentInputEl) {
+            commentInputEl.addEventListener('input', () => {
+                if (pendingDraft) {
+                    pendingDraft.comment = commentInputEl.value || '';
+                }
+            });
+        }
+
+        function handleModalConfirm() {
+            if (!pendingDraft || !pendingDraft.start || !pendingDraft.end) {
+                setModalStatus('Select a time range before confirming.', 'error');
+                return;
+            }
+            const key = issueSelectEl ? (issueSelectEl.value || '') : '';
+            const issue = key ? activeIssueMap.get(key) : null;
+            if (!issue) {
+                setModalStatus('Please choose an issue.', 'error');
+                return;
+            }
+            const comment = commentInputEl ? commentInputEl.value.trim() : '';
+            const draft = {
+                ...pendingDraft,
+                issueKey: issue.issueKey,
+                summary: issue.summary || '',
+                comment,
+                remainingHours: issue.remainingHours ?? null,
+                estimateHours: issue.estimateHours ?? null,
+                status: issue.status ?? null
+            };
+            createPendingEventFromDraft(draft);
+            closeWorklogModal({ clearDraft: false });
+        }
+
+        function handleModalCancel() {
+            closeWorklogModal({ clearDraft: true });
+            removePendingEvent();
+        }
+
+        if (confirmBtn) {
+            confirmBtn.addEventListener('click', handleModalConfirm);
+        }
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', handleModalCancel);
+        }
+        closeButtons.forEach((btn) => {
+            if (!btn) return;
+            btn.addEventListener('click', (evt) => {
+                handleModalCancel();
+            });
+        });
+        if (modalEl) {
+            modalEl.addEventListener('keydown', (evt) => {
+                if (evt.key === 'Escape') {
+                    evt.preventDefault();
+                    handleModalCancel();
                 }
             });
         }
@@ -1546,6 +2163,14 @@
         reportStateInstance.subscribe((state) => {
             const selection = state?.selection || {};
             const selectionKey = selectionKeyOf(selection);
+            const selectedUsername = (selection?.username || '').trim();
+            if (selfUserLoaded && selectedUsername && selfIdentifiers.has(selectedUsername)) {
+                selectionWarningShown = false;
+            }
+            if (pendingEvent && (!selectedUsername || !selfIdentifiers.has(selectedUsername))) {
+                removePendingEvent();
+                closeWorklogModal({ clearDraft: true });
+            }
             if (selectionKey && selectionKey !== lastSelectionKey) {
                 lastSelectionKey = selectionKey;
                 const targetMoment = createMoment(`${selection.jYear}/${selection.jMonth}/1`, 'jYYYY/jM/jD');
@@ -2765,6 +3390,19 @@
         const num = Number.parseFloat(val);
         if (!Number.isFinite(num)) return '0.00';
         return num.toFixed(2);
+    }
+
+    function formatDurationLabel(minutes) {
+        const safe = Number.isFinite(minutes) ? Math.max(1, Math.round(minutes)) : 1;
+        const hrs = Math.floor(safe / 60);
+        const mins = safe % 60;
+        if (hrs > 0 && mins > 0) {
+            return `${hrs}h ${mins}m`;
+        }
+        if (hrs > 0) {
+            return `${hrs}h`;
+        }
+        return `${mins}m`;
     }
 
     function weekdayName(w) {
