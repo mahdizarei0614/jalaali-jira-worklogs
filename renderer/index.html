@@ -48,6 +48,10 @@
             --tooltip-bg:rgba(17,17,17,.95);
             --tooltip-text:#ffffff;
             --tooltip-underline:rgba(0,0,0,.2);
+            --calendar-event-bg:#e0ecff;
+            --calendar-event-border:#c2d8ff;
+            --calendar-event-text:#0f1115;
+            --calendar-event-hours:#0a2a66;
         }
         :root[data-theme="dark"]{
             color-scheme: dark;
@@ -88,6 +92,10 @@
             --tooltip-bg:rgba(12,17,29,.92);
             --tooltip-text:#f9fbff;
             --tooltip-underline:rgba(229,233,240,.4);
+            --calendar-event-bg:#0c1b3a;
+            --calendar-event-border:#1e315b;
+            --calendar-event-text:#f3f6ff;
+            --calendar-event-hours:#d8e4ff;
         }
         *{box-sizing:border-box; margin: 0; padding: 0}
         html,body{height:100%}
@@ -420,6 +428,23 @@
             border-color:var(--border);
             color:var(--text);
         }
+        [data-calendar-container] .fc .fc-daygrid-event,
+        [data-calendar-container] .fc .fc-timegrid-event{
+            background:var(--calendar-event-bg);
+            border:1px solid var(--calendar-event-border);
+            color:var(--calendar-event-text);
+            border-radius:10px;
+            box-shadow:0 4px 12px rgba(12,17,29,.08);
+            overflow:hidden;
+        }
+        :root[data-theme="dark"] [data-calendar-container] .fc .fc-daygrid-event,
+        :root[data-theme="dark"] [data-calendar-container] .fc .fc-timegrid-event{
+            box-shadow:0 6px 16px rgba(3,7,18,.32);
+        }
+        [data-calendar-container] .fc .fc-daygrid-event .fc-event-main,
+        [data-calendar-container] .fc .fc-timegrid-event .fc-event-main{
+            color:var(--calendar-event-text);
+        }
         .calendar-day-header{
             display:flex;
             flex-direction:column;
@@ -457,8 +482,8 @@
             font-weight:600;
         }
         .calendar-event__hours{
-            color:var(--muted);
-            font-weight:600;
+            color:var(--calendar-event-hours);
+            font-weight:700;
         }
         .calendar-event__separator{
             color:var(--muted);
