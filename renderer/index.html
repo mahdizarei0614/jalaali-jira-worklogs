@@ -52,6 +52,10 @@
             --calendar-event-border:#c2d8ff;
             --calendar-event-text:#0f1115;
             --calendar-event-hours:#0a2a66;
+            --calendar-event-new-bg:#e6f7ee;
+            --calendar-event-new-border:#c1ebd4;
+            --calendar-event-new-text:#0f1115;
+            --calendar-event-new-hours:#0f421f;
         }
         :root[data-theme="dark"]{
             color-scheme: dark;
@@ -96,6 +100,10 @@
             --calendar-event-border:#1e315b;
             --calendar-event-text:#f3f6ff;
             --calendar-event-hours:#d8e4ff;
+            --calendar-event-new-bg:#123022;
+            --calendar-event-new-border:#1f5a3a;
+            --calendar-event-new-text:#c6f2d9;
+            --calendar-event-new-hours:#8ce7b6;
         }
         *{box-sizing:border-box; margin: 0; padding: 0}
         html,body{height:100%}
@@ -462,6 +470,14 @@
             border-color:var(--accent);
             box-shadow:0 0 0 rgba(0,0,0,0);
         }
+        [data-calendar-container] .calendar-event--new{
+            background:var(--calendar-event-new-bg);
+            border-color:var(--calendar-event-new-border);
+            color:var(--calendar-event-new-text);
+        }
+        [data-calendar-container] .calendar-event--new .calendar-event__hours{
+            color:var(--calendar-event-new-hours);
+        }
         :root[data-theme="dark"] [data-calendar-container] .calendar-event--draft,
         :root[data-theme="dark"] [data-calendar-container] .calendar-event--pending{
             background:rgba(77,141,255,.16);
@@ -475,21 +491,23 @@
             color:var(--calendar-event-text);
         }
         .calendar-draft-event{
+            position:relative;
             display:flex;
             flex-direction:column;
             gap:6px;
+            padding-top:36px;
         }
         .calendar-draft-event__header{
             display:flex;
+            flex-direction:column;
             gap:6px;
-            flex-wrap:wrap;
             align-items:flex-start;
-            justify-content:space-between;
+            padding-right:56px;
         }
         .calendar-draft-event__title{
             display:flex;
             flex-direction:column;
-            gap:2px;
+            gap:4px;
         }
         .calendar-draft-event__issue{
             font-size:13px;
@@ -517,9 +535,13 @@
             color:var(--muted);
         }
         .calendar-draft-event__actions{
+            position:absolute;
+            top:8px;
+            right:8px;
             display:flex;
             gap:8px;
             align-items:center;
+            z-index:1;
         }
         .calendar-draft-event__action{
             border:none;
