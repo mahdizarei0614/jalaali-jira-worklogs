@@ -1391,12 +1391,20 @@
         let currentSelection = selectionSnapshot ? { ...selectionSnapshot } : {};
         let currentBaseUrl = null;
         let pendingDraft = null;
+        let suppressDraftEventClick = false;
         let feedbackTimer = null;
         let modalOpen = false;
         let activeIssues = [];
         let activeIssueMap = new Map();
         const issuesCache = new Map();
         const recentlyCreatedWorklogIds = new Set();
+
+        function muteNextDraftEventClick() {
+            suppressDraftEventClick = true;
+            window.setTimeout(() => {
+                suppressDraftEventClick = false;
+            }, 0);
+        }
 
         function ensureCalendar() {
             if (calendar) return calendar;
@@ -1570,6 +1578,10 @@
                     confirmBtn.addEventListener('click', (ev) => {
                         ev.preventDefault();
                         ev.stopPropagation();
+                        if (typeof ev.stopImmediatePropagation === 'function') {
+                            ev.stopImmediatePropagation();
+                        }
+                        muteNextDraftEventClick();
                         handleDraftSubmit(event);
                     });
                 }
@@ -1579,6 +1591,10 @@
                     cancelBtn.addEventListener('click', (ev) => {
                         ev.preventDefault();
                         ev.stopPropagation();
+                        if (typeof ev.stopImmediatePropagation === 'function') {
+                            ev.stopImmediatePropagation();
+                        }
+                        muteNextDraftEventClick();
                         handleDraftCancel(event);
                     });
                 }
@@ -1936,6 +1952,10 @@
         function handleEventClick(info) {
             const event = info?.event;
             if (!event) return;
+            if (suppressDraftEventClick) {
+                suppressDraftEventClick = false;
+                return;
+            }
             if (event.extendedProps?.isDraft) {
                 info.jsEvent.preventDefault();
                 info.jsEvent.stopPropagation();
