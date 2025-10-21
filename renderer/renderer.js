@@ -501,6 +501,7 @@
         registerController('detailed-worklogs', (node) => initDetailedWorklogs(node, reportState)),
         registerController('due-issues', (node) => initDueIssues(node, reportState)),
         registerController('issues', (node) => initIssuesReport(node, reportState)),
+        registerController('issues-worklogs', (node) => initIssuesWorklogs(node, reportState)),
         registerController('quarter-report', (node) => initQuarterReport(node, reportState)),
         registerController('configurations', (node) => initConfigurations(node, reportState, userSelectContext, settingsPromise))
     ]);
@@ -1294,6 +1295,298 @@
                 tbody.appendChild(tr);
             });
             notifyTableUpdate(table);
+        });
+
+        return {
+            onShow: () => reportStateInstance.refresh()
+        };
+    }
+
+    function initIssuesWorklogs(root, reportStateInstance) {
+        if (!root || root.dataset.controllerReady === 'true') return {};
+        root.dataset.controllerReady = 'true';
+
+        setupIssueLinkHandler(root);
+
+        const container = root.querySelector('[data-calendar-container]');
+        const calendarEl = root.querySelector('#issuesWorklogsCalendar');
+        const messageEl = root.querySelector('[data-calendar-message]');
+        if (!container || !calendarEl || !messageEl) {
+            console.warn('Issues worklogs view missing required elements.');
+            return {};
+        }
+
+        const fullCalendarGlobal = window.FullCalendar || null;
+        const CalendarCtor = fullCalendarGlobal?.Calendar;
+        if (typeof CalendarCtor !== 'function') {
+            messageEl.textContent = 'Calendar component failed to load.';
+            container.classList.add('is-message-visible');
+            return {};
+        }
+
+        const momentRef = window.moment || null;
+        if (momentRef?.loadPersian) {
+            try {
+                momentRef.loadPersian({ usePersianDigits: false, dialect: 'persian-modern' });
+            } catch (err) {
+                console.warn('Failed to initialise Persian locale for moment.', err);
+            }
+        }
+        function createMoment(input, format) {
+            if (!momentRef) return null;
+            if (input == null || input === '') return null;
+            const instance = format
+                ? momentRef(input, format, true)
+                : momentRef(input);
+            if (!instance?.isValid()) {
+                return null;
+            }
+            if (typeof instance.locale === 'function') {
+                instance.locale('fa');
+            }
+            return instance;
+        }
+
+        const selectionSnapshot = typeof reportStateInstance.getSelection === 'function'
+            ? reportStateInstance.getSelection()
+            : {};
+        const initialMoment = createMoment(
+            `${selectionSnapshot?.jYear ?? ''}/${selectionSnapshot?.jMonth ?? ''}/1`,
+            'jYYYY/jM/jD'
+        );
+        const initialDate = initialMoment ? initialMoment.toDate() : undefined;
+
+        let calendar = null;
+        let eventSource = null;
+        let lastSelectionKey = null;
+
+        function ensureCalendar() {
+            if (calendar) return calendar;
+            calendar = new CalendarCtor(calendarEl, {
+                initialView: 'timeGridWeek',
+                initialDate,
+                firstDay: 6,
+                height: 'auto',
+                expandRows: true,
+                stickyHeaderDates: true,
+                headerToolbar: { start: 'prev,next today', center: 'title', end: '' },
+                buttonText: { today: 'امروز' },
+                nowIndicator: true,
+                slotLabelFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
+                eventTimeFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
+                dayHeaderContent: (args) => formatDayHeader(args.date),
+                titleFormat: () => '',
+                datesSet: (info) => updateToolbarTitle(info.start, info.end),
+                eventContent: (arg) => renderEventContent(arg.event),
+                eventDidMount: (info) => applyEventMetadata(info.el, info.event.extendedProps)
+            });
+            calendar.render();
+            updateToolbarTitle(calendar.view.currentStart, calendar.view.currentEnd);
+            return calendar;
+        }
+
+        function formatDayHeader(date) {
+            const m = createMoment(date);
+            if (m) {
+                const html = `
+                    <div class="calendar-day-header">
+                        <span class="calendar-day-header__name">${escapeHtml(m.format('dddd'))}</span>
+                        <span class="calendar-day-header__date">${escapeHtml(m.format('jD'))}</span>
+                    </div>
+                `;
+                return { html };
+            }
+            const text = new Intl.DateTimeFormat('fa-IR', { weekday: 'short', day: 'numeric' }).format(date);
+            return { text };
+        }
+
+        function updateToolbarTitle(start, end) {
+            const titleEl = container.querySelector('.fc-toolbar-title');
+            if (!titleEl) return;
+            const startMoment = createMoment(start);
+            const endMoment = createMoment(end)?.subtract(1, 'day');
+            if (startMoment && endMoment) {
+                titleEl.textContent = `${startMoment.format('jYYYY jMMMM jD')} — ${endMoment.format('jYYYY jMMMM jD')}`;
+                return;
+            }
+            const formatter = new Intl.DateTimeFormat('fa-IR', { dateStyle: 'medium' });
+            const inclusiveEnd = new Date(end.getTime() - 1);
+            titleEl.textContent = `${formatter.format(start)} — ${formatter.format(inclusiveEnd)}`;
+        }
+
+        function renderEventContent(event) {
+            const props = event.extendedProps || {};
+            const pieces = [];
+            if (props.issueKey) {
+                const issueLabel = escapeHtml(props.issueKey);
+                if (props.issueUrl) {
+                    const safeUrl = escapeHtml(props.issueUrl);
+                    pieces.push(`<a href="${safeUrl}" data-issue-url="${safeUrl}" class="calendar-event__issue" target="_blank" rel="noreferrer noopener">${issueLabel}</a>`);
+                } else {
+                    pieces.push(`<span class="calendar-event__issue">${issueLabel}</span>`);
+                }
+            }
+            if (props.summary) {
+                pieces.push(`<span class="calendar-event__summary">${escapeHtml(props.summary)}</span>`);
+            }
+            if (props.hoursText) {
+                pieces.push(`<span class="calendar-event__hours">${escapeHtml(`${props.hoursText} h`)}</span>`);
+            }
+            if (!pieces.length) {
+                pieces.push(`<span class="calendar-event__summary">${escapeHtml(event.title || '')}</span>`);
+            }
+            const html = `
+                <div class="calendar-event__content">
+                    ${pieces.join('<span class="calendar-event__separator">•</span>')}
+                </div>
+            `;
+            return { html };
+        }
+
+        function applyEventMetadata(el, props = {}) {
+            const tooltipParts = [];
+            if (props.jalaaliDate) tooltipParts.push(props.jalaaliDate);
+            if (props.timeSpent) tooltipParts.push(props.timeSpent);
+            if (props.comment) tooltipParts.push(props.comment);
+            if (tooltipParts.length) {
+                el.setAttribute('title', tooltipParts.join('\n'));
+            }
+        }
+
+        function selectionKeyOf(sel) {
+            if (!sel) return '';
+            const { jYear, jMonth } = sel;
+            if (!Number.isFinite(jYear) || !Number.isFinite(jMonth)) return '';
+            return `${jYear}-${jMonth}`;
+        }
+
+        function showMessage(text) {
+            messageEl.textContent = text;
+            container.classList.add('is-message-visible');
+        }
+
+        function hideMessage() {
+            container.classList.remove('is-message-visible');
+        }
+
+        function clearEvents() {
+            if (!calendar) return;
+            if (eventSource) {
+                try {
+                    eventSource.remove();
+                } catch (err) {
+                    console.warn('Failed to remove calendar event source', err);
+                }
+                eventSource = null;
+            }
+            calendar.removeAllEvents();
+        }
+
+        function setEvents(events) {
+            const cal = ensureCalendar();
+            cal.batchRendering(() => {
+                if (eventSource) {
+                    try {
+                        eventSource.remove();
+                    } catch (err) {
+                        console.warn('Failed to remove calendar event source', err);
+                    }
+                    eventSource = null;
+                }
+                cal.removeAllEvents();
+                if (Array.isArray(events) && events.length) {
+                    eventSource = cal.addEventSource(events);
+                }
+            });
+        }
+
+        function buildEvents(worklogs, baseUrl) {
+            if (!Array.isArray(worklogs) || worklogs.length === 0) {
+                return [];
+            }
+            const uniqueWorklogs = Array.from(new Set(worklogs));
+            return uniqueWorklogs.map((worklog, idx) => {
+                let startMoment = createMoment(worklog?.date || worklog?.started);
+                if (!startMoment && worklog?.persianDate) {
+                    startMoment = createMoment(worklog.persianDate, 'jYYYY/jM/jD');
+                }
+                if (!startMoment) {
+                    return null;
+                }
+                const hoursValue = Number.parseFloat(worklog?.hours);
+                const hours = Number.isFinite(hoursValue) ? hoursValue : 0;
+                const durationHours = hours > 0 ? hours : 0.25;
+                const endMoment = startMoment.clone().add(durationHours, 'hours');
+                const summary = (worklog?.summary || '').toString().replace(/\s+/g, ' ').trim();
+                const issueKey = (worklog?.issueKey || '').toString().trim();
+                const titleParts = [issueKey, summary].filter(Boolean);
+                const hoursText = Number.isFinite(hoursValue) ? formatHours(hoursValue) : null;
+                return {
+                    id: String(worklog?.worklogId ?? worklog?.id ?? `worklog-${idx}`),
+                    title: titleParts.join(' — ') || (worklog?.persianDate || ''),
+                    start: startMoment.toISOString(),
+                    end: endMoment.toISOString(),
+                    allDay: false,
+                    extendedProps: {
+                        issueKey,
+                        summary,
+                        comment: (worklog?.comment || '').toString(),
+                        timeSpent: worklog?.timeSpent || '',
+                        jalaaliDate: worklog?.persianDate || '',
+                        hours,
+                        hoursText,
+                        issueUrl: buildIssueUrl(baseUrl, issueKey)
+                    }
+                };
+            }).filter(Boolean);
+        }
+
+        showMessage('Select a user and month to see worklogs.');
+
+        reportStateInstance.subscribe((state) => {
+            const selection = state?.selection || {};
+            const selectionKey = selectionKeyOf(selection);
+            if (selectionKey && selectionKey !== lastSelectionKey) {
+                lastSelectionKey = selectionKey;
+                const targetMoment = createMoment(`${selection.jYear}/${selection.jMonth}/1`, 'jYYYY/jM/jD');
+                if (targetMoment) {
+                    const cal = ensureCalendar();
+                    cal.gotoDate(targetMoment.toDate());
+                    updateToolbarTitle(cal.view.currentStart, cal.view.currentEnd);
+                }
+            } else if (!selectionKey) {
+                lastSelectionKey = null;
+            }
+
+            if (!selectionKey || !selection?.username) {
+                clearEvents();
+                showMessage('Select a user and month to see worklogs.');
+                return;
+            }
+
+            if (state.isFetching && !state.result) {
+                clearEvents();
+                showMessage('Loading…');
+                return;
+            }
+
+            const res = state.result;
+            if (!res || !res.ok) {
+                clearEvents();
+                const message = res ? (res.reason || 'Unable to load worklogs.') : 'No data yet.';
+                showMessage(message);
+                return;
+            }
+
+            const events = buildEvents(res.worklogs, res.baseUrl);
+            if (!events.length) {
+                clearEvents();
+                showMessage('No worklogs found for this period.');
+                return;
+            }
+
+            setEvents(events);
+            hideMessage();
         });
 
         return {
