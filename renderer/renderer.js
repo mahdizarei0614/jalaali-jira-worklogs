@@ -1316,6 +1316,15 @@
             return {};
         }
 
+        const noticeEl = document.createElement('div');
+        noticeEl.className = 'calendar-inline-notice';
+        noticeEl.hidden = true;
+        if (calendarEl.parentNode === container) {
+            container.insertBefore(noticeEl, calendarEl);
+        } else {
+            container.appendChild(noticeEl);
+        }
+
         const fullCalendarGlobal = window.FullCalendar || null;
         const CalendarCtor = fullCalendarGlobal?.Calendar;
         if (typeof CalendarCtor !== 'function') {
@@ -1359,6 +1368,67 @@
         let calendar = null;
         let eventSource = null;
         let lastSelectionKey = null;
+        let draftState = null;
+        let selfIdentity = { username: null, raw: {} };
+        let currentSelection = selectionSnapshot && typeof selectionSnapshot === 'object'
+            ? { ...selectionSnapshot }
+            : {};
+        let isSelfSelected = false;
+        const timeFormatter = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+        function normaliseIdentity(value) {
+            return (value ?? '').toString().trim();
+        }
+
+        function candidateMatchesSelf(value) {
+            const candidate = normaliseIdentity(value);
+            if (!candidate) return false;
+            const possibilities = [
+                selfIdentity.username,
+                selfIdentity.raw?.name,
+                selfIdentity.raw?.emailAddress,
+                selfIdentity.raw?.accountId,
+                selfIdentity.raw?.displayName,
+            ]
+                .map(normaliseIdentity)
+                .filter(Boolean);
+            return possibilities.some((item) => item === candidate);
+        }
+
+        function canLogWork() {
+            return Boolean(selfIdentity.username) && Boolean(isSelfSelected);
+        }
+
+        function updateSelfSelection() {
+            const previous = isSelfSelected;
+            isSelfSelected = candidateMatchesSelf(currentSelection?.username);
+            if (!isSelfSelected && previous) {
+                clearDraft();
+            }
+        }
+
+        if (typeof window.appApi?.whoami === 'function') {
+            window.appApi.whoami()
+                .then((who) => {
+                    if (!who?.ok) {
+                        return;
+                    }
+                    const username = normaliseIdentity(who.username);
+                    if (!username) {
+                        return;
+                    }
+                    selfIdentity = {
+                        username,
+                        raw: who.raw || {},
+                    };
+                    updateSelfSelection();
+                })
+                .catch((err) => {
+                    console.warn('Failed to determine current user', err);
+                });
+        } else {
+            updateSelfSelection();
+        }
 
         function ensureCalendar() {
             if (calendar) return calendar;
@@ -1372,13 +1442,33 @@
                 headerToolbar: { start: 'prev,next today', center: 'title', end: '' },
                 buttonText: { today: 'امروز' },
                 nowIndicator: true,
+                selectable: true,
+                selectMirror: true,
+                selectAllow: () => canLogWork(),
+                select: handleCalendarSelect,
+                eventResizableFromStart: false,
+                eventDurationEditable: false,
+                eventStartEditable: false,
+                eventResize: handleDraftResize,
                 slotLabelFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
                 eventTimeFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
                 dayHeaderContent: (args) => formatDayHeader(args.date),
                 titleFormat: () => '',
                 datesSet: (info) => updateToolbarTitle(info.start, info.end),
                 eventContent: (arg) => renderEventContent(arg.event),
-                eventDidMount: (info) => applyEventMetadata(info.el, info.event.extendedProps)
+                eventDidMount: (info) => {
+                    const props = info.event.extendedProps || {};
+                    if (props.isDraft) {
+                        mountDraftEvent(info.el, info.event);
+                    } else {
+                        applyEventMetadata(info.el, props);
+                    }
+                },
+                eventWillUnmount: (info) => {
+                    if (info.event.extendedProps?.isDraft) {
+                        unmountDraftEvent(info.event);
+                    }
+                }
             });
             calendar.render();
             updateToolbarTitle(calendar.view.currentStart, calendar.view.currentEnd);
@@ -1416,6 +1506,9 @@
 
         function renderEventContent(event) {
             const props = event.extendedProps || {};
+            if (props.isDraft) {
+                return { html: '<div class="calendar-draft" data-draft-root></div>' };
+            }
             const pieces = [];
             if (props.issueKey) {
                 const issueLabel = escapeHtml(props.issueKey);
@@ -1460,7 +1553,20 @@
             return `${jYear}-${jMonth}`;
         }
 
+        function showInlineNotice(text) {
+            if (!noticeEl) return;
+            noticeEl.textContent = text;
+            noticeEl.hidden = false;
+        }
+
+        function hideInlineNotice() {
+            if (!noticeEl) return;
+            noticeEl.hidden = true;
+            noticeEl.textContent = '';
+        }
+
         function showMessage(text) {
+            hideInlineNotice();
             messageEl.textContent = text;
             container.classList.add('is-message-visible');
         }
@@ -1469,8 +1575,25 @@
             container.classList.remove('is-message-visible');
         }
 
+        function removeNonDraftEvents(cal) {
+            if (!cal) return;
+            cal.getEvents().forEach((evt) => {
+                if (evt.extendedProps?.isDraft) {
+                    return;
+                }
+                try {
+                    evt.remove();
+                } catch (err) {
+                    console.warn('Failed to remove calendar event', err);
+                }
+            });
+        }
+
         function clearEvents() {
             if (!calendar) return;
+            if (draftState) {
+                clearDraft();
+            }
             if (eventSource) {
                 try {
                     eventSource.remove();
@@ -1479,7 +1602,7 @@
                 }
                 eventSource = null;
             }
-            calendar.removeAllEvents();
+            removeNonDraftEvents(calendar);
         }
 
         function setEvents(events) {
@@ -1493,11 +1616,401 @@
                     }
                     eventSource = null;
                 }
-                cal.removeAllEvents();
+                removeNonDraftEvents(cal);
                 if (Array.isArray(events) && events.length) {
-                    eventSource = cal.addEventSource(events);
+                    const prepared = events.map((evt) => ({
+                        ...evt,
+                        editable: false,
+                        startEditable: false,
+                        durationEditable: false,
+                    }));
+                    eventSource = cal.addEventSource(prepared);
                 }
             });
+        }
+
+        function clearDraft() {
+            if (!draftState) return;
+            const event = draftState.event;
+            if (event) {
+                try {
+                    event.remove();
+                } catch (err) {
+                    console.warn('Failed to remove draft event', err);
+                }
+            }
+            if (calendar) {
+                try {
+                    calendar.unselect();
+                } catch (err) {
+                    console.warn('Failed to clear calendar selection', err);
+                }
+            }
+            draftState = null;
+        }
+
+        function handleCalendarSelect(info) {
+            if (!canLogWork()) return;
+            const rawStart = info?.start ? new Date(info.start) : null;
+            const rawEnd = info?.end ? new Date(info.end) : null;
+            if (!rawStart || Number.isNaN(rawStart.getTime())) {
+                return;
+            }
+            const endCandidate = rawEnd && rawEnd > rawStart
+                ? rawEnd
+                : new Date(rawStart.getTime() + 30 * 60 * 1000);
+            openDraft(rawStart, endCandidate);
+        }
+
+        function openDraft(startDate, endDate) {
+            const start = new Date(startDate.getTime());
+            const end = new Date(endDate.getTime());
+            const cal = ensureCalendar();
+            cal.unselect();
+            clearDraft();
+            draftState = {
+                start,
+                end,
+                issueKey: '',
+                comment: '',
+                issues: [],
+                loadingIssues: false,
+                error: null,
+                infoMessage: '',
+                isSubmitting: false,
+                event: null,
+                root: null,
+                fetchToken: null,
+            };
+            const event = cal.addEvent({
+                title: '',
+                start,
+                end,
+                allDay: false,
+                editable: true,
+                startEditable: false,
+                durationEditable: true,
+                extendedProps: { isDraft: true },
+            });
+            draftState.event = event;
+            ensureDraftIssuesLoaded();
+        }
+
+        function mutateDraft(updates = {}, options = {}) {
+            if (!draftState) return;
+            Object.assign(draftState, updates);
+            if (options.render !== false) {
+                renderDraft();
+            }
+        }
+
+        function renderDraft() {
+            if (!draftState?.root) {
+                return;
+            }
+            const root = draftState.root;
+            const start = draftState.start instanceof Date ? draftState.start : null;
+            const end = draftState.end instanceof Date ? draftState.end : null;
+            const startValid = start && !Number.isNaN(start.getTime());
+            const endValid = end && !Number.isNaN(end.getTime());
+            const durationSeconds = startValid && endValid
+                ? Math.max(0, Math.round((end.getTime() - start.getTime()) / 1000))
+                : 0;
+            const durationHours = durationSeconds / 3600;
+            let startLabel = '';
+            let endLabel = '';
+            let dateLabel = '';
+            if (startValid) {
+                startLabel = timeFormatter.format(start);
+                const m = createMoment(start);
+                if (m) {
+                    dateLabel = m.format('jYYYY/jMM/jDD');
+                } else {
+                    dateLabel = new Intl.DateTimeFormat('en-GB', {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                    }).format(start);
+                }
+            }
+            if (endValid) {
+                endLabel = timeFormatter.format(end);
+            }
+            const durationLabel = durationSeconds > 0 ? formatHours(durationHours) : '0.00';
+            const headerPieces = [];
+            if (dateLabel) {
+                headerPieces.push(`<span>${escapeHtml(dateLabel)}</span>`);
+            }
+            if (startLabel && endLabel) {
+                headerPieces.push(`<span>${escapeHtml(`${startLabel} – ${endLabel}`)}</span>`);
+            }
+            const optionPieces = ['<option value="">Select an issue…</option>'];
+            draftState.issues.forEach((issue) => {
+                if (!issue || !issue.key) return;
+                const issueKeyRaw = (issue.key || '').toString();
+                const summaryRaw = (issue.summary || '').toString().replace(/\s+/g, ' ').trim();
+                const label = summaryRaw ? `${issueKeyRaw} — ${summaryRaw}` : issueKeyRaw;
+                optionPieces.push(`<option value="${escapeHtml(issueKeyRaw)}">${escapeHtml(label)}</option>`);
+            });
+            const statusPieces = [];
+            let statusClass = 'calendar-draft__status';
+            if (draftState.error) {
+                statusClass += ' calendar-draft__status--error';
+                statusPieces.push(`<span>${escapeHtml(draftState.error)}</span>`);
+            } else if (draftState.loadingIssues) {
+                statusPieces.push('<span>Loading active sprint issues…</span>');
+            } else if (draftState.infoMessage) {
+                statusPieces.push(`<span>${escapeHtml(draftState.infoMessage)}</span>`);
+            } else if (!draftState.issues.length) {
+                statusPieces.push('<span>No active sprint issues assigned to you.</span>');
+            }
+            root.innerHTML = `
+                <div class="calendar-draft__header">
+                    ${headerPieces.join('<span>•</span>')}
+                    <span class="calendar-draft__duration">${escapeHtml(`${durationLabel} h`)}</span>
+                </div>
+                <div class="calendar-draft__field">
+                    <label>
+                        Issue
+                        <select data-draft-issue>${optionPieces.join('')}</select>
+                    </label>
+                </div>
+                <div class="calendar-draft__field">
+                    <label>
+                        Comment (optional)
+                        <textarea data-draft-comment placeholder="Add a log comment…">${escapeHtml(draftState.comment || '')}</textarea>
+                    </label>
+                </div>
+                ${statusPieces.length ? `<div class="${statusClass}">${statusPieces.join('')}</div>` : ''}
+                <div class="calendar-draft__actions">
+                    <button type="button" data-draft-cancel${draftState.isSubmitting ? ' disabled' : ''}>Cancel</button>
+                    <button type="button" data-draft-submit${draftState.isSubmitting || !draftState.issueKey || draftState.loadingIssues || durationSeconds < 60 ? ' disabled' : ''}>Log work</button>
+                </div>
+            `;
+            const issueSelect = root.querySelector('[data-draft-issue]');
+            const commentInput = root.querySelector('[data-draft-comment]');
+            const submitBtn = root.querySelector('[data-draft-submit]');
+            const cancelBtn = root.querySelector('[data-draft-cancel]');
+            if (issueSelect) {
+                issueSelect.value = draftState.issueKey || '';
+                issueSelect.disabled = draftState.loadingIssues || draftState.isSubmitting || !draftState.issues.length;
+                issueSelect.addEventListener('change', (evt) => {
+                    const nextValue = normaliseIdentity(evt.target.value);
+                    const updates = { issueKey: nextValue };
+                    if (nextValue) {
+                        updates.error = null;
+                    }
+                    mutateDraft(updates);
+                });
+            }
+            if (commentInput) {
+                commentInput.value = draftState.comment || '';
+                commentInput.disabled = draftState.isSubmitting;
+                commentInput.addEventListener('input', (evt) => {
+                    mutateDraft({ comment: evt.target.value }, { render: false });
+                });
+            }
+            if (cancelBtn) {
+                cancelBtn.disabled = draftState.isSubmitting;
+                cancelBtn.addEventListener('click', () => {
+                    clearDraft();
+                });
+            }
+            if (submitBtn) {
+                submitBtn.disabled = draftState.isSubmitting || !draftState.issueKey || draftState.loadingIssues || durationSeconds < 60;
+                submitBtn.addEventListener('click', () => {
+                    submitDraft();
+                });
+            }
+        }
+
+        function ensureDraftIssuesLoaded() {
+            if (!draftState || !canLogWork()) {
+                return;
+            }
+            if (typeof window.appApi?.getActiveSprintIssues !== 'function') {
+                mutateDraft({
+                    loadingIssues: false,
+                    issues: [],
+                    error: 'Active sprint issues API is not available.',
+                    infoMessage: '',
+                });
+                return;
+            }
+            const username = normaliseIdentity(selfIdentity.username);
+            if (!username) {
+                return;
+            }
+            const currentEvent = draftState.event;
+            const fetchToken = Symbol('draftIssues');
+            mutateDraft({ loadingIssues: true, error: null, infoMessage: '', fetchToken });
+            window.appApi.getActiveSprintIssues({ username })
+                .then((res) => {
+                    if (!draftState || draftState.fetchToken !== fetchToken || draftState.event !== currentEvent) {
+                        return;
+                    }
+                    if (!res?.ok) {
+                        mutateDraft({
+                            loadingIssues: false,
+                            issues: [],
+                            error: res?.reason || 'Failed to load active sprint issues.',
+                            infoMessage: '',
+                        });
+                        return;
+                    }
+                    const issues = Array.isArray(res.issues)
+                        ? res.issues.filter((issue) => issue && issue.key)
+                        : [];
+                    const updates = {
+                        loadingIssues: false,
+                        issues,
+                        error: null,
+                        infoMessage: '',
+                    };
+                    if (!issues.length) {
+                        updates.infoMessage = res?.reason
+                            ? res.reason.toString()
+                            : 'No active sprint issues assigned to you.';
+                    }
+                    if (draftState.issueKey && !issues.some((issue) => normaliseIdentity(issue.key) === draftState.issueKey)) {
+                        updates.issueKey = '';
+                    }
+                    mutateDraft(updates);
+                })
+                .catch((err) => {
+                    if (!draftState || draftState.fetchToken !== fetchToken || draftState.event !== currentEvent) {
+                        return;
+                    }
+                    mutateDraft({
+                        loadingIssues: false,
+                        issues: [],
+                        error: err?.message || 'Failed to load active sprint issues.',
+                        infoMessage: '',
+                    });
+                });
+        }
+
+        function handleDraftResize(info) {
+            if (!info) return;
+            const event = info.event;
+            if (!event?.extendedProps?.isDraft || !draftState || draftState.event !== event) {
+                if (typeof info.revert === 'function') {
+                    info.revert();
+                }
+                return;
+            }
+            const start = event.start ? new Date(event.start) : null;
+            const end = event.end ? new Date(event.end) : null;
+            if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+                if (typeof info.revert === 'function') {
+                    info.revert();
+                }
+                return;
+            }
+            const durationMs = end.getTime() - start.getTime();
+            if (durationMs < 60000) {
+                if (typeof info.revert === 'function') {
+                    info.revert();
+                }
+                return;
+            }
+            mutateDraft({ start, end });
+        }
+
+        function mountDraftEvent(element, event) {
+            if (!draftState || draftState.event !== event) {
+                return;
+            }
+            const root = element.querySelector('[data-draft-root]');
+            if (!root) {
+                return;
+            }
+            draftState.root = root;
+            renderDraft();
+        }
+
+        function unmountDraftEvent(event) {
+            if (!draftState || draftState.event !== event) {
+                return;
+            }
+            draftState.root = null;
+        }
+
+        function formatDateTimeForApi(date) {
+            if (!date || Number.isNaN(date.getTime())) {
+                return '';
+            }
+            if (momentRef) {
+                const m = momentRef(date);
+                if (m?.isValid()) {
+                    if (typeof m.locale === 'function') {
+                        m.locale('en');
+                    }
+                    return m.format('YYYY-MM-DD[T]HH:mm:ss.SSSZZ');
+                }
+            }
+            const iso = date.toISOString();
+            const offsetMinutes = -date.getTimezoneOffset();
+            const sign = offsetMinutes >= 0 ? '+' : '-';
+            const abs = Math.abs(offsetMinutes);
+            const hh = String(Math.floor(abs / 60)).padStart(2, '0');
+            const mm = String(abs % 60).padStart(2, '0');
+            return iso.replace('Z', `${sign}${hh}${mm}`);
+        }
+
+        async function submitDraft() {
+            if (!draftState) {
+                return;
+            }
+            if (!canLogWork()) {
+                mutateDraft({ error: 'You can only log work for your own user.' });
+                return;
+            }
+            const issueKey = normaliseIdentity(draftState.issueKey);
+            if (!issueKey) {
+                mutateDraft({ error: 'Please select an issue to log work.' });
+                return;
+            }
+            const start = draftState.start instanceof Date ? draftState.start : null;
+            const end = draftState.end instanceof Date ? draftState.end : null;
+            if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+                mutateDraft({ error: 'Invalid time range selected.' });
+                return;
+            }
+            const durationSeconds = Math.max(60, Math.round((end.getTime() - start.getTime()) / 1000));
+            const startedValue = formatDateTimeForApi(start);
+            if (!startedValue) {
+                mutateDraft({ error: 'Unable to determine start time for worklog.' });
+                return;
+            }
+            if (typeof window.appApi?.addWorklog !== 'function') {
+                mutateDraft({ error: 'Worklog API is not available.' });
+                return;
+            }
+            mutateDraft({ isSubmitting: true, error: null });
+            try {
+                const payload = {
+                    issueKey,
+                    started: startedValue,
+                    timeSpentSeconds: durationSeconds,
+                    comment: draftState.comment || '',
+                    username: normaliseIdentity(currentSelection?.username) || normaliseIdentity(selfIdentity.username),
+                };
+                const res = await window.appApi.addWorklog(payload);
+                if (!res?.ok) {
+                    const reason = res?.reason || 'Failed to add worklog.';
+                    mutateDraft({ isSubmitting: false, error: reason });
+                    return;
+                }
+                clearDraft();
+                try {
+                    await reportStateInstance.refresh({ force: true });
+                } catch (err) {
+                    console.warn('Failed to refresh calendar after logging work', err);
+                }
+            } catch (err) {
+                mutateDraft({ isSubmitting: false, error: err?.message || 'Failed to add worklog.' });
+            }
         }
 
         function buildEvents(worklogs, baseUrl) {
@@ -1545,6 +2058,8 @@
 
         reportStateInstance.subscribe((state) => {
             const selection = state?.selection || {};
+            currentSelection = selection ? { ...selection } : {};
+            updateSelfSelection();
             const selectionKey = selectionKeyOf(selection);
             if (selectionKey && selectionKey !== lastSelectionKey) {
                 lastSelectionKey = selectionKey;
@@ -1580,13 +2095,15 @@
 
             const events = buildEvents(res.worklogs, res.baseUrl);
             if (!events.length) {
-                clearEvents();
-                showMessage('No worklogs found for this period.');
+                setEvents([]);
+                hideMessage();
+                showInlineNotice('No worklogs found for this period.');
                 return;
             }
 
             setEvents(events);
             hideMessage();
+            hideInlineNotice();
         });
 
         return {

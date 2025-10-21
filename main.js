@@ -546,6 +546,80 @@
         }
     }
 
+    function normaliseUserIdentifier(value) {
+        const raw = (value ?? '').toString().trim();
+        return {
+            raw,
+            lower: raw.toLowerCase()
+        };
+    }
+
+    function matchesUserIdentity(candidate, who) {
+        if (!candidate || !who) return false;
+        const target = normaliseUserIdentifier(candidate);
+        if (!target.raw) return false;
+        const possibilities = [
+            who.username,
+            who.raw?.name,
+            who.raw?.emailAddress,
+            who.raw?.accountId,
+            who.raw?.displayName,
+        ]
+            .map(normaliseUserIdentifier)
+            .filter((item) => item.raw);
+        return possibilities.some((item) => item.raw === target.raw || item.lower === target.lower);
+    }
+
+    function buildCommentDocument(text) {
+        const clean = (text ?? '').toString();
+        if (!clean.trim()) {
+            return null;
+        }
+        return {
+            type: 'doc',
+            version: 1,
+            content: [
+                {
+                    type: 'paragraph',
+                    content: [
+                        {
+                            type: 'text',
+                            text: clean,
+                        }
+                    ]
+                }
+            ]
+        };
+    }
+
+    function extractAxiosError(err, fallback = 'Request failed.') {
+        if (err?.response?.data) {
+            const data = err.response.data;
+            if (Array.isArray(data.errorMessages) && data.errorMessages.length) {
+                return data.errorMessages.join(', ');
+            }
+            if (data.errors && typeof data.errors === 'object') {
+                const parts = Object.entries(data.errors)
+                    .map(([key, value]) => `${key}: ${value}`)
+                    .filter(Boolean);
+                if (parts.length) {
+                    return parts.join('; ');
+                }
+            }
+        }
+        if (err?.response) {
+            const status = err.response.status;
+            const statusText = err.response.statusText || '';
+            if (status || statusText) {
+                return `${status || ''} ${statusText}`.trim() || fallback;
+            }
+        }
+        if (err?.message) {
+            return err.message;
+        }
+        return fallback;
+    }
+
     function authorMatches(author, username) {
         if (!author || !username) return false;
         return author.name === username || author.emailAddress === username;
@@ -983,6 +1057,102 @@
     });
 
     ipcMain.handle('auth:whoami', async () => whoAmI());
+
+    ipcMain.handle('issues:active-sprint', async (_evt, { username }) => {
+        const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
+        const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
+        if (!baseUrl || !token) {
+            return { ok: false, reason: 'Missing Jira base URL or token.' };
+        }
+
+        const requestedUser = (username ?? '').toString().trim();
+        if (!requestedUser) {
+            return { ok: false, reason: 'Username is required.' };
+        }
+
+        const who = await whoAmI();
+        if (!who?.ok) {
+            return who;
+        }
+        if (!matchesUserIdentity(requestedUser, who)) {
+            return { ok: false, reason: 'You can only view active sprint issues for your own user.' };
+        }
+
+        const headers = buildHeaders(baseUrl, token);
+        const jql = `assignee = "${requestedUser}" AND Sprint in openSprints() ORDER BY updated DESC`;
+
+        try {
+            const issues = await searchIssuesPaged(baseUrl, headers, jql, 'summary');
+            const simplified = [];
+            const seenKeys = new Set();
+            for (const issue of issues) {
+                const key = (issue?.key || '').toString().trim();
+                if (!key || seenKeys.has(key)) continue;
+                seenKeys.add(key);
+                simplified.push({
+                    key,
+                    id: issue?.id || null,
+                    summary: (issue?.fields?.summary ?? '').toString()
+                });
+            }
+            return { ok: true, issues: simplified };
+        } catch (err) {
+            return { ok: false, reason: extractAxiosError(err, 'Failed to load active sprint issues.') };
+        }
+    });
+
+    ipcMain.handle('worklog:add', async (_evt, payload) => {
+        const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
+        const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
+        if (!baseUrl || !token) {
+            return { ok: false, reason: 'Missing Jira base URL or token.' };
+        }
+
+        const issueKey = (payload?.issueKey ?? '').toString().trim();
+        const started = (payload?.started ?? '').toString().trim();
+        const timeSpentSeconds = Number.parseInt(payload?.timeSpentSeconds, 10);
+        const comment = (payload?.comment ?? '').toString();
+        const username = (payload?.username ?? '').toString().trim();
+
+        if (!issueKey) {
+            return { ok: false, reason: 'Issue key is required.' };
+        }
+        if (!started) {
+            return { ok: false, reason: 'Start time is required.' };
+        }
+        if (!Number.isFinite(timeSpentSeconds) || timeSpentSeconds <= 0) {
+            return { ok: false, reason: 'Duration must be greater than zero seconds.' };
+        }
+
+        const who = await whoAmI();
+        if (!who?.ok) {
+            return who;
+        }
+        if (username && !matchesUserIdentity(username, who)) {
+            return { ok: false, reason: 'You can only log work for your own user.' };
+        }
+
+        const headers = buildHeaders(baseUrl, token);
+        const body = {
+            started,
+            timeSpentSeconds,
+        };
+        const commentDoc = buildCommentDocument(comment);
+        if (commentDoc) {
+            body.comment = commentDoc;
+        }
+
+        try {
+            const { data } = await axios.post(
+                `${baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}/worklog`,
+                body,
+                { headers }
+            );
+            return { ok: true, worklog: data };
+        } catch (err) {
+            return { ok: false, reason: extractAxiosError(err, 'Failed to add worklog.') };
+        }
+    });
 
     ipcMain.handle('settings:get', async () => {
         const baseUrl = STORE.get('jiraBaseUrl', '');
