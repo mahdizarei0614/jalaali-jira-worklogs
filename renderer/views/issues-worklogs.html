@@ -1,0 +1,182 @@
+<div class="app calendar-app">
+    <div class="section-title">Worklogs Calendar</div>
+    <div class="calendar-meta">
+        <div class="calendar-meta__title" data-calendar-jtitle>—</div>
+        <div class="calendar-meta__hint">Navigate through the calendar to review weekly worklogs in Jalaali.</div>
+    </div>
+    <div class="calendar-surface">
+        <div id="issuesWorklogsCalendar" class="calendar-surface__body" aria-live="polite"></div>
+        <div class="calendar-status" data-calendar-status>Loading…</div>
+    </div>
+    <div class="calendar-footer">
+        <div class="calendar-footer__legend-item">
+            <span class="calendar-footer__swatch calendar-footer__swatch--hours"></span>
+            <span>Aggregated logged hours per day</span>
+        </div>
+        <div class="calendar-footer__legend-item">
+            <span class="calendar-footer__swatch calendar-footer__swatch--count"></span>
+            <span>Number of worklog entries per day</span>
+        </div>
+    </div>
+</div>
+
+<style>
+    .calendar-app{
+        display:flex;
+        flex-direction:column;
+        gap:16px;
+        min-height:100%;
+    }
+    .calendar-meta{
+        display:flex;
+        flex-direction:column;
+        gap:6px;
+    }
+    .calendar-meta__title{
+        font-size:18px;
+        font-weight:700;
+    }
+    .calendar-meta__hint{
+        font-size:12px;
+        color:var(--muted);
+    }
+    .calendar-surface{
+        position:relative;
+        border:1px solid var(--border);
+        border-radius:16px;
+        background:var(--card);
+        padding:12px;
+        box-shadow:0 16px 40px rgba(15,17,21,.08);
+    }
+    .calendar-surface__body{
+        width:100%;
+        min-height:560px;
+    }
+    .calendar-status{
+        position:absolute;
+        inset:12px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        border-radius:12px;
+        background:color-mix(in srgb, var(--card) 88%, transparent);
+        border:1px dashed var(--border);
+        font-weight:600;
+        color:var(--muted);
+        pointer-events:none;
+        transition:opacity .2s ease;
+    }
+    .calendar-status[hidden]{
+        opacity:0;
+        pointer-events:none;
+    }
+    .calendar-footer{
+        display:flex;
+        flex-wrap:wrap;
+        gap:16px;
+        align-items:center;
+        font-size:12px;
+        color:var(--muted);
+    }
+    .calendar-footer__legend-item{
+        display:flex;
+        gap:8px;
+        align-items:center;
+    }
+    .calendar-footer__swatch{
+        width:12px;
+        height:12px;
+        border-radius:50%;
+        display:inline-flex;
+    }
+    .calendar-footer__swatch--hours{ background:var(--accent); }
+    .calendar-footer__swatch--count{ background:var(--yellow); }
+    .calendar-app :where(.fc){
+        font-family:"Rubik","Roboto",-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Inter,system-ui,Arial,sans-serif;
+    }
+    .calendar-app :where(.fc .fc-toolbar.fc-header-toolbar){
+        margin-bottom:18px;
+    }
+    .calendar-app :where(.fc .fc-toolbar-title){
+        font-size:16px;
+        font-weight:700;
+    }
+    .calendar-app :where(.fc .fc-button){
+        border-radius:10px;
+        border:1px solid var(--border);
+        background:var(--soft);
+        color:var(--text);
+        padding:6px 12px;
+        font-weight:600;
+        text-transform:none;
+    }
+    .calendar-app :where(.fc .fc-button-primary:not(:disabled).fc-button-active,
+    .fc .fc-button-primary:not(:disabled):active){
+        background:var(--accent);
+        border-color:var(--accent);
+        color:var(--accent-foreground);
+    }
+    .calendar-app :where(.fc .fc-button-primary:focus-visible){
+        box-shadow:0 0 0 4px var(--focus-ring);
+    }
+    .calendar-app :where(.fc .fc-col-header-cell-cushion){
+        display:flex;
+        flex-direction:column;
+        gap:4px;
+        font-weight:600;
+    }
+    .calendar-app :where(.calendar-day-name){
+        font-size:12px;
+        color:var(--muted);
+    }
+    .calendar-app :where(.calendar-day-date){
+        font-size:14px;
+        font-weight:700;
+        color:var(--text);
+    }
+    .calendar-app :where(.fc .fc-daygrid-day-number){
+        font-weight:700;
+    }
+    .calendar-app :where(.worklog-event-wrapper){
+        background:transparent !important;
+        border:none !important;
+        box-shadow:none !important;
+        padding:0 !important;
+    }
+    .calendar-app :where(.worklog-event-wrapper .fc-event-main){
+        padding:8px 10px;
+        border-radius:10px;
+        border:1px solid var(--border);
+        background:var(--soft);
+    }
+    .worklog-event{
+        display:flex;
+        flex-direction:column;
+        gap:2px;
+        font-size:11px;
+        line-height:1.4;
+        font-weight:600;
+    }
+    .worklog-event__date{
+        font-size:12px;
+    }
+    .worklog-event__hours{
+        color:var(--accent-foreground);
+        background:var(--accent);
+        border-radius:6px;
+        padding:2px 6px;
+        display:inline-flex;
+        align-self:flex-start;
+    }
+    .worklog-event__count{
+        color:var(--muted);
+        font-weight:500;
+        background:var(--chip-yellow);
+        border-radius:6px;
+        padding:2px 6px;
+        align-self:flex-start;
+    }
+    @media (max-width: 960px){
+        .calendar-surface__body{ min-height:420px; }
+    }
+</style>

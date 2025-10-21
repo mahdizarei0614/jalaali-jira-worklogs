@@ -7,6 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100..900;1,100..900&family=Rubik:ital,wght@0,300..900;1,300..900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css">
     <style>
         :root{
             color-scheme: light;
@@ -516,7 +517,22 @@
         </div>
         <hr class="sidebar-divider" />
         <nav class="nav" aria-label="Primary">
-            <button type="button" class="nav-item" data-route="issues" aria-controls="issuesView">Issues</button>
+            <div class="nav-group" data-nav-group="issues" data-nav-depth="0">
+                <button
+                    type="button"
+                    class="nav-group-toggle"
+                    data-nav-toggle="issues"
+                    aria-expanded="false"
+                    aria-controls="navGroupIssues"
+                >
+                    <span class="nav-group-toggle__label">Issues</span>
+                    <span class="nav-group-toggle__icon" aria-hidden="true"></span>
+                </button>
+                <div class="nav-group-content" id="navGroupIssues" data-nav-content="issues" hidden>
+                    <button type="button" class="nav-item" data-route="issues" aria-controls="issuesView" data-nav-parents="issues">Overview</button>
+                    <button type="button" class="nav-item" data-route="issues-worklogs" aria-controls="issuesWorklogsView" data-nav-parents="issues">Worklogs</button>
+                </div>
+            </div>
             <div class="nav-group" data-nav-group="reports" data-nav-depth="0">
                 <button
                     type="button"
@@ -628,6 +644,14 @@
         </section>
 
         <section
+                id="issuesWorklogsView"
+                class="view"
+                data-route-view="issues-worklogs"
+                data-route-title="Worklogs Calendar"
+                data-template="./views/issues-worklogs.html">
+        </section>
+
+        <section
                 id="quarterReportView"
                 class="view"
                 data-route-view="quarter-report"
@@ -673,7 +697,10 @@
     </div>
 </div>
 
-<script src="./theme.js"></script>
-<script src="./renderer.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/moment@2.30.1/min/moment.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/moment-jalaali@0.10.6/build/moment-jalaali.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+<script defer src="./theme.js"></script>
+<script defer src="./renderer.js"></script>
 </body>
 </html>
