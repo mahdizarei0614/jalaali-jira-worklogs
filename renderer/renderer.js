@@ -60,6 +60,7 @@
     const TABLE_FEATURES = new WeakMap();
     const TABLE_FEATURE_STATES = new Set();
     let tableFeatureResizeAttached = false;
+    let SELF_USERNAME = null;
 
     function getAdminTeamsForUser(username) {
         const key = (username || '').trim();
@@ -825,6 +826,7 @@
                 }
                 const self = (who.username || '').trim();
                 if (!self) return;
+                SELF_USERNAME = self;
                 const displayName = (who.raw?.displayName || '').trim() || self;
 
                 const currentSelection = reportStateInstance.getSelection();
@@ -1311,9 +1313,24 @@
         const container = root.querySelector('[data-calendar-container]');
         const calendarEl = root.querySelector('#issuesWorklogsCalendar');
         const messageEl = root.querySelector('[data-calendar-message]');
+        const feedbackEl = root.querySelector('[data-calendar-feedback]');
+        const modalEl = root.querySelector('[data-draft-modal]');
+        const issueSelectEl = modalEl?.querySelector('[data-draft-issue-select]');
+        const commentEl = modalEl?.querySelector('[data-draft-comment]');
+        const confirmBtn = modalEl?.querySelector('[data-draft-confirm]');
+        const cancelBtn = modalEl?.querySelector('[data-draft-cancel]');
+        const statusEl = modalEl?.querySelector('[data-draft-modal-status]');
+        const issueMetaEl = modalEl?.querySelector('[data-draft-issue-meta]');
+        const dateLabelEl = modalEl?.querySelector('[data-draft-date]');
+        const timeLabelEl = modalEl?.querySelector('[data-draft-time]');
+        const durationLabelEl = modalEl?.querySelector('[data-draft-duration]');
+
         if (!container || !calendarEl || !messageEl) {
             console.warn('Issues worklogs view missing required elements.');
             return {};
+        }
+        if (!modalEl || !issueSelectEl || !commentEl || !confirmBtn || !cancelBtn) {
+            console.warn('Issues worklogs draft modal missing required elements.');
         }
 
         const fullCalendarGlobal = window.FullCalendar || null;
@@ -1359,6 +1376,440 @@
         let calendar = null;
         let eventSource = null;
         let lastSelectionKey = null;
+        let lastSelectionUsername = selectionSnapshot?.username || null;
+        let feedbackTimeout = null;
+        let modalEscapeHandler = null;
+        let currentBaseUrl = null;
+
+        const draftState = {
+            event: null,
+            eventId: null,
+            data: null,
+            selection: null,
+            isSaving: false,
+            fetchToken: 0,
+            issuesByKey: new Map()
+        };
+
+        function formatDurationLabel(seconds) {
+            const totalMinutes = Math.max(1, Math.round(Number(seconds || 0) / 60));
+            const hours = Math.floor(totalMinutes / 60);
+            const minutes = totalMinutes % 60;
+            const parts = [];
+            if (hours) parts.push(`${hours}h`);
+            if (minutes) parts.push(`${minutes}m`);
+            if (!parts.length) parts.push('1m');
+            return parts.join(' ');
+        }
+
+        function getDurationSecondsBetween(start, end) {
+            if (!(start instanceof Date) || !(end instanceof Date)) return 60;
+            const diffMs = Math.max(0, end.getTime() - start.getTime());
+            return Math.max(60, Math.round(diffMs / 1000));
+        }
+
+        function cloneDate(value) {
+            if (!(value instanceof Date)) return null;
+            return new Date(value.getTime());
+        }
+
+        function showFeedback(text, type = 'info', options = {}) {
+            if (!feedbackEl) return;
+            const { autoHide = true, duration = 6000 } = options;
+            feedbackEl.textContent = text;
+            if (type) {
+                feedbackEl.dataset.type = type;
+            } else if (feedbackEl.dataset) {
+                delete feedbackEl.dataset.type;
+            }
+            feedbackEl.hidden = false;
+            if (feedbackTimeout) {
+                clearTimeout(feedbackTimeout);
+                feedbackTimeout = null;
+            }
+            if (autoHide) {
+                feedbackTimeout = window.setTimeout(() => {
+                    clearFeedback();
+                }, duration);
+            }
+        }
+
+        function clearFeedback() {
+            if (!feedbackEl) return;
+            feedbackEl.hidden = true;
+            feedbackEl.textContent = '';
+            if (feedbackEl.dataset) {
+                delete feedbackEl.dataset.type;
+            }
+            if (feedbackTimeout) {
+                clearTimeout(feedbackTimeout);
+                feedbackTimeout = null;
+            }
+        }
+
+        function showMessage(text) {
+            messageEl.textContent = text;
+            container.classList.add('is-message-visible');
+        }
+
+        function hideMessage() {
+            container.classList.remove('is-message-visible');
+        }
+
+        function setModalStatus(message, type = 'info') {
+            if (!statusEl) return;
+            if (!message) {
+                statusEl.hidden = true;
+                statusEl.textContent = '';
+                if (statusEl.dataset) {
+                    delete statusEl.dataset.type;
+                }
+                return;
+            }
+            statusEl.textContent = message;
+            statusEl.dataset.type = type;
+            statusEl.hidden = false;
+        }
+
+        function clearModalStatus() {
+            setModalStatus('', null);
+        }
+
+        function updateIssueMeta(issue) {
+            if (!issueMetaEl) return;
+            if (!issue) {
+                issueMetaEl.hidden = true;
+                issueMetaEl.textContent = '';
+                return;
+            }
+            const parts = [];
+            if (issue.status) {
+                parts.push(`Status: ${issue.status}`);
+            }
+            if (Number.isFinite(issue.remainingHours)) {
+                parts.push(`Remaining: ${Number(issue.remainingHours).toFixed(2)}h`);
+            }
+            if (Number.isFinite(issue.estimateHours)) {
+                parts.push(`Estimate: ${Number(issue.estimateHours).toFixed(2)}h`);
+            }
+            if (Array.isArray(issue.sprints) && issue.sprints.length) {
+                parts.push(`Sprint: ${issue.sprints.join(', ')}`);
+            }
+            issueMetaEl.textContent = parts.join(' • ');
+            issueMetaEl.hidden = parts.length === 0;
+        }
+
+        function updateConfirmButtonState() {
+            if (!confirmBtn) return;
+            const hasIssue = issueSelectEl && !issueSelectEl.disabled && issueSelectEl.value;
+            confirmBtn.disabled = !hasIssue || draftState.isSaving;
+        }
+
+        function updateModalSummary() {
+            if (!draftState.selection) {
+                if (dateLabelEl) dateLabelEl.textContent = '';
+                if (timeLabelEl) timeLabelEl.textContent = '';
+                if (durationLabelEl) durationLabelEl.textContent = '';
+                return;
+            }
+            const start = cloneDate(draftState.selection.start);
+            const end = cloneDate(draftState.selection.end || draftState.selection.start);
+            const startMoment = createMoment(start);
+            const endMoment = createMoment(end);
+            if (dateLabelEl) {
+                if (startMoment) {
+                    dateLabelEl.textContent = startMoment.format('jYYYY/jMM/jDD dddd');
+                } else if (start) {
+                    dateLabelEl.textContent = new Intl.DateTimeFormat('fa-IR', { dateStyle: 'full' }).format(start);
+                } else {
+                    dateLabelEl.textContent = '';
+                }
+            }
+            if (timeLabelEl) {
+                if (startMoment && endMoment) {
+                    timeLabelEl.textContent = `${startMoment.format('HH:mm')} – ${endMoment.format('HH:mm')}`;
+                } else if (start && end) {
+                    const timeFormatter = new Intl.DateTimeFormat('fa-IR', { hour: '2-digit', minute: '2-digit' });
+                    timeLabelEl.textContent = `${timeFormatter.format(start)} – ${timeFormatter.format(end)}`;
+                } else {
+                    timeLabelEl.textContent = '';
+                }
+            }
+            if (durationLabelEl) {
+                const seconds = start && end ? getDurationSecondsBetween(start, end) : 60;
+                durationLabelEl.textContent = `Duration: ${formatDurationLabel(seconds)}`;
+            }
+        }
+
+        function resetDraftForm() {
+            if (issueSelectEl) {
+                issueSelectEl.disabled = true;
+                issueSelectEl.innerHTML = '<option value="">Loading issues…</option>';
+                issueSelectEl.value = '';
+            }
+            if (commentEl) {
+                commentEl.value = '';
+            }
+            draftState.issuesByKey = new Map();
+            updateConfirmButtonState();
+            updateIssueMeta(null);
+            clearModalStatus();
+        }
+
+        function openDraftModal() {
+            if (!modalEl) return;
+            modalEl.hidden = false;
+            modalEl.setAttribute('aria-hidden', 'false');
+            if (!modalEscapeHandler) {
+                modalEscapeHandler = (evt) => {
+                    if (evt.key === 'Escape') {
+                        evt.preventDefault();
+                        closeDraftModal({ cancel: true });
+                        clearDraft({ keepFeedback: true });
+                    }
+                };
+                document.addEventListener('keydown', modalEscapeHandler);
+            }
+            if (typeof window.setTimeout === 'function') {
+                window.setTimeout(() => {
+                    issueSelectEl?.focus();
+                }, 50);
+            }
+        }
+
+        function closeDraftModal(options = {}) {
+            if (!modalEl) return;
+            const { cancel = false } = options;
+            modalEl.hidden = true;
+            modalEl.setAttribute('aria-hidden', 'true');
+            if (modalEscapeHandler) {
+                document.removeEventListener('keydown', modalEscapeHandler);
+                modalEscapeHandler = null;
+            }
+            if (cancel) {
+                draftState.selection = null;
+            }
+        }
+
+        async function loadDraftIssues() {
+            if (!issueSelectEl) return;
+            const selection = typeof reportStateInstance.getSelection === 'function'
+                ? reportStateInstance.getSelection()
+                : {};
+            const username = (selection?.username || '').trim();
+            const requestId = ++draftState.fetchToken;
+            issueSelectEl.disabled = true;
+            issueSelectEl.innerHTML = '<option value="">Loading issues…</option>';
+            updateConfirmButtonState();
+            updateIssueMeta(null);
+            setModalStatus('Loading active sprint issues…', 'info');
+            try {
+                if (typeof window.appApi?.getActiveSprintIssues !== 'function') {
+                    throw new Error('API unavailable');
+                }
+                const res = await window.appApi.getActiveSprintIssues({ username });
+                if (draftState.fetchToken !== requestId) {
+                    return;
+                }
+                if (!res?.ok) {
+                    issueSelectEl.innerHTML = '<option value="">No issues available</option>';
+                    issueSelectEl.disabled = true;
+                    setModalStatus(res?.reason || 'Unable to load active sprint issues.', 'error');
+                    updateConfirmButtonState();
+                    return;
+                }
+                const issues = Array.isArray(res.issues) ? res.issues : [];
+                draftState.issuesByKey = new Map(issues.map((issue) => [issue.issueKey, issue]));
+                if (!issues.length) {
+                    issueSelectEl.innerHTML = '<option value="">No active sprint issues found</option>';
+                    issueSelectEl.disabled = true;
+                    setModalStatus('No active sprint issues were found for you.', 'info');
+                } else {
+                    const options = ['<option value="">Select an issue…</option>'];
+                    issues.forEach((issue) => {
+                        const key = escapeHtml(issue.issueKey || '');
+                        const summary = escapeHtml((issue.summary || '').toString());
+                        options.push(`<option value="${key}">${key} — ${summary}</option>`);
+                    });
+                    issueSelectEl.innerHTML = options.join('');
+                    issueSelectEl.disabled = false;
+                    clearModalStatus();
+                }
+                updateConfirmButtonState();
+            } catch (err) {
+                if (draftState.fetchToken !== requestId) return;
+                console.error('Failed to load active sprint issues', err);
+                issueSelectEl.innerHTML = '<option value="">Unable to load issues</option>';
+                issueSelectEl.disabled = true;
+                setModalStatus('Unable to load active sprint issues.', 'error');
+                updateConfirmButtonState();
+            }
+        }
+
+        function canCreateDraft() {
+            if (!SELF_USERNAME) return false;
+            const selection = typeof reportStateInstance.getSelection === 'function'
+                ? reportStateInstance.getSelection()
+                : {};
+            const username = (selection?.username || '').trim();
+            return Boolean(username) && username === SELF_USERNAME;
+        }
+
+        function setDraftSaving(flag) {
+            draftState.isSaving = !!flag;
+            if (draftState.event) {
+                draftState.event.setExtendedProp('isDraftSaving', draftState.isSaving);
+            }
+            updateConfirmButtonState();
+        }
+
+        function clearDraft(options = {}) {
+            const { keepFeedback = false } = options;
+            draftState.fetchToken += 1;
+            if (draftState.event) {
+                try {
+                    draftState.event.remove();
+                } catch (err) {
+                    console.warn('Failed to remove draft event', err);
+                }
+            }
+            draftState.event = null;
+            draftState.eventId = null;
+            draftState.data = null;
+            draftState.selection = null;
+            draftState.isSaving = false;
+            draftState.issuesByKey = new Map();
+            if (!keepFeedback) {
+                clearFeedback();
+            }
+            closeDraftModal({ cancel: true });
+            updateConfirmButtonState();
+            updateIssueMeta(null);
+            updateModalSummary();
+        }
+
+        function updateDraftEventProps(event, issue, comment) {
+            if (!event) return;
+            const start = event.start ? cloneDate(event.start) : null;
+            const end = event.end ? cloneDate(event.end) : start;
+            const durationSeconds = start && end ? getDurationSecondsBetween(start, end) : 60;
+            const durationText = formatDurationLabel(durationSeconds);
+            const issueKey = issue?.issueKey || draftState.data?.issueKey || '';
+            const summary = issue?.summary || draftState.data?.issue?.summary || '';
+            const status = issue?.status ?? draftState.data?.issue?.status ?? null;
+            const remainingHours = Number.isFinite(issue?.remainingHours)
+                ? issue.remainingHours
+                : Number.isFinite(draftState.data?.issue?.remainingHours)
+                    ? draftState.data.issue.remainingHours
+                    : null;
+            const estimateHours = Number.isFinite(issue?.estimateHours)
+                ? issue.estimateHours
+                : Number.isFinite(draftState.data?.issue?.estimateHours)
+                    ? draftState.data.issue.estimateHours
+                    : null;
+            event.setExtendedProp('isDraft', true);
+            event.setExtendedProp('issueKey', issueKey);
+            event.setExtendedProp('summary', summary);
+            event.setExtendedProp('comment', comment || '');
+            event.setExtendedProp('durationSeconds', durationSeconds);
+            event.setExtendedProp('durationText', durationText);
+            event.setExtendedProp('status', status);
+            event.setExtendedProp('remainingHours', remainingHours);
+            event.setExtendedProp('estimateHours', estimateHours);
+            event.setExtendedProp('issueUrl', currentBaseUrl ? buildIssueUrl(currentBaseUrl, issueKey) : null);
+            event.setExtendedProp('isDraftSaving', draftState.isSaving);
+            if (!Array.isArray(event.classNames) || !event.classNames.includes('calendar-event--draft')) {
+                const existing = Array.isArray(event.classNames) ? event.classNames : [];
+                event.setProp('classNames', [...new Set([...existing, 'calendar-event--draft'])]);
+            }
+        }
+
+        function handleDraftEventChange(event) {
+            if (!event?.extendedProps?.isDraft) {
+                return;
+            }
+            draftState.selection = {
+                start: cloneDate(event.start),
+                end: cloneDate(event.end || event.start)
+            };
+            const issue = draftState.data?.issue || draftState.issuesByKey.get(draftState.data?.issueKey) || null;
+            updateDraftEventProps(event, issue, draftState.data?.comment || '');
+            updateModalSummary();
+        }
+
+        async function handleDraftConfirm() {
+            if (!draftState.event || !draftState.data) return;
+            if (draftState.isSaving) return;
+            const event = draftState.event;
+            const start = event.start ? cloneDate(event.start) : null;
+            const end = event.end ? cloneDate(event.end) : start;
+            if (!start || !end) {
+                showFeedback('Unable to determine the selected time range.', 'error');
+                return;
+            }
+            const issueKey = draftState.data.issueKey;
+            if (!issueKey) {
+                showFeedback('No issue is associated with this draft.', 'error');
+                return;
+            }
+            const selection = typeof reportStateInstance.getSelection === 'function'
+                ? reportStateInstance.getSelection()
+                : {};
+            const username = (selection?.username || '').trim();
+            if (!username) {
+                showFeedback('Select a user first.', 'error');
+                return;
+            }
+            if (typeof window.appApi?.addWorklog !== 'function') {
+                showFeedback('Worklog API is unavailable.', 'error');
+                return;
+            }
+            const durationSeconds = getDurationSecondsBetween(start, end);
+            setDraftSaving(true);
+            try {
+                const res = await window.appApi.addWorklog({
+                    issueKey,
+                    comment: draftState.data.comment || '',
+                    start: start.toISOString(),
+                    durationSeconds,
+                    username
+                });
+                if (!res?.ok) {
+                    setDraftSaving(false);
+                    showFeedback(res?.reason || 'Failed to add worklog.', 'error', { autoHide: false });
+                    return;
+                }
+                showFeedback('Worklog added successfully. Refreshing…', 'success');
+                clearDraft({ keepFeedback: true });
+                await reportStateInstance.refresh({ force: true });
+            } catch (err) {
+                console.error('Failed to add worklog', err);
+                setDraftSaving(false);
+                showFeedback('Failed to add worklog. Please try again.', 'error', { autoHide: false });
+            }
+        }
+
+        function handleDraftCancel() {
+            clearDraft();
+            showFeedback('Draft discarded.', 'info');
+        }
+
+        function handleCalendarSelect(selectionInfo) {
+            const cal = ensureCalendar();
+            cal.unselect();
+            if (!canCreateDraft()) {
+                showFeedback('Worklog drafts are only available for your own user.', 'error');
+                return;
+            }
+            clearDraft({ keepFeedback: true });
+            const start = cloneDate(selectionInfo.start);
+            const end = cloneDate(selectionInfo.end || selectionInfo.start);
+            draftState.selection = { start, end };
+            updateModalSummary();
+            resetDraftForm();
+            openDraftModal();
+            loadDraftIssues();
+        }
 
         function ensureCalendar() {
             if (calendar) return calendar;
@@ -1378,7 +1829,14 @@
                 titleFormat: () => '',
                 datesSet: (info) => updateToolbarTitle(info.start, info.end),
                 eventContent: (arg) => renderEventContent(arg.event),
-                eventDidMount: (info) => applyEventMetadata(info.el, info.event.extendedProps)
+                eventDidMount: (info) => applyEventMetadata(info.el, info.event.extendedProps),
+                selectable: true,
+                selectMirror: true,
+                selectOverlap: true,
+                editable: false,
+                select: handleCalendarSelect,
+                eventDrop: (info) => handleDraftEventChange(info.event),
+                eventResize: (info) => handleDraftEventChange(info.event)
             });
             calendar.render();
             updateToolbarTitle(calendar.view.currentStart, calendar.view.currentEnd);
@@ -1416,6 +1874,9 @@
 
         function renderEventContent(event) {
             const props = event.extendedProps || {};
+            if (props.isDraft) {
+                return renderDraftEventContent(event, props);
+            }
             const pieces = [];
             if (props.issueKey) {
                 const issueLabel = escapeHtml(props.issueKey);
@@ -1443,11 +1904,63 @@
             return { html };
         }
 
+        function renderDraftEventContent(event, props) {
+            const eventId = escapeHtml(event.id || 'draft');
+            const issueKey = props.issueKey ? escapeHtml(props.issueKey) : 'Draft';
+            const summaryHtml = props.summary ? `<span class="calendar-event__summary">${escapeHtml(props.summary)}</span>` : '';
+            const issueLabel = props.issueUrl
+                ? `<a href="${escapeHtml(props.issueUrl)}" data-issue-url="${escapeHtml(props.issueUrl)}" class="calendar-event__issue" target="_blank" rel="noreferrer noopener">${issueKey}</a>`
+                : `<span class="calendar-event__issue">${issueKey}</span>`;
+            const metaParts = [];
+            if (props.durationText) metaParts.push(escapeHtml(props.durationText));
+            if (props.status) metaParts.push(escapeHtml(props.status));
+            if (Number.isFinite(props.remainingHours)) {
+                metaParts.push(escapeHtml(`Remaining ${Number(props.remainingHours).toFixed(2)}h`));
+            }
+            if (Number.isFinite(props.estimateHours)) {
+                metaParts.push(escapeHtml(`Estimate ${Number(props.estimateHours).toFixed(2)}h`));
+            }
+            const metaHtml = metaParts.length
+                ? `<div class="calendar-event__draft-meta">${metaParts.join('<span class="calendar-event__separator">•</span>')}</div>`
+                : '';
+            const commentText = props.comment
+                ? escapeHtml(props.comment.toString().replace(/\r?\n/g, ' '))
+                : '';
+            const commentHtml = commentText
+                ? `<div class="calendar-event__draft-comment">${commentText}</div>`
+                : '';
+            const disabledAttr = props.isDraftSaving ? ' disabled' : '';
+            const html = `
+                <div class="calendar-event__content calendar-event__content--draft">
+                    <div class="calendar-event__draft-main">
+                        <div class="calendar-event__draft-summary">
+                            <span class="calendar-event__draft-badge">Draft</span>
+                            ${issueLabel}
+                            ${summaryHtml}
+                        </div>
+                        ${metaHtml}
+                        ${commentHtml}
+                    </div>
+                    <div class="calendar-event__draft-actions" data-draft-actions data-draft-event-id="${eventId}">
+                        <button type="button" class="calendar-event__draft-button calendar-event__draft-button--confirm" data-draft-action="confirm"${disabledAttr} title="Add worklog">✓</button>
+                        <button type="button" class="calendar-event__draft-button" data-draft-action="cancel"${disabledAttr} title="Discard draft">✕</button>
+                    </div>
+                </div>
+            `;
+            return { html };
+        }
+
         function applyEventMetadata(el, props = {}) {
+            if (!el) return;
             const tooltipParts = [];
-            if (props.jalaaliDate) tooltipParts.push(props.jalaaliDate);
-            if (props.timeSpent) tooltipParts.push(props.timeSpent);
-            if (props.comment) tooltipParts.push(props.comment);
+            if (props.isDraft) {
+                if (props.durationText) tooltipParts.push(props.durationText);
+                if (props.comment) tooltipParts.push(props.comment);
+            } else {
+                if (props.jalaaliDate) tooltipParts.push(props.jalaaliDate);
+                if (props.timeSpent) tooltipParts.push(props.timeSpent);
+                if (props.comment) tooltipParts.push(props.comment);
+            }
             if (tooltipParts.length) {
                 el.setAttribute('title', tooltipParts.join('\n'));
             }
@@ -1460,18 +1973,8 @@
             return `${jYear}-${jMonth}`;
         }
 
-        function showMessage(text) {
-            messageEl.textContent = text;
-            container.classList.add('is-message-visible');
-        }
-
-        function hideMessage() {
-            container.classList.remove('is-message-visible');
-        }
-
         function clearEvents() {
-            if (!calendar) return;
-            if (eventSource) {
+            if (calendar && eventSource) {
                 try {
                     eventSource.remove();
                 } catch (err) {
@@ -1479,7 +1982,9 @@
                 }
                 eventSource = null;
             }
-            calendar.removeAllEvents();
+            if (draftState.event) {
+                clearDraft({ keepFeedback: true });
+            }
         }
 
         function setEvents(events) {
@@ -1493,7 +1998,6 @@
                     }
                     eventSource = null;
                 }
-                cal.removeAllEvents();
                 if (Array.isArray(events) && events.length) {
                     eventSource = cal.addEventSource(events);
                 }
@@ -1541,13 +2045,133 @@
             }).filter(Boolean);
         }
 
+        if (issueSelectEl) {
+            issueSelectEl.addEventListener('change', () => {
+                const issue = draftState.issuesByKey.get(issueSelectEl.value) || null;
+                if (!draftState.data) {
+                    draftState.data = {
+                        issueKey: issue?.issueKey || issueSelectEl.value,
+                        issue,
+                        comment: commentEl?.value || ''
+                    };
+                } else {
+                    draftState.data.issueKey = issue?.issueKey || issueSelectEl.value;
+                    draftState.data.issue = issue;
+                }
+                updateIssueMeta(issue);
+                updateConfirmButtonState();
+            });
+        }
+        if (commentEl) {
+            commentEl.addEventListener('input', () => {
+                if (!draftState.data) {
+                    draftState.data = { issueKey: issueSelectEl?.value || '', issue: draftState.issuesByKey.get(issueSelectEl?.value) || null, comment: commentEl.value || '' };
+                } else {
+                    draftState.data.comment = commentEl.value || '';
+                }
+                if (draftState.event) {
+                    const issue = draftState.data.issue || draftState.issuesByKey.get(draftState.data.issueKey) || null;
+                    updateDraftEventProps(draftState.event, issue, draftState.data.comment);
+                }
+            });
+        }
+        if (confirmBtn) {
+            confirmBtn.addEventListener('click', () => {
+                if (!issueSelectEl || issueSelectEl.disabled || !issueSelectEl.value) {
+                    setModalStatus('Please select an issue to continue.', 'error');
+                    return;
+                }
+                const issue = draftState.issuesByKey.get(issueSelectEl.value) || null;
+                draftState.data = {
+                    issueKey: issue?.issueKey || issueSelectEl.value,
+                    issue,
+                    comment: commentEl?.value || ''
+                };
+                if (!draftState.selection) {
+                    const cal = ensureCalendar();
+                    const viewStart = cal?.view?.currentStart ? cloneDate(cal.view.currentStart) : new Date();
+                    draftState.selection = {
+                        start: viewStart,
+                        end: new Date(viewStart.getTime() + 3600000)
+                    };
+                }
+                const cal = ensureCalendar();
+                const start = cloneDate(draftState.selection.start);
+                const end = cloneDate(draftState.selection.end || draftState.selection.start);
+                if (!draftState.event) {
+                    const eventId = `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                    draftState.event = cal.addEvent({
+                        id: eventId,
+                        start,
+                        end,
+                        allDay: false,
+                        display: 'block',
+                        editable: true,
+                        startEditable: true,
+                        durationEditable: true,
+                        classNames: ['calendar-event--draft'],
+                        extendedProps: { isDraft: true }
+                    });
+                    draftState.eventId = eventId;
+                } else {
+                    draftState.event.setDates(start, end, { maintainDuration: false });
+                }
+                updateDraftEventProps(draftState.event, draftState.data.issue, draftState.data.comment);
+                closeDraftModal();
+                showFeedback('Draft created. Adjust the block as needed, then confirm to log your work.', 'info', { autoHide: false });
+            });
+        }
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', () => {
+                closeDraftModal({ cancel: true });
+                clearDraft();
+            });
+        }
+        if (modalEl) {
+            modalEl.addEventListener('click', (evt) => {
+                if (evt.target && evt.target.matches('[data-draft-modal-close]')) {
+                    evt.preventDefault();
+                    closeDraftModal({ cancel: true });
+                    clearDraft();
+                }
+            });
+        }
+
+        container.addEventListener('click', (evt) => {
+            const actionBtn = evt.target.closest('[data-draft-action]');
+            if (!actionBtn) return;
+            evt.preventDefault();
+            evt.stopPropagation();
+            const wrap = actionBtn.closest('[data-draft-actions]');
+            const eventId = wrap?.getAttribute('data-draft-event-id');
+            if (!eventId || !draftState.event || draftState.event.id !== eventId) {
+                return;
+            }
+            const action = actionBtn.getAttribute('data-draft-action');
+            if (action === 'confirm') {
+                handleDraftConfirm();
+            } else if (action === 'cancel') {
+                handleDraftCancel();
+            }
+        });
+
         showMessage('Select a user and month to see worklogs.');
 
         reportStateInstance.subscribe((state) => {
             const selection = state?.selection || {};
             const selectionKey = selectionKeyOf(selection);
+            const selectionUsername = (selection?.username || '').trim() || null;
+
+            if (selectionUsername !== lastSelectionUsername) {
+                lastSelectionUsername = selectionUsername;
+                if (selectionUsername !== SELF_USERNAME) {
+                    clearDraft({ keepFeedback: true });
+                }
+            }
+
             if (selectionKey && selectionKey !== lastSelectionKey) {
                 lastSelectionKey = selectionKey;
+                clearDraft({ keepFeedback: true });
                 const targetMoment = createMoment(`${selection.jYear}/${selection.jMonth}/1`, 'jYYYY/jM/jD');
                 if (targetMoment) {
                     const cal = ensureCalendar();
@@ -1559,12 +2183,14 @@
             }
 
             if (!selectionKey || !selection?.username) {
+                currentBaseUrl = null;
                 clearEvents();
                 showMessage('Select a user and month to see worklogs.');
                 return;
             }
 
             if (state.isFetching && !state.result) {
+                currentBaseUrl = null;
                 clearEvents();
                 showMessage('Loading…');
                 return;
@@ -1572,12 +2198,14 @@
 
             const res = state.result;
             if (!res || !res.ok) {
+                currentBaseUrl = null;
                 clearEvents();
                 const message = res ? (res.reason || 'Unable to load worklogs.') : 'No data yet.';
                 showMessage(message);
                 return;
             }
 
+            currentBaseUrl = res.baseUrl || null;
             const events = buildEvents(res.worklogs, res.baseUrl);
             if (!events.length) {
                 clearEvents();
@@ -1586,6 +2214,10 @@
             }
 
             setEvents(events);
+            if (draftState.event) {
+                const issue = draftState.data?.issue || draftState.issuesByKey.get(draftState.data?.issueKey) || null;
+                updateDraftEventProps(draftState.event, issue, draftState.data?.comment || '');
+            }
             hideMessage();
         });
 

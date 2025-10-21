@@ -1,9 +1,42 @@
 <div class="app">
     <div class="section-title">Worklogs Calendar</div>
     <div class="calendar-area" data-calendar-container>
+        <div class="calendar-area__feedback" data-calendar-feedback role="alert" hidden></div>
         <div id="issuesWorklogsCalendar" class="calendar-area__grid"></div>
         <div class="calendar-message" data-calendar-message role="status" aria-live="polite">
             Select a user and month to see worklogs.
+        </div>
+    </div>
+    <div class="calendar-draft-modal" data-draft-modal hidden aria-hidden="true">
+        <div class="calendar-draft-modal__backdrop" data-draft-modal-close></div>
+        <div class="calendar-draft-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="calendarDraftTitle">
+            <div class="calendar-draft-modal__header">
+                <h2 id="calendarDraftTitle">Draft worklog</h2>
+                <button type="button" class="calendar-draft-modal__close" data-draft-modal-close aria-label="Close">×</button>
+            </div>
+            <div class="calendar-draft-modal__body">
+                <div class="calendar-draft-modal__status" data-draft-modal-status hidden></div>
+                <div class="calendar-draft-modal__row">
+                    <label for="calendarDraftIssue">Issue</label>
+                    <select id="calendarDraftIssue" data-draft-issue-select disabled>
+                        <option value="">Loading issues…</option>
+                    </select>
+                </div>
+                <div class="calendar-draft-modal__row" data-draft-issue-meta hidden></div>
+                <div class="calendar-draft-modal__row">
+                    <label for="calendarDraftComment">Comment</label>
+                    <textarea id="calendarDraftComment" data-draft-comment rows="4" placeholder="Optional"></textarea>
+                </div>
+                <div class="calendar-draft-modal__summary" data-draft-summary>
+                    <span data-draft-date></span>
+                    <span data-draft-time></span>
+                    <span data-draft-duration></span>
+                </div>
+            </div>
+            <div class="calendar-draft-modal__footer">
+                <button type="button" class="btn" data-draft-cancel>Cancel</button>
+                <button type="button" class="btn btn-primary" data-draft-confirm disabled>Continue</button>
+            </div>
         </div>
     </div>
 </div>

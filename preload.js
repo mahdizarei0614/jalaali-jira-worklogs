@@ -15,4 +15,6 @@ contextBridge.exposeInMainWorld('appApi', {
     whoami: () => ipcRenderer.invoke('auth:whoami'),
     openExternal: (url) => ipcRenderer.invoke('app:open-external', { url }),
     exportFullReport: (payload) => ipcRenderer.invoke('reports:full-export', payload),
+    getActiveSprintIssues: (payload) => ipcRenderer.invoke('issues:active-sprint', payload),
+    addWorklog: (payload) => ipcRenderer.invoke('worklogs:add', payload),
 });
