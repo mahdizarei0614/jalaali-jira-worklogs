@@ -48,6 +48,9 @@
             --tooltip-bg:rgba(17,17,17,.95);
             --tooltip-text:#ffffff;
             --tooltip-underline:rgba(0,0,0,.2);
+            --calendar-event-bg:#e6f0ff;
+            --calendar-event-border:#c3d8ff;
+            --calendar-event-hours:#0a3f7d;
         }
         :root[data-theme="dark"]{
             color-scheme: dark;
@@ -88,6 +91,9 @@
             --tooltip-bg:rgba(12,17,29,.92);
             --tooltip-text:#f9fbff;
             --tooltip-underline:rgba(229,233,240,.4);
+            --calendar-event-bg:#0a172d;
+            --calendar-event-border:#1b2f53;
+            --calendar-event-hours:#d6e4ff;
         }
         *{box-sizing:border-box; margin: 0; padding: 0}
         html,body{height:100%}
@@ -457,12 +463,22 @@
             font-weight:600;
         }
         .calendar-event__hours{
-            color:var(--muted);
-            font-weight:600;
+            color:var(--calendar-event-hours);
+            font-weight:700;
         }
         .calendar-event__separator{
             color:var(--muted);
             font-weight:500;
+        }
+        [data-calendar-container] .fc-event,
+        [data-calendar-container] .fc-timegrid-event,
+        [data-calendar-container] .fc-daygrid-event{
+            background:var(--calendar-event-bg);
+            border:1px solid var(--calendar-event-border);
+            color:var(--text);
+        }
+        [data-calendar-container] .fc-event-main{
+            padding:6px 8px;
         }
         [data-calendar-container] .fc-timegrid-slot{
             height:48px;
