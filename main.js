@@ -123,6 +123,16 @@
         return h;
     }
 
+    async function getJiraAuthContext() {
+        const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
+        const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
+        if (!baseUrl || !token) {
+            return { ok: false, reason: 'Missing Jira base URL or token.' };
+        }
+        const headers = buildHeaders(baseUrl, token);
+        return { ok: true, baseUrl, token, headers };
+    }
+
     const DEFAULT_SEARCH_FIELDS = [
         'key',
         'summary',
@@ -420,6 +430,47 @@
         return normalized.map(({ updatedMs, ...rest }) => rest);
     }
 
+    async function fetchActiveSprintIssues({ baseUrl, headers, username }) {
+        if (!baseUrl || !username) {
+            return [];
+        }
+        const jql = `assignee = "${username}" AND sprint in openSprints() ORDER BY updated DESC`;
+        const fields = [
+            'key',
+            'summary',
+            'status',
+            'timetracking',
+            'timeoriginalestimate',
+            'timeestimate',
+            'timespent',
+            'aggregatetimeestimate',
+            'aggregatetimespent',
+            'aggregatetimeoriginalestimate',
+            'project'
+        ].join(',');
+
+        const issues = await searchIssuesPaged(baseUrl, headers, jql, fields);
+
+        return issues
+            .map((issue) => {
+                const key = issue?.key || '';
+                if (!key) return null;
+                const fieldsData = issue?.fields ?? {};
+                const times = extractTimeTracking(issue);
+                return {
+                    issueKey: key,
+                    summary: fieldsData.summary || '',
+                    status: fieldsData.status?.name || null,
+                    estimateHours: secsToHours(times.originalSeconds),
+                    loggedHours: secsToHours(times.spentSeconds),
+                    remainingHours: secsToHours(times.remainingSeconds),
+                    projectKey: fieldsData.project?.key || null,
+                    projectName: fieldsData.project?.name || null
+                };
+            })
+            .filter(Boolean);
+    }
+
     async function fetchIssuesDueThisMonth({ baseUrl, headers, username, start, end }) {
         function normalizeYMD(value) {
             if (!value) return null;
@@ -513,6 +564,43 @@
             startAt += got;
         }
         return collected;
+    }
+
+    function formatWorklogStarted(start) {
+        if (!start) return null;
+        const m = moment(start);
+        if (!m.isValid()) return null;
+        return m.format('YYYY-MM-DDTHH:mm:ss.SSSZZ');
+    }
+
+    function buildWorklogCommentDoc(text) {
+        const raw = (text ?? '').toString();
+        if (!raw.trim()) {
+            return {
+                type: 'doc',
+                version: 1,
+                content: [{ type: 'paragraph', content: [] }]
+            };
+        }
+        const lines = raw.split(/\r?\n/);
+        const content = [];
+        lines.forEach((line, idx) => {
+            const trimmed = line.replace(/\s+$/g, '');
+            if (trimmed) {
+                content.push({ type: 'text', text: trimmed });
+            }
+            if (idx < lines.length - 1) {
+                content.push({ type: 'hardBreak' });
+            }
+        });
+        if (!content.length) {
+            content.push({ type: 'text', text: raw.trim() });
+        }
+        return {
+            type: 'doc',
+            version: 1,
+            content: [{ type: 'paragraph', content }]
+        };
     }
 
     async function whoAmI() {
@@ -968,6 +1056,86 @@
     });
     app.on('window-all-closed', (e) => { if (process.platform !== 'darwin') e.preventDefault(); });
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+
+    ipcMain.handle('jira:active-sprint-issues', async (_evt, payload) => {
+        const username = (payload?.username || '').trim();
+        const auth = await getJiraAuthContext();
+        if (!auth.ok) {
+            return auth;
+        }
+        const who = await whoAmI();
+        if (!who?.ok) {
+            return { ok: false, reason: who?.reason || 'Unable to determine current user.' };
+        }
+        const selfUser = (who.username || '').trim();
+        if (!username || username !== selfUser) {
+            return { ok: false, reason: 'You can only view active sprint issues for your own user.' };
+        }
+        try {
+            const issues = await fetchActiveSprintIssues({ baseUrl: auth.baseUrl, headers: auth.headers, username });
+            return { ok: true, issues };
+        } catch (err) {
+            const reason = err?.response?.status
+                ? `${err.response.status} ${err.response.statusText}`
+                : (err?.message || 'Failed to load active sprint issues.');
+            return { ok: false, reason };
+        }
+    });
+
+    ipcMain.handle('jira:create-worklog', async (_evt, payload) => {
+        const issueKey = (payload?.issueKey || '').trim();
+        const started = payload?.started;
+        const seconds = Number(payload?.timeSpentSeconds);
+        const comment = (payload?.comment || '').toString();
+        const username = (payload?.username || '').trim();
+
+        const auth = await getJiraAuthContext();
+        if (!auth.ok) {
+            return auth;
+        }
+
+        const who = await whoAmI();
+        if (!who?.ok) {
+            return { ok: false, reason: who?.reason || 'Unable to determine current user.' };
+        }
+        const selfUser = (who.username || '').trim();
+        if (!selfUser || !username || selfUser !== username) {
+            return { ok: false, reason: 'You can only add worklogs for your own user.' };
+        }
+        if (!issueKey) {
+            return { ok: false, reason: 'Missing issue key.' };
+        }
+        const startedFormatted = formatWorklogStarted(started);
+        if (!startedFormatted) {
+            return { ok: false, reason: 'Invalid start time provided.' };
+        }
+        if (!Number.isFinite(seconds)) {
+            return { ok: false, reason: 'Invalid worklog duration.' };
+        }
+        const timeSpentSeconds = Math.max(60, Math.round(seconds));
+        const body = {
+            started: startedFormatted,
+            timeSpentSeconds
+        };
+        if (comment && comment.trim()) {
+            body.comment = buildWorklogCommentDoc(comment.trim());
+        }
+
+        try {
+            const { data } = await axios.post(
+                `${auth.baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}/worklog`,
+                body,
+                { headers: auth.headers }
+            );
+            return { ok: true, worklogId: data?.id || data?.worklogId || null };
+        } catch (err) {
+            const reason = err?.response?.data?.errorMessages?.join(', ')
+                ?? err?.response?.statusText
+                ?? err?.message
+                ?? 'Failed to add worklog.';
+            return { ok: false, reason };
+        }
+    });
 
     ipcMain.handle('views:load', async (_evt, relPath) => {
         if (typeof relPath !== 'string') {
