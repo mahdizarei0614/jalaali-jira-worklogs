@@ -52,6 +52,9 @@
             --calendar-event-border:#c2d8ff;
             --calendar-event-text:#0f1115;
             --calendar-event-hours:#0a2a66;
+            --calendar-event-new-bg:#daf5e7;
+            --calendar-event-new-border:#a7e0c0;
+            --calendar-event-new-shadow:rgba(12, 90, 46, .12);
         }
         :root[data-theme="dark"]{
             color-scheme: dark;
@@ -96,6 +99,9 @@
             --calendar-event-border:#1e315b;
             --calendar-event-text:#f3f6ff;
             --calendar-event-hours:#d8e4ff;
+            --calendar-event-new-bg:#103026;
+            --calendar-event-new-border:#1f5a41;
+            --calendar-event-new-shadow:rgba(16, 120, 78, .32);
         }
         *{box-sizing:border-box; margin: 0; padding: 0}
         html,body{height:100%}
@@ -474,6 +480,11 @@
         [data-calendar-container] .fc .fc-timegrid-event .fc-event-main{
             color:var(--calendar-event-text);
         }
+        [data-calendar-container] .calendar-event--new{
+            background:var(--calendar-event-new-bg);
+            border-color:var(--calendar-event-new-border);
+            box-shadow:0 6px 18px var(--calendar-event-new-shadow);
+        }
         .calendar-draft-event{
             display:flex;
             flex-direction:column;
@@ -484,12 +495,14 @@
             gap:6px;
             flex-wrap:wrap;
             align-items:flex-start;
-            justify-content:space-between;
+            justify-content:flex-start;
+            position:relative;
         }
         .calendar-draft-event__title{
             display:flex;
             flex-direction:column;
             gap:2px;
+            padding-right:48px;
         }
         .calendar-draft-event__issue{
             font-size:13px;
@@ -520,6 +533,9 @@
             display:flex;
             gap:8px;
             align-items:center;
+            position:absolute;
+            top:0;
+            right:0;
         }
         .calendar-draft-event__action{
             border:none;
