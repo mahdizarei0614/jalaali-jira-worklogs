@@ -1435,7 +1435,7 @@
                 const html = `
                     <div class="calendar-day-header">
                         <span class="calendar-day-header__name">${escapeHtml(m.format('dddd'))}</span>
-                        <span class="calendar-day-header__date">${escapeHtml(m.format('jD'))}</span>
+                        <span class="calendar-day-header__date">${escapeHtml(m.format('D'))}</span>
                     </div>
                 `;
                 return { html };
@@ -1450,7 +1450,7 @@
             const startMoment = createMoment(start);
             const endMoment = createMoment(end)?.subtract(1, 'day');
             if (startMoment && endMoment) {
-                titleEl.textContent = `${startMoment.format('jYYYY jMMMM jD')} — ${endMoment.format('jYYYY jMMMM jD')}`;
+                titleEl.textContent = `${startMoment.format('YYYY MMMM D')} — ${endMoment.format('YYYY MMMM D')}`;
                 return;
             }
             const formatter = new Intl.DateTimeFormat('fa-IR', { dateStyle: 'medium' });
