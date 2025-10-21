@@ -1335,11 +1335,35 @@
         const commentInput = root.querySelector('[data-worklog-comment]');
         const confirmBtn = root.querySelector('[data-worklog-confirm]');
         const cancelBtn = root.querySelector('[data-worklog-cancel]');
+        const logOutput = root.querySelector('[data-worklog-log]');
 
         if (!container || !calendarEl || !messageEl || !modal || !issueSelect || !commentInput || !confirmBtn || !cancelBtn) {
             console.warn('Issues worklogs view missing required elements.');
             return {};
         }
+
+        function renderWorklogLog(content) {
+            if (!logOutput) return;
+            if (content == null) {
+                logOutput.textContent = '';
+                logOutput.hidden = true;
+                return;
+            }
+            let text;
+            if (typeof content === 'string') {
+                text = content;
+            } else {
+                try {
+                    text = JSON.stringify(content, null, 2);
+                } catch (err) {
+                    text = String(content);
+                }
+            }
+            logOutput.textContent = text;
+            logOutput.hidden = false;
+        }
+
+        renderWorklogLog(null);
 
         const getSelfUser = typeof userSelectCtx?.getSelfUser === 'function'
             ? () => (userSelectCtx.getSelfUser() || '').trim()
@@ -1999,6 +2023,7 @@
             }
             try {
                 setDraftStage(event, 'submitting');
+                renderWorklogLog({ status: 'pending', message: 'Submitting worklog…' });
                 const payload = {
                     issueKey,
                     started: start.toISOString(),
@@ -2008,11 +2033,23 @@
                 };
                 const res = await window.appApi.createWorklog(payload);
                 if (!res?.ok) {
-                    throw new Error(res?.reason || 'Failed to add worklog.');
+                    if (res?.log) {
+                        renderWorklogLog(res.log);
+                    } else {
+                        renderWorklogLog({ success: false, message: res?.reason || 'Failed to add worklog.' });
+                    }
+                    const errObj = new Error(res?.reason || 'Failed to add worklog.');
+                    if (res?.log) errObj.log = res.log;
+                    throw errObj;
                 }
                 const newWorklogId = res?.worklogId ?? null;
                 if (newWorklogId != null) {
                     recentlyCreatedWorklogIds.add(String(newWorklogId));
+                }
+                if (res?.log) {
+                    renderWorklogLog(res.log);
+                } else {
+                    renderWorklogLog({ success: true, message: 'Worklog added successfully.' });
                 }
                 setFeedback('Worklog added successfully. Refreshing data…', { variant: 'success', timeout: 5000 });
                 clearPendingDraft({ silent: true });
@@ -2020,6 +2057,11 @@
                 await reportStateInstance.refresh({ force: true });
             } catch (err) {
                 console.error('Failed to submit worklog', err);
+                if (err?.log) {
+                    renderWorklogLog(err.log);
+                } else {
+                    renderWorklogLog({ success: false, message: err?.message || 'Failed to submit worklog.' });
+                }
                 setFeedback(err?.message || 'Failed to submit worklog.', { variant: 'error', timeout: 6000 });
                 setDraftStage(event, 'ready');
             }
