@@ -60,6 +60,113 @@
     const TABLE_FEATURES = new WeakMap();
     const TABLE_FEATURE_STATES = new Set();
     let tableFeatureResizeAttached = false;
+    const externalAssetPromises = new Map();
+
+    function loadExternalStylesheet(id, href) {
+        if (externalAssetPromises.has(id)) {
+            return externalAssetPromises.get(id);
+        }
+        const existing = document.getElementById(id);
+        if (existing) {
+            const resolved = Promise.resolve(existing);
+            externalAssetPromises.set(id, resolved);
+            return resolved;
+        }
+        const link = document.createElement('link');
+        link.id = id;
+        link.rel = 'stylesheet';
+        link.href = href;
+        link.referrerPolicy = 'no-referrer';
+        const promise = new Promise((resolve, reject) => {
+            link.addEventListener('load', () => resolve(link), { once: true });
+            link.addEventListener('error', () => reject(new Error(`Failed to load stylesheet: ${href}`)), { once: true });
+        }).catch((err) => {
+            externalAssetPromises.delete(id);
+            if (link.parentNode) {
+                link.parentNode.removeChild(link);
+            }
+            throw err;
+        });
+        externalAssetPromises.set(id, promise);
+        document.head.appendChild(link);
+        return promise;
+    }
+
+    function loadExternalScript(id, src) {
+        if (externalAssetPromises.has(id)) {
+            return externalAssetPromises.get(id);
+        }
+        const existing = document.getElementById(id);
+        if (existing) {
+            const resolved = Promise.resolve(existing);
+            externalAssetPromises.set(id, resolved);
+            return resolved;
+        }
+        const script = document.createElement('script');
+        script.id = id;
+        script.src = src;
+        script.async = false;
+        script.defer = false;
+        script.referrerPolicy = 'no-referrer';
+        const promise = new Promise((resolve, reject) => {
+            script.addEventListener('load', () => resolve(script), { once: true });
+            script.addEventListener('error', () => reject(new Error(`Failed to load script: ${src}`)), { once: true });
+        }).catch((err) => {
+            externalAssetPromises.delete(id);
+            if (script.parentNode) {
+                script.parentNode.removeChild(script);
+            }
+            throw err;
+        });
+        externalAssetPromises.set(id, promise);
+        document.head.appendChild(script);
+        return promise;
+    }
+
+    const ensureFullCalendar = (() => {
+        let promise = null;
+        return function ensureFullCalendar() {
+            if (promise) {
+                return promise;
+            }
+            promise = (async () => {
+                await loadExternalStylesheet('fullcalendar-style', 'https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.css');
+                if (!window.moment) {
+                    await loadExternalScript('moment-lib', 'https://cdn.jsdelivr.net/npm/moment@2.30.1/min/moment.min.js');
+                }
+                if (!(window.moment && typeof window.moment.fn?.jYear === 'function')) {
+                    await loadExternalScript('moment-jalaali-lib', 'https://cdn.jsdelivr.net/npm/moment-jalaali@0.10.4/build/moment-jalaali.js');
+                }
+                if (window.moment) {
+                    if (typeof window.moment.loadPersian === 'function') {
+                        try {
+                            window.moment.loadPersian({ usePersianDigits: false, dialect: 'persian-modern' });
+                        } catch (err) {
+                            console.warn('Failed to configure Persian locale for moment.', err);
+                        }
+                    }
+                    try {
+                        window.moment.updateLocale('fa', { week: { dow: 6, doy: 12 } });
+                    } catch (err) {
+                        console.warn('Failed to update moment locale configuration.', err);
+                    }
+                    try {
+                        window.moment.locale('en');
+                    } catch (err) {
+                        console.warn('Failed to set default moment locale.', err);
+                    }
+                }
+                if (!window.FullCalendar) {
+                    await loadExternalScript('fullcalendar-lib', 'https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js');
+                }
+                return { FullCalendar: window.FullCalendar, moment: window.moment };
+            })().catch((err) => {
+                promise = null;
+                throw err;
+            });
+            return promise;
+        };
+    })();
 
     function getAdminTeamsForUser(username) {
         const key = (username || '').trim();
@@ -501,6 +608,7 @@
         registerController('detailed-worklogs', (node) => initDetailedWorklogs(node, reportState)),
         registerController('due-issues', (node) => initDueIssues(node, reportState)),
         registerController('issues', (node) => initIssuesReport(node, reportState)),
+        registerController('issues-worklogs', (node) => initIssuesWorklogsCalendar(node, reportState)),
         registerController('quarter-report', (node) => initQuarterReport(node, reportState)),
         registerController('configurations', (node) => initConfigurations(node, reportState, userSelectContext, settingsPromise))
     ]);
@@ -1553,6 +1661,312 @@
             });
             notifyTableUpdate(table);
         });
+
+        return {
+            onShow: () => reportStateInstance.refresh()
+        };
+    }
+
+    function initIssuesWorklogsCalendar(root, reportStateInstance) {
+        if (!root || root.dataset.controllerReady === 'true') return {};
+        root.dataset.controllerReady = 'true';
+
+        const calendarEl = root.querySelector('#issuesWorklogsCalendar');
+        const messageEl = root.querySelector('[data-calendar-message]');
+        const rangeEl = root.querySelector('[data-calendar-range]');
+        const totalHoursEl = root.querySelector('[data-calendar-total-hours]');
+        const prevBtn = root.querySelector('[data-calendar-prev]');
+        const nextBtn = root.querySelector('[data-calendar-next]');
+        const resetBtn = root.querySelector('[data-calendar-reset]');
+
+        if (!calendarEl || !messageEl || !rangeEl || !totalHoursEl) {
+            console.warn('Worklogs calendar view missing required elements.');
+            return {};
+        }
+
+        let calendar = null;
+        let momentLib = null;
+        let latestState = null;
+        let latestSelection = null;
+        let lastSelectionKey = '';
+        let calendarReady = false;
+        let currentWeekStart = null;
+        let activeWorklogs = [];
+
+        const disableControls = (disabled) => {
+            [prevBtn, nextBtn, resetBtn].forEach((btn) => {
+                if (!btn) return;
+                btn.disabled = !!disabled;
+            });
+        };
+        disableControls(true);
+
+        const setMessage = (text) => {
+            if (!messageEl) return;
+            if (text) {
+                messageEl.textContent = text;
+                messageEl.hidden = false;
+            } else {
+                messageEl.textContent = '';
+                messageEl.hidden = true;
+            }
+        };
+
+        const computeWeekStart = (jYear, jMonth, jDay = 1) => {
+            if (!momentLib) return null;
+            const base = momentLib(`${jYear}/${jMonth}/${jDay}`, 'jYYYY/jM/jD', true);
+            if (!base.isValid()) return null;
+            const weekday = base.weekday();
+            const diff = (weekday - 6 + 7) % 7;
+            return base.clone().subtract(diff, 'days').startOf('day');
+        };
+
+        const updateTotals = () => {
+            if (!momentLib || !currentWeekStart) {
+                totalHoursEl.textContent = '—';
+                return;
+            }
+            const start = currentWeekStart.clone().startOf('day');
+            const end = start.clone().add(6, 'day').endOf('day');
+            const total = activeWorklogs.reduce((sum, log) => {
+                if (log.date.isBetween(start, end, 'day', '[]')) {
+                    return sum + log.hours;
+                }
+                return sum;
+            }, 0);
+            totalHoursEl.textContent = total.toFixed(2);
+        };
+
+        const updateRange = () => {
+            if (!momentLib || !currentWeekStart) {
+                rangeEl.textContent = '—';
+                updateTotals();
+                return;
+            }
+            const start = currentWeekStart.clone();
+            const end = currentWeekStart.clone().add(6, 'day');
+            const startLabel = start.clone().locale('fa').format('jD jMMMM jYYYY');
+            const endLabel = end.clone().locale('fa').format('jD jMMMM jYYYY');
+            rangeEl.textContent = `${startLabel} تا ${endLabel}`;
+            if (calendar) {
+                calendar.gotoDate(start.toDate());
+            }
+            updateTotals();
+        };
+
+        const buildEvents = (worklogs) => {
+            if (!momentLib) return [];
+            const events = [];
+            activeWorklogs = [];
+            worklogs.forEach((log, idx) => {
+                const dateMoment = momentLib(log.date, 'YYYY-MM-DD', true);
+                if (!dateMoment.isValid()) return;
+                const hoursRaw = Number.parseFloat(log.hours);
+                const hours = Number.isFinite(hoursRaw) ? hoursRaw : 0;
+                const issueKey = (log.issueKey || '').toString();
+                const summary = (log.summary || '').toString();
+                const comment = (log.comment || '').toString();
+                activeWorklogs.push({
+                    issueKey,
+                    summary,
+                    comment,
+                    hours,
+                    date: dateMoment.clone()
+                });
+                events.push({
+                    id: `wl-${idx}-${log.worklogId || issueKey || dateMoment.format('YYYYMMDD')}`,
+                    title: '',
+                    start: dateMoment.format('YYYY-MM-DD'),
+                    end: dateMoment.clone().add(1, 'day').format('YYYY-MM-DD'),
+                    allDay: true,
+                    extendedProps: {
+                        issueKey,
+                        summary,
+                        comment,
+                        hours,
+                        jalaliDate: dateMoment.clone().locale('fa').format('jD jMMMM jYYYY'),
+                        gregorianDate: dateMoment.format('YYYY-MM-DD')
+                    }
+                });
+            });
+            return events;
+        };
+
+        const applyStateToCalendar = () => {
+            if (!calendarReady || !latestState || !momentLib) {
+                return;
+            }
+            const { selection, result, isFetching } = latestState;
+            const selectionValid = Number.isFinite(selection?.jYear) && Number.isFinite(selection?.jMonth);
+            latestSelection = selectionValid ? { jYear: selection.jYear, jMonth: selection.jMonth } : null;
+
+            if (!selectionValid) {
+                disableControls(true);
+                if (calendar) {
+                    calendar.batchRendering(() => {
+                        calendar.removeAllEvents();
+                    });
+                }
+                activeWorklogs = [];
+                currentWeekStart = null;
+                rangeEl.textContent = '—';
+                totalHoursEl.textContent = '—';
+                setMessage('Select a team member, year, and month to view worklogs on the calendar.');
+                return;
+            }
+
+            const selectionKey = `${selection.jYear}-${selection.jMonth}`;
+            if (selectionKey !== lastSelectionKey || !currentWeekStart) {
+                currentWeekStart = computeWeekStart(selection.jYear, selection.jMonth, 1);
+                lastSelectionKey = selectionKey;
+            }
+
+            if (!result || !result.ok) {
+                if (!result && isFetching) {
+                    setMessage('Loading worklogs…');
+                } else {
+                    setMessage(result?.reason || 'Unable to load worklogs.');
+                }
+                if (calendar) {
+                    calendar.batchRendering(() => {
+                        calendar.removeAllEvents();
+                    });
+                }
+                activeWorklogs = [];
+                updateRange();
+                disableControls(true);
+                return;
+            }
+
+            const worklogs = Array.isArray(result.worklogs) ? result.worklogs : [];
+            if (!worklogs.length) {
+                setMessage('No worklogs recorded for the selected month.');
+            } else {
+                setMessage('');
+            }
+
+            const events = buildEvents(worklogs);
+            if (calendar) {
+                calendar.batchRendering(() => {
+                    calendar.removeAllEvents();
+                    if (events.length) {
+                        calendar.addEventSource(events);
+                    }
+                });
+            }
+            disableControls(false);
+            updateRange();
+        };
+
+        ensureFullCalendar().then(({ FullCalendar, moment }) => {
+            momentLib = moment;
+            calendar = new FullCalendar.Calendar(calendarEl, {
+                initialView: 'dayGridWeek',
+                headerToolbar: false,
+                height: 'auto',
+                firstDay: 6,
+                fixedWeekCount: false,
+                showNonCurrentDates: false,
+                direction: 'rtl',
+                dayHeaderContent: (arg) => {
+                    const dayMoment = moment(arg.date);
+                    const jalali = dayMoment.clone().locale('fa');
+                    const container = document.createElement('div');
+                    container.className = 'calendar-day-header';
+                    const weekdayEl = document.createElement('span');
+                    weekdayEl.className = 'calendar-day-header__weekday';
+                    weekdayEl.textContent = jalali.format('dddd');
+                    const dateEl = document.createElement('span');
+                    dateEl.className = 'calendar-day-header__date';
+                    dateEl.textContent = `${jalali.format('jD')} ${jalali.format('jMMMM')}`;
+                    container.appendChild(weekdayEl);
+                    container.appendChild(dateEl);
+                    return { domNodes: [container] };
+                },
+                eventContent: (arg) => {
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'worklog-event';
+                    const title = document.createElement('div');
+                    title.className = 'worklog-event__title';
+                    const issueKey = arg.event.extendedProps.issueKey || 'Worklog';
+                    const hours = Number.isFinite(arg.event.extendedProps.hours)
+                        ? `${arg.event.extendedProps.hours.toFixed(2)} h`
+                        : '';
+                    title.textContent = hours ? `${issueKey} • ${hours}` : issueKey;
+                    wrapper.appendChild(title);
+                    const summary = arg.event.extendedProps.summary;
+                    if (summary) {
+                        const summaryEl = document.createElement('div');
+                        summaryEl.className = 'worklog-event__summary';
+                        summaryEl.textContent = summary;
+                        wrapper.appendChild(summaryEl);
+                    }
+                    return { domNodes: [wrapper] };
+                },
+                eventDidMount: (info) => {
+                    const { issueKey, jalaliDate, gregorianDate, hours, comment } = info.event.extendedProps || {};
+                    const parts = [];
+                    if (issueKey) parts.push(`Issue: ${issueKey}`);
+                    if (jalaliDate) {
+                        const greg = gregorianDate ? ` (${gregorianDate})` : '';
+                        parts.push(`Date: ${jalaliDate}${greg}`);
+                    }
+                    if (Number.isFinite(hours)) {
+                        parts.push(`Hours: ${hours.toFixed(2)}`);
+                    }
+                    if (comment) {
+                        parts.push(`Comment: ${comment}`);
+                    }
+                    if (parts.length) {
+                        info.el.setAttribute('title', parts.join('\n'));
+                    }
+                }
+            });
+            calendar.render();
+            calendarReady = true;
+            applyStateToCalendar();
+        }).catch((err) => {
+            console.error('Failed to initialise worklogs calendar.', err);
+            setMessage('Unable to load the calendar. Please check your internet connection and try again.');
+            disableControls(true);
+        });
+
+        reportStateInstance.subscribe((state) => {
+            latestState = state;
+            if (calendarReady) {
+                applyStateToCalendar();
+            }
+        });
+
+        const shiftWeek = (delta) => {
+            if (!momentLib) return;
+            if (!currentWeekStart) {
+                if (latestSelection) {
+                    currentWeekStart = computeWeekStart(latestSelection.jYear, latestSelection.jMonth, 1);
+                } else {
+                    return;
+                }
+            }
+            currentWeekStart = currentWeekStart.clone().add(delta, 'week');
+            updateRange();
+        };
+
+        if (prevBtn) {
+            prevBtn.addEventListener('click', () => shiftWeek(-1));
+        }
+        if (nextBtn) {
+            nextBtn.addEventListener('click', () => shiftWeek(1));
+        }
+        if (resetBtn) {
+            resetBtn.addEventListener('click', () => {
+                if (!latestSelection) return;
+                const resetStart = computeWeekStart(latestSelection.jYear, latestSelection.jMonth, 1);
+                if (resetStart) {
+                    currentWeekStart = resetStart;
+                    updateRange();
+                }
+            });
+        }
 
         return {
             onShow: () => reportStateInstance.refresh()

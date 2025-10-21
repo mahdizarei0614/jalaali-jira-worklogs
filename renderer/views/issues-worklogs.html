@@ -1,0 +1,21 @@
+<div class="app">
+    <div class="section-title">Worklogs Calendar</div>
+    <div class="calendar-card">
+        <div class="calendar-toolbar">
+            <div class="calendar-range" data-calendar-range>—</div>
+            <div class="calendar-toolbar__metrics">
+                <div class="calendar-metric">
+                    <span class="calendar-metric__label">Logged hours this week</span>
+                    <span class="calendar-metric__value" data-calendar-total-hours>—</span>
+                </div>
+            </div>
+            <div class="calendar-toolbar__controls">
+                <button type="button" class="btn btn-outline" data-calendar-prev disabled>Prev Week</button>
+                <button type="button" class="btn btn-outline" data-calendar-reset disabled>This Month</button>
+                <button type="button" class="btn btn-outline" data-calendar-next disabled>Next Week</button>
+            </div>
+        </div>
+        <div id="issuesWorklogsCalendar" class="worklogs-calendar"></div>
+        <p class="calendar-message" data-calendar-message hidden>Select a team member, year, and month to view worklogs on the calendar.</p>
+    </div>
+</div>

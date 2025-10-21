@@ -397,6 +397,84 @@
 
         .table-wrap.small{ max-height:42vh; overflow:auto; }
 
+        .calendar-card{
+            margin-top:12px;
+            border:1px solid var(--border);
+            border-radius:16px;
+            background:var(--card);
+            box-shadow:0 6px 24px rgba(0,0,0,.04);
+            padding:16px;
+            display:flex;
+            flex-direction:column;
+            gap:12px;
+        }
+        .calendar-toolbar{
+            display:flex;
+            flex-wrap:wrap;
+            gap:12px;
+            align-items:center;
+            justify-content:space-between;
+        }
+        .calendar-toolbar__controls{ display:flex; gap:8px; }
+        .calendar-toolbar__metrics{
+            display:flex;
+            gap:16px;
+            align-items:center;
+            flex-wrap:wrap;
+        }
+        .calendar-metric{
+            display:flex;
+            flex-direction:column;
+            gap:2px;
+            font-size:12px;
+            color:var(--muted);
+        }
+        .calendar-metric__value{
+            font-size:16px;
+            font-weight:700;
+            color:var(--text);
+        }
+        .calendar-range{ font-weight:600; }
+        .calendar-message{
+            font-size:13px;
+            color:var(--muted);
+            margin-top:4px;
+        }
+        .worklogs-calendar{
+            border-radius:12px;
+            overflow:hidden;
+        }
+        .worklogs-calendar .fc{
+            --fc-border-color:var(--border);
+            --fc-page-bg-color:var(--card);
+            --fc-neutral-bg-color:var(--soft);
+            --fc-today-bg-color:rgba(0,122,255,.08);
+            --fc-event-bg-color:var(--accent);
+            --fc-event-border-color:var(--accent);
+            --fc-event-text-color:var(--accent-foreground);
+            --fc-more-link-bg-color:var(--accent);
+            --fc-more-link-text-color:var(--accent-foreground);
+        }
+        .worklogs-calendar .fc-scroller{ overflow:hidden !important; }
+        .calendar-day-header{
+            display:flex;
+            flex-direction:column;
+            align-items:center;
+            gap:4px;
+            font-size:12px;
+        }
+        .calendar-day-header__weekday{ font-weight:600; }
+        .calendar-day-header__date{ color:var(--muted); }
+        .worklog-event{
+            display:flex;
+            flex-direction:column;
+            gap:4px;
+            font-size:12px;
+            line-height:1.4;
+        }
+        .worklog-event__title{ font-weight:600; }
+        .worklog-event__summary{ opacity:.85; }
+
         #quarterReportTable td{ vertical-align: top; }
         .quarter-month{ display:flex; flex-direction:column; gap:2px; }
         .quarter-month strong{ font-size:13px; }
@@ -516,7 +594,22 @@
         </div>
         <hr class="sidebar-divider" />
         <nav class="nav" aria-label="Primary">
-            <button type="button" class="nav-item" data-route="issues" aria-controls="issuesView">Issues</button>
+            <div class="nav-group" data-nav-group="issues" data-nav-depth="0">
+                <button
+                    type="button"
+                    class="nav-group-toggle"
+                    data-nav-toggle="issues"
+                    aria-expanded="false"
+                    aria-controls="navGroupIssues"
+                >
+                    <span class="nav-group-toggle__label">Issues</span>
+                    <span class="nav-group-toggle__icon" aria-hidden="true"></span>
+                </button>
+                <div class="nav-group-content" id="navGroupIssues" data-nav-content="issues" hidden>
+                    <button type="button" class="nav-item" data-route="issues" aria-controls="issuesView" data-nav-parents="issues">Assigned Issues</button>
+                    <button type="button" class="nav-item" data-route="issues-worklogs" aria-controls="issuesWorklogsView" data-nav-parents="issues">Worklogs</button>
+                </div>
+            </div>
             <div class="nav-group" data-nav-group="reports" data-nav-depth="0">
                 <button
                     type="button"
@@ -625,6 +718,14 @@
                 data-route-view="issues"
                 data-route-title="Issues"
                 data-template="./views/issues.html">
+        </section>
+
+        <section
+                id="issuesWorklogsView"
+                class="view"
+                data-route-view="issues-worklogs"
+                data-route-title="Worklogs Calendar"
+                data-template="./views/issues-worklogs.html">
         </section>
 
         <section
