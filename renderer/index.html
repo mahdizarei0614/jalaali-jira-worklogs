@@ -475,21 +475,22 @@
             color:var(--calendar-event-text);
         }
         .calendar-draft-event{
+            position:relative;
             display:flex;
             flex-direction:column;
             gap:6px;
+            padding-top:4px;
         }
         .calendar-draft-event__header{
             display:flex;
-            gap:6px;
-            flex-wrap:wrap;
-            align-items:flex-start;
-            justify-content:space-between;
+            flex-direction:column;
+            gap:4px;
         }
         .calendar-draft-event__title{
             display:flex;
             flex-direction:column;
             gap:2px;
+            padding-right:44px;
         }
         .calendar-draft-event__issue{
             font-size:13px;
@@ -517,9 +518,13 @@
             color:var(--muted);
         }
         .calendar-draft-event__actions{
+            position:absolute;
+            top:4px;
+            right:4px;
             display:flex;
             gap:8px;
             align-items:center;
+            z-index:1;
         }
         .calendar-draft-event__action{
             border:none;
@@ -555,6 +560,15 @@
         .calendar-draft-event__action[disabled]{
             opacity:.6;
             cursor:not-allowed;
+        }
+        [data-calendar-container] .calendar-event--new-worklog{
+            background:rgba(52,199,89,.16);
+            border-color:var(--green);
+            box-shadow:0 0 0 rgba(0,0,0,0);
+        }
+        :root[data-theme="dark"] [data-calendar-container] .calendar-event--new-worklog{
+            background:rgba(91,216,145,.24);
+            border-color:var(--green);
         }
         .calendar-day-header{
             display:flex;

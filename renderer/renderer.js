@@ -1583,6 +1583,11 @@
                 }
                 return;
             }
+            if (props.isNewWorklog) {
+                el.classList.add('calendar-event--new-worklog');
+            } else {
+                el.classList.remove('calendar-event--new-worklog');
+            }
             const tooltipParts = [];
             if (props.jalaaliDate) tooltipParts.push(props.jalaaliDate);
             if (props.timeSpent) tooltipParts.push(props.timeSpent);
@@ -1939,6 +1944,51 @@
             }
         }
 
+        function addTemporaryWorklogEvent(event, { worklogId = null, issueKey = '', comment = '' } = {}) {
+            if (!event || !event.start) return;
+            const cal = ensureCalendar();
+            if (!cal) return;
+            const props = event.extendedProps || {};
+            const start = event.start;
+            const end = event.end || event.start;
+            if (!start || !end) return;
+            const hours = computeEventHours(event);
+            const hoursText = formatHours(hours);
+            const summary = props.issueSummary || props.summary || '';
+            const baseIssueKey = issueKey || props.issueKey || '';
+            const issueUrl = props.issueUrl || buildIssueUrl(currentBaseUrl, baseIssueKey);
+            const momentDate = createMoment(start);
+            const jalaaliDate = momentDate ? momentDate.format('jYYYY/jM/jD') : '';
+            const titleParts = [baseIssueKey, summary].filter(Boolean);
+            const fallbackTitle = hoursText ? `${hoursText} h` : 'Worklog';
+            const eventData = {
+                title: titleParts.length ? titleParts.join(' — ') : fallbackTitle,
+                start: new Date(start.getTime()),
+                end: new Date(end.getTime()),
+                allDay: false,
+                classNames: ['calendar-event--new-worklog'],
+                extendedProps: {
+                    issueKey: baseIssueKey,
+                    summary,
+                    comment: comment || (props.comment || '').toString(),
+                    timeSpent: hoursText ? `${hoursText} h` : '',
+                    jalaaliDate,
+                    hours,
+                    hoursText,
+                    issueUrl,
+                    isNewWorklog: true
+                }
+            };
+            if (worklogId) {
+                eventData.id = `new-worklog-${worklogId}`;
+            }
+            const created = cal.addEvent(eventData);
+            if (created) {
+                created.setExtendedProp('isNewWorklog', true);
+                created.setProp('classNames', ['calendar-event--new-worklog']);
+            }
+        }
+
         async function handleDraftSubmit(event) {
             if (!event) return;
             const props = event.extendedProps || {};
@@ -1982,6 +2032,11 @@
                 if (!res?.ok) {
                     throw new Error(res?.reason || 'Failed to add worklog.');
                 }
+                addTemporaryWorklogEvent(event, {
+                    worklogId: res?.worklogId || null,
+                    issueKey,
+                    comment: payload.comment
+                });
                 setFeedback('Worklog added successfully. Refreshing data…', { variant: 'success', timeout: 5000 });
                 clearPendingDraft({ silent: true });
                 closeModal({ discard: false, silent: true });
@@ -2000,6 +2055,10 @@
             if (pendingDraft === event) {
                 pendingDraft = null;
                 closeModal({ discard: false, silent: true });
+            }
+            const cal = ensureCalendar();
+            if (cal && typeof cal.unselect === 'function') {
+                cal.unselect();
             }
             setFeedback('Pending worklog discarded.', { variant: 'warning', timeout: 4000 });
         }
