@@ -2,6 +2,8 @@
     const $ = (selector, root = document) => root.querySelector(selector);
     const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
+    const currentUser = { username: null, displayName: null };
+
     const GITHUB_USER = 'mahdizarei0614';
     const GITHUB_REPO = 'jira-worklogs-electron';
 
@@ -826,6 +828,8 @@
                 const self = (who.username || '').trim();
                 if (!self) return;
                 const displayName = (who.raw?.displayName || '').trim() || self;
+                currentUser.username = self;
+                currentUser.displayName = displayName;
 
                 const currentSelection = reportStateInstance.getSelection();
                 const adminTeams = getAdminTeamsForUser(self);
@@ -1360,6 +1364,20 @@
         let eventSource = null;
         let lastSelectionKey = null;
 
+        const DRAFT_EVENT_ID = 'draft-worklog';
+        let draftEvent = null;
+        let draftState = { issueKey: '', comment: '', isSubmitting: false, errorMessage: '' };
+        let draftUi = null;
+        let sprintIssues = [];
+        let sprintIssuesLoading = false;
+        let sprintIssuesError = null;
+        let sprintIssuesPromise = null;
+        let calendarInteractionEnabled = false;
+
+        function getSelfUsername() {
+            return (currentUser.username || '').trim();
+        }
+
         function ensureCalendar() {
             if (calendar) return calendar;
             calendar = new CalendarCtor(calendarEl, {
@@ -1378,11 +1396,54 @@
                 titleFormat: () => '',
                 datesSet: (info) => updateToolbarTitle(info.start, info.end),
                 eventContent: (arg) => renderEventContent(arg.event),
-                eventDidMount: (info) => applyEventMetadata(info.el, info.event.extendedProps)
+                eventDidMount: (info) => {
+                    if (info.event.extendedProps?.isDraft) {
+                        initDraftEvent(info.el, info.event);
+                    } else {
+                        applyEventMetadata(info.el, info.event.extendedProps);
+                    }
+                },
+                selectable: true,
+                selectMirror: true,
+                editable: true,
+                eventResizableFromStart: true,
+                selectAllow: () => calendarInteractionEnabled,
+                select: (info) => handleCalendarSelect(info),
+                eventAllow: (_dropInfo, draggedEvent) => {
+                    if (draggedEvent?.extendedProps?.isDraft) {
+                        return calendarInteractionEnabled;
+                    }
+                    return false;
+                },
+                eventChange: (changeInfo) => {
+                    if (changeInfo.event?.extendedProps?.isDraft) {
+                        ensureDraftMinimumDuration();
+                        refreshDraftUi();
+                    }
+                }
             });
             calendar.render();
             updateToolbarTitle(calendar.view.currentStart, calendar.view.currentEnd);
+            updateCalendarInteractionOptions(calendar);
             return calendar;
+        }
+
+        function updateCalendarInteractionOptions(cal) {
+            if (!cal) return;
+            cal.setOption('selectable', calendarInteractionEnabled);
+            cal.setOption('editable', calendarInteractionEnabled);
+        }
+
+        function updateCalendarInteractionState(enabled) {
+            const next = Boolean(enabled);
+            const changed = calendarInteractionEnabled !== next;
+            calendarInteractionEnabled = next;
+            updateCalendarInteractionOptions(calendar);
+            if (!calendarInteractionEnabled) {
+                removeDraftEvent();
+            } else if (changed) {
+                ensureActiveSprintIssues();
+            }
         }
 
         function formatDayHeader(date) {
@@ -1414,8 +1475,53 @@
             titleEl.textContent = `${formatter.format(start)} — ${formatter.format(inclusiveEnd)}`;
         }
 
+        function formatDraftTimeRange(start, end) {
+            const startMoment = createMoment(start);
+            const endMoment = createMoment(end);
+            if (startMoment && endMoment) {
+                return `${startMoment.format('HH:mm')} — ${endMoment.format('HH:mm')}`;
+            }
+            const formatter = new Intl.DateTimeFormat('fa-IR', { hour: '2-digit', minute: '2-digit', hour12: false });
+            return `${formatter.format(start)} — ${formatter.format(end)}`;
+        }
+
+        function formatDraftDuration(start, end) {
+            if (!(start instanceof Date) || !(end instanceof Date)) return '';
+            const ms = Math.max(0, end.getTime() - start.getTime());
+            const minutes = Math.max(1, Math.round(ms / 60000));
+            const hours = Math.floor(minutes / 60);
+            const remaining = minutes % 60;
+            if (hours > 0 && remaining > 0) return `${hours}h ${remaining}m`;
+            if (hours > 0) return `${hours}h`;
+            return `${minutes}m`;
+        }
+
         function renderEventContent(event) {
             const props = event.extendedProps || {};
+            if (props.isDraft) {
+                const root = document.createElement('div');
+                root.className = 'calendar-event__content calendar-event__content--draft';
+                root.innerHTML = `
+                    <div class="calendar-draft__header">
+                        <span class="calendar-draft__time" data-draft-time-range></span>
+                        <span class="calendar-draft__duration" data-draft-duration></span>
+                    </div>
+                    <label class="calendar-draft__field">
+                        <span class="calendar-draft__label">Issue</span>
+                        <select class="calendar-draft__select" data-draft-issue></select>
+                    </label>
+                    <label class="calendar-draft__field">
+                        <span class="calendar-draft__label">Comment</span>
+                        <textarea class="calendar-draft__textarea" data-draft-comment placeholder="Worklog comment (optional)"></textarea>
+                    </label>
+                    <div class="calendar-draft__actions">
+                        <button type="button" class="calendar-draft__btn calendar-draft__btn--ghost" data-draft-cancel>Cancel</button>
+                        <button type="button" class="calendar-draft__btn calendar-draft__btn--primary" data-draft-submit>Log work</button>
+                    </div>
+                    <div class="calendar-draft__error" data-draft-error hidden></div>
+                `;
+                return { domNodes: [root] };
+            }
             const pieces = [];
             if (props.issueKey) {
                 const issueLabel = escapeHtml(props.issueKey);
@@ -1444,6 +1550,7 @@
         }
 
         function applyEventMetadata(el, props = {}) {
+            if (props.isDraft) return;
             const tooltipParts = [];
             if (props.jalaaliDate) tooltipParts.push(props.jalaaliDate);
             if (props.timeSpent) tooltipParts.push(props.timeSpent);
@@ -1469,7 +1576,306 @@
             container.classList.remove('is-message-visible');
         }
 
+        function ensureDraftMinimumDuration() {
+            if (!draftEvent) return;
+            const start = draftEvent.start;
+            let end = draftEvent.end;
+            if (!start) return;
+            if (!end || end <= start) {
+                end = new Date(start.getTime() + 15 * 60 * 1000);
+                draftEvent.setDates(start, end, { keepDuration: false });
+            }
+        }
+
+        function updateDraftTimeDisplay() {
+            if (!draftUi || !draftEvent) return;
+            const start = draftEvent.start;
+            const end = draftEvent.end || start;
+            if (draftUi.timeRange) {
+                draftUi.timeRange.textContent = formatDraftTimeRange(start, end);
+            }
+            if (draftUi.duration) {
+                draftUi.duration.textContent = formatDraftDuration(start, end);
+            }
+        }
+
+        function setDraftError(message) {
+            draftState.errorMessage = message ? String(message) : '';
+            if (draftUi?.error) {
+                if (draftState.errorMessage) {
+                    draftUi.error.textContent = draftState.errorMessage;
+                    draftUi.error.hidden = false;
+                } else {
+                    draftUi.error.textContent = '';
+                    draftUi.error.hidden = true;
+                }
+            }
+        }
+
+        function updateDraftIssueOptions() {
+            if (!draftUi?.issueSelect) return;
+            const select = draftUi.issueSelect;
+            const previous = draftState.issueKey;
+            select.innerHTML = '';
+            if (sprintIssuesLoading) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = 'Loading issues…';
+                select.appendChild(opt);
+                select.disabled = true;
+            } else if (sprintIssuesError) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = 'Unable to load active sprint issues';
+                select.appendChild(opt);
+                select.disabled = true;
+            } else {
+                const placeholder = document.createElement('option');
+                placeholder.value = '';
+                placeholder.textContent = sprintIssues.length ? 'Select issue…' : 'No active sprint issues';
+                select.appendChild(placeholder);
+                sprintIssues.forEach((issue) => {
+                    const opt = document.createElement('option');
+                    opt.value = issue.key;
+                    opt.textContent = issue.summary
+                        ? `${issue.key} — ${issue.summary}`
+                        : issue.key;
+                    select.appendChild(opt);
+                });
+                if (!previous && sprintIssues.length === 1) {
+                    draftState.issueKey = sprintIssues[0].key;
+                }
+            }
+            select.value = draftState.issueKey || '';
+        }
+
+        function refreshDraftUi() {
+            if (!draftUi) return;
+            updateDraftTimeDisplay();
+            updateDraftIssueOptions();
+            if (draftUi.issueSelect) {
+                draftUi.issueSelect.disabled = draftState.isSubmitting
+                    || sprintIssuesLoading
+                    || Boolean(sprintIssuesError)
+                    || sprintIssues.length === 0;
+            }
+            if (draftUi.comment) {
+                if (document.activeElement !== draftUi.comment) {
+                    draftUi.comment.value = draftState.comment;
+                }
+                draftUi.comment.disabled = draftState.isSubmitting;
+            }
+            if (draftUi.submit) {
+                draftUi.submit.disabled = draftState.isSubmitting
+                    || !draftState.issueKey
+                    || Boolean(sprintIssuesError)
+                    || sprintIssues.length === 0;
+                draftUi.submit.textContent = draftState.isSubmitting ? 'Logging…' : 'Log work';
+            }
+            if (draftUi.cancel) {
+                draftUi.cancel.disabled = draftState.isSubmitting;
+            }
+            setDraftError(draftState.errorMessage || sprintIssuesError || '');
+        }
+
+        function initDraftEvent(el) {
+            draftUi = {
+                root: el,
+                content: el.querySelector('.calendar-event__content--draft'),
+                timeRange: el.querySelector('[data-draft-time-range]'),
+                duration: el.querySelector('[data-draft-duration]'),
+                issueSelect: el.querySelector('[data-draft-issue]'),
+                comment: el.querySelector('[data-draft-comment]'),
+                submit: el.querySelector('[data-draft-submit]'),
+                cancel: el.querySelector('[data-draft-cancel]'),
+                error: el.querySelector('[data-draft-error]')
+            };
+            if (draftUi.issueSelect && !draftUi.issueSelect.dataset.bound) {
+                draftUi.issueSelect.addEventListener('change', () => {
+                    draftState.issueKey = draftUi.issueSelect.value || '';
+                    draftState.errorMessage = '';
+                    refreshDraftUi();
+                });
+                draftUi.issueSelect.dataset.bound = 'true';
+            }
+            if (draftUi.comment && !draftUi.comment.dataset.bound) {
+                draftUi.comment.value = draftState.comment;
+                draftUi.comment.addEventListener('input', () => {
+                    draftState.comment = draftUi.comment.value;
+                });
+                draftUi.comment.dataset.bound = 'true';
+            }
+            if (draftUi.submit && !draftUi.submit.dataset.bound) {
+                draftUi.submit.addEventListener('click', () => submitDraftWorklog());
+                draftUi.submit.dataset.bound = 'true';
+            }
+            if (draftUi.cancel && !draftUi.cancel.dataset.bound) {
+                draftUi.cancel.addEventListener('click', () => removeDraftEvent());
+                draftUi.cancel.dataset.bound = 'true';
+            }
+            refreshDraftUi();
+        }
+
+        function removeDraftEvent() {
+            if (draftEvent) {
+                try {
+                    draftEvent.remove();
+                } catch (err) {
+                    console.warn('Failed to remove draft event', err);
+                }
+            }
+            draftEvent = null;
+            draftUi = null;
+            draftState = { issueKey: '', comment: '', isSubmitting: false, errorMessage: '' };
+        }
+
+        function createDraftEvent(start, end) {
+            const cal = ensureCalendar();
+            removeDraftEvent();
+            const safeStart = start instanceof Date ? start : new Date();
+            let safeEnd = end instanceof Date ? end : null;
+            if (!safeEnd || safeEnd <= safeStart) {
+                safeEnd = new Date(safeStart.getTime() + 30 * 60 * 1000);
+            }
+            draftEvent = cal.addEvent({
+                id: DRAFT_EVENT_ID,
+                start: safeStart,
+                end: safeEnd,
+                allDay: false,
+                display: 'block',
+                extendedProps: { isDraft: true }
+            });
+            cal.unselect();
+            ensureDraftMinimumDuration();
+            refreshDraftUi();
+            ensureActiveSprintIssues();
+        }
+
+        function handleCalendarSelect(info) {
+            if (!calendarInteractionEnabled) {
+                return;
+            }
+            const start = info.start ? new Date(info.start.getTime()) : null;
+            const end = info.end ? new Date(info.end.getTime()) : null;
+            if (!start) return;
+            createDraftEvent(start, end);
+        }
+
+        async function ensureActiveSprintIssues(force = false) {
+            if (!calendarInteractionEnabled) return [];
+            if (force) {
+                sprintIssues = [];
+                sprintIssuesError = null;
+                sprintIssuesPromise = null;
+            }
+            if (sprintIssues.length && !force) {
+                return sprintIssues;
+            }
+            if (sprintIssuesPromise) {
+                return sprintIssuesPromise;
+            }
+            if (typeof window.appApi?.fetchActiveSprintIssues !== 'function') {
+                sprintIssues = [];
+                sprintIssuesError = 'Active sprint issues API is unavailable.';
+                refreshDraftUi();
+                return sprintIssues;
+            }
+            sprintIssuesLoading = true;
+            sprintIssuesError = null;
+            refreshDraftUi();
+            const username = getSelfUsername();
+            sprintIssuesPromise = (async () => {
+                try {
+                    const res = await window.appApi.fetchActiveSprintIssues({ username });
+                    if (res?.ok && Array.isArray(res.issues)) {
+                        const unique = new Map();
+                        res.issues.forEach((issue) => {
+                            const key = (issue?.key || '').trim();
+                            if (!key || unique.has(key)) return;
+                            unique.set(key, {
+                                key,
+                                summary: (issue?.summary || '').toString().replace(/\s+/g, ' ').trim()
+                            });
+                        });
+                        sprintIssues = Array.from(unique.values());
+                        sprintIssues.sort((a, b) => a.key.localeCompare(b.key));
+                        sprintIssuesError = null;
+                    } else {
+                        sprintIssues = [];
+                        sprintIssuesError = res?.reason || 'Unable to load active sprint issues.';
+                    }
+                } catch (err) {
+                    sprintIssues = [];
+                    sprintIssuesError = err?.message || 'Unable to load active sprint issues.';
+                } finally {
+                    sprintIssuesLoading = false;
+                    sprintIssuesPromise = null;
+                    refreshDraftUi();
+                }
+                return sprintIssues;
+            })();
+            return sprintIssuesPromise;
+        }
+
+        async function submitDraftWorklog() {
+            if (!draftEvent || typeof window.appApi?.createWorklog !== 'function') {
+                return;
+            }
+            if (sprintIssuesError) {
+                draftState.errorMessage = sprintIssuesError;
+                refreshDraftUi();
+                return;
+            }
+            if (!draftState.issueKey) {
+                draftState.errorMessage = 'Please choose an issue.';
+                refreshDraftUi();
+                return;
+            }
+            const start = draftEvent.start;
+            const end = draftEvent.end || start;
+            if (!(start instanceof Date) || !(end instanceof Date) || end <= start) {
+                draftState.errorMessage = 'Please choose a valid time range.';
+                refreshDraftUi();
+                return;
+            }
+            const durationMs = Math.max(0, end.getTime() - start.getTime());
+            const minutes = Math.max(1, Math.round(durationMs / 60000));
+            const seconds = minutes * 60;
+
+            draftState.isSubmitting = true;
+            draftState.errorMessage = '';
+            refreshDraftUi();
+
+            try {
+                const res = await window.appApi.createWorklog({
+                    issueKey: draftState.issueKey,
+                    started: start.toISOString(),
+                    timeSpentSeconds: seconds,
+                    comment: draftState.comment,
+                    username: getSelfUsername()
+                });
+                if (!res?.ok) {
+                    draftState.errorMessage = res?.reason || 'Failed to add worklog.';
+                    return;
+                }
+                removeDraftEvent();
+                try {
+                    await reportStateInstance.refresh({ force: true });
+                } catch (refreshErr) {
+                    console.error('Failed to refresh report after worklog creation', refreshErr);
+                }
+            } catch (err) {
+                draftState.errorMessage = err?.message || 'Failed to add worklog.';
+            } finally {
+                if (draftState.isSubmitting) {
+                    draftState.isSubmitting = false;
+                    refreshDraftUi();
+                }
+            }
+        }
+
         function clearEvents() {
+            removeDraftEvent();
             if (!calendar) return;
             if (eventSource) {
                 try {
@@ -1485,6 +1891,7 @@
         function setEvents(events) {
             const cal = ensureCalendar();
             cal.batchRendering(() => {
+                removeDraftEvent();
                 if (eventSource) {
                     try {
                         eventSource.remove();
@@ -1498,6 +1905,7 @@
                     eventSource = cal.addEventSource(events);
                 }
             });
+            updateCalendarInteractionOptions(cal);
         }
 
         function buildEvents(worklogs, baseUrl) {
@@ -1527,6 +1935,7 @@
                     start: startMoment.toISOString(),
                     end: endMoment.toISOString(),
                     allDay: false,
+                    editable: false,
                     extendedProps: {
                         issueKey,
                         summary,
@@ -1546,6 +1955,9 @@
         reportStateInstance.subscribe((state) => {
             const selection = state?.selection || {};
             const selectionKey = selectionKeyOf(selection);
+            const isSelfSelection = Boolean(selection?.username && selection.username === getSelfUsername());
+            updateCalendarInteractionState(isSelfSelection);
+
             if (selectionKey && selectionKey !== lastSelectionKey) {
                 lastSelectionKey = selectionKey;
                 const targetMoment = createMoment(`${selection.jYear}/${selection.jMonth}/1`, 'jYYYY/jM/jD');
@@ -1553,6 +1965,7 @@
                     const cal = ensureCalendar();
                     cal.gotoDate(targetMoment.toDate());
                     updateToolbarTitle(cal.view.currentStart, cal.view.currentEnd);
+                    updateCalendarInteractionOptions(cal);
                 }
             } else if (!selectionKey) {
                 lastSelectionKey = null;
@@ -1580,20 +1993,27 @@
 
             const events = buildEvents(res.worklogs, res.baseUrl);
             if (!events.length) {
-                clearEvents();
-                showMessage('No worklogs found for this period.');
+                setEvents([]);
+                if (!calendarInteractionEnabled) {
+                    showMessage('No worklogs found for this period.');
+                } else {
+                    hideMessage();
+                    messageEl.textContent = 'No worklogs found for this period.';
+                }
                 return;
             }
 
             setEvents(events);
             hideMessage();
+            if (calendarInteractionEnabled) {
+                ensureActiveSprintIssues();
+            }
         });
 
         return {
             onShow: () => reportStateInstance.refresh()
         };
     }
-
     function initDueIssues(root, reportStateInstance) {
         if (!root || root.dataset.controllerReady === 'true') return {};
         root.dataset.controllerReady = 'true';

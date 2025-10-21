@@ -420,6 +420,28 @@
         return normalized.map(({ updatedMs, ...rest }) => rest);
     }
 
+    async function fetchActiveSprintIssuesForUser({ baseUrl, headers, username }) {
+        if (!baseUrl || !username) return [];
+
+        const fields = ['key', 'summary'].join(',');
+        const jql = `assignee = "${username}" AND Sprint in openSprints() ORDER BY updated DESC`;
+        const issues = await searchIssuesPaged(baseUrl, headers, jql, fields);
+
+        const unique = new Map();
+        issues.forEach((issue) => {
+            const key = (issue?.key || '').trim();
+            if (!key || unique.has(key)) return;
+            const summary = (issue?.fields?.summary || '').toString().replace(/\s+/g, ' ').trim();
+            unique.set(key, {
+                key,
+                summary,
+                id: issue?.id || null,
+            });
+        });
+
+        return Array.from(unique.values());
+    }
+
     async function fetchIssuesDueThisMonth({ baseUrl, headers, username, start, end }) {
         function normalizeYMD(value) {
             if (!value) return null;
@@ -515,12 +537,7 @@
         return collected;
     }
 
-    async function whoAmI() {
-        const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
-        const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
-        if (!baseUrl || !token) return { ok: false, reason: 'Missing Jira base URL or token.' };
-
-        const headers = buildHeaders(baseUrl, token);
+    async function resolveCurrentUser({ baseUrl, headers }) {
         try {
             const { data } = await axios.get(`${baseUrl}/rest/api/latest/myself`, { headers });
             const username =
@@ -529,21 +546,43 @@
                 data?.accountId ||
                 data?.displayName ||
                 '';
-
+            if (!username) {
+                return { ok: false, reason: 'Unable to determine current user.' };
+            }
             return {
                 ok: true,
                 username,
-                raw: {
-                    name: data?.name,
-                    emailAddress: data?.emailAddress,
-                    accountId: data?.accountId,
-                    displayName: data?.displayName,
-                }
+                raw: data,
             };
-        } catch (e) {
-            const msg = e?.response ? `${e.response.status} ${e.response.statusText}` : (e?.message || 'whoami failed');
-            return { ok: false, reason: msg };
+        } catch (err) {
+            const reason = err?.response
+                ? `${err.response.status} ${err.response.statusText}`
+                : (err?.message || 'Failed to resolve current user.');
+            return { ok: false, reason };
         }
+    }
+
+    async function whoAmI() {
+        const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
+        const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
+        if (!baseUrl || !token) return { ok: false, reason: 'Missing Jira base URL or token.' };
+
+        const headers = buildHeaders(baseUrl, token);
+        const info = await resolveCurrentUser({ baseUrl, headers });
+        if (!info.ok) {
+            return { ok: false, reason: info.reason || 'whoami failed' };
+        }
+
+        return {
+            ok: true,
+            username: info.username,
+            raw: {
+                name: info.raw?.name,
+                emailAddress: info.raw?.emailAddress,
+                accountId: info.raw?.accountId,
+                displayName: info.raw?.displayName,
+            }
+        };
     }
 
     function authorMatches(author, username) {
@@ -565,6 +604,19 @@
         const started = wl.started || '';
         const secs = wl.timeSpentSeconds ?? wl.timeSpentInSeconds ?? 0;
         return `fp:${issueKey}|${a}|${started}|${secs}`;
+    }
+
+    function buildWorklogCommentDocument(text) {
+        const raw = (text ?? '').toString().replace(/\r\n/g, '\n');
+        const lines = raw.split('\n');
+        return {
+            type: 'doc',
+            version: 1,
+            content: lines.map((line) => ({
+                type: 'paragraph',
+                content: line ? [{ type: 'text', text: line }] : [],
+            })),
+        };
     }
 
     function classifyDay({ isWorkday, isFuture, hours }) {
@@ -1087,6 +1139,109 @@
         } catch (err) {
             console.error('Failed to generate full report archive', err);
             return { ok: false, reason: err?.message || 'Unable to generate archive' };
+        }
+    });
+
+    ipcMain.handle('issues:active-sprint', async (_evt, payload) => {
+        const requestedUsername = typeof payload?.username === 'string'
+            ? payload.username.trim()
+            : '';
+        const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
+        const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
+        if (!baseUrl || !token) {
+            return { ok: false, reason: 'Missing Jira base URL or token.' };
+        }
+
+        const headers = buildHeaders(baseUrl, token);
+        const current = await resolveCurrentUser({ baseUrl, headers });
+        if (!current.ok) {
+            return { ok: false, reason: current.reason || 'Unable to determine current user.' };
+        }
+
+        const selfUsername = (current.username || '').trim();
+        if (!selfUsername) {
+            return { ok: false, reason: 'Unable to determine current user.' };
+        }
+        if (requestedUsername && requestedUsername !== selfUsername) {
+            return { ok: false, reason: 'Active sprint issues are only available for the authenticated user.' };
+        }
+
+        try {
+            const issues = await fetchActiveSprintIssuesForUser({
+                baseUrl,
+                headers,
+                username: selfUsername,
+            });
+            return { ok: true, issues };
+        } catch (err) {
+            const reason = err?.response?.data?.errorMessages?.[0]
+                || (err?.response ? `${err.response.status} ${err.response.statusText}` : (err?.message || 'Unable to load active sprint issues.'));
+            return { ok: false, reason };
+        }
+    });
+
+    ipcMain.handle('worklog:create', async (_evt, payload) => {
+        const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
+        const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
+        if (!baseUrl || !token) {
+            return { ok: false, reason: 'Missing Jira base URL or token.' };
+        }
+
+        const headers = buildHeaders(baseUrl, token);
+        const current = await resolveCurrentUser({ baseUrl, headers });
+        if (!current.ok) {
+            return { ok: false, reason: current.reason || 'Unable to determine current user.' };
+        }
+
+        const selfUsername = (current.username || '').trim();
+        if (!selfUsername) {
+            return { ok: false, reason: 'Unable to determine current user.' };
+        }
+        const requestedUsername = typeof payload?.username === 'string' ? payload.username.trim() : '';
+        if (requestedUsername && requestedUsername !== selfUsername) {
+            return { ok: false, reason: 'Worklogs can only be created for the authenticated user.' };
+        }
+
+        const issueKey = typeof payload?.issueKey === 'string' ? payload.issueKey.trim() : '';
+        if (!issueKey) {
+            return { ok: false, reason: 'Issue key is required.' };
+        }
+
+        const seconds = Number.parseInt(payload?.timeSpentSeconds, 10);
+        if (!Number.isFinite(seconds) || seconds <= 0) {
+            return { ok: false, reason: 'Duration must be greater than zero.' };
+        }
+
+        const startedMoment = moment(payload?.started);
+        if (!startedMoment.isValid()) {
+            return { ok: false, reason: 'Invalid start time.' };
+        }
+
+        const startedFormatted = startedMoment
+            .clone()
+            .utcOffset(TEHRAN_OFFSET_MIN)
+            .format('YYYY-MM-DDTHH:mm:ss.SSSZZ');
+
+        const comment = typeof payload?.comment === 'string' ? payload.comment.trim() : '';
+        const body = {
+            started: startedFormatted,
+            timeSpentSeconds: seconds,
+        };
+        if (comment) {
+            body.comment = buildWorklogCommentDocument(comment);
+        }
+
+        try {
+            const { data } = await axios.post(
+                `${baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}/worklog`,
+                body,
+                { headers }
+            );
+            return { ok: true, worklog: data };
+        } catch (err) {
+            const reason = err?.response?.data?.errorMessages?.[0]
+                || (err?.response ? `${err.response.status} ${err.response.statusText}` : (err?.message || 'Failed to add worklog.'));
+            return { ok: false, reason };
         }
     });
 

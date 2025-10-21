@@ -469,6 +469,13 @@
             gap:6px;
             font-size:12px;
         }
+        .calendar-event__content--draft{
+            width:100%;
+            flex-wrap:nowrap;
+            align-items:stretch;
+            flex-direction:column;
+            gap:8px;
+        }
         .calendar-event__issue{
             color:var(--accent);
             font-weight:700;
@@ -488,6 +495,101 @@
         .calendar-event__separator{
             color:var(--muted);
             font-weight:500;
+        }
+        .calendar-draft__header{
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:8px;
+        }
+        .calendar-draft__time{
+            font-size:12px;
+            font-weight:600;
+        }
+        .calendar-draft__duration{
+            font-size:11px;
+            font-weight:500;
+            color:var(--muted);
+        }
+        .calendar-draft__field{
+            display:flex;
+            flex-direction:column;
+            gap:4px;
+        }
+        .calendar-draft__label{
+            font-size:11px;
+            font-weight:600;
+            color:var(--muted);
+        }
+        .calendar-draft__select,
+        .calendar-draft__textarea{
+            width:100%;
+            border-radius:8px;
+            border:1px solid var(--border);
+            background:var(--input-bg);
+            color:var(--text);
+            font-family:inherit;
+            font-size:12px;
+            padding:6px 8px;
+            transition:border-color .15s ease, box-shadow .15s ease;
+        }
+        .calendar-draft__select:disabled,
+        .calendar-draft__textarea:disabled{
+            opacity:.6;
+            cursor:default;
+        }
+        .calendar-draft__select:focus,
+        .calendar-draft__textarea:focus{
+            outline:none;
+            border-color:var(--accent);
+            box-shadow:0 0 0 3px var(--focus-ring);
+        }
+        .calendar-draft__textarea{
+            resize:vertical;
+            min-height:60px;
+        }
+        .calendar-draft__actions{
+            display:flex;
+            gap:8px;
+            justify-content:flex-end;
+        }
+        .calendar-draft__btn{
+            border:none;
+            border-radius:8px;
+            padding:6px 12px;
+            font-size:12px;
+            font-weight:600;
+            cursor:pointer;
+            transition:background .15s ease, color .15s ease, opacity .15s ease;
+        }
+        .calendar-draft__btn--primary{
+            background:var(--accent);
+            color:var(--accent-foreground);
+        }
+        .calendar-draft__btn--primary:not(:disabled):hover{
+            background:var(--accent-press);
+        }
+        .calendar-draft__btn--primary:disabled{
+            opacity:.6;
+            cursor:default;
+        }
+        .calendar-draft__btn--ghost{
+            background:transparent;
+            color:var(--text);
+            border:1px solid var(--border);
+        }
+        .calendar-draft__btn--ghost:not(:disabled):hover{
+            background:var(--soft);
+        }
+        .calendar-draft__btn--ghost:disabled{
+            opacity:.6;
+            cursor:default;
+        }
+        .calendar-draft__error{
+            font-size:11px;
+            font-weight:500;
+            color:var(--red);
+            text-align:right;
         }
         [data-calendar-container] .fc-timegrid-slot{
             height:48px;
