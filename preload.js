@@ -17,4 +17,5 @@ contextBridge.exposeInMainWorld('appApi', {
     exportFullReport: (payload) => ipcRenderer.invoke('reports:full-export', payload),
     getActiveSprintIssues: (payload) => ipcRenderer.invoke('jira:active-sprint-issues', payload),
     createWorklog: (payload) => ipcRenderer.invoke('jira:create-worklog', payload),
+    getWorklogsRange: (payload) => ipcRenderer.invoke('worklogs:range', payload),
 });

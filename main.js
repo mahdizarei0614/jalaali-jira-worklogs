@@ -95,6 +95,21 @@
         return { start, end };
     }
 
+    function parseToTehranMoment(value) {
+        if (value == null) return moment.invalid();
+        let parsed = moment(value, moment.ISO_8601, true);
+        if (!parsed.isValid()) {
+            parsed = moment(value, 'YYYY-MM-DD', true);
+        }
+        if (!parsed.isValid()) {
+            parsed = moment(value, 'YYYY/MM/DD', true);
+        }
+        if (!parsed.isValid()) {
+            return parsed;
+        }
+        return parsed.utcOffset(TEHRAN_OFFSET_MIN);
+    }
+
     function toAsciiDigits(val) {
         if (val == null) return '';
         const s = String(val);
@@ -679,10 +694,22 @@
         return { jYear, jMonth, source: 'current' };
     }
 
-    async function buildMonthlyReport({ baseUrl, headers, username, jYear, jMonth, nowG, includeDetails = true }) {
-        const { start, end } = jMonthRange(jYear, jMonth);
-        if (!start || !end) {
-            return { ok: false, reason: 'Failed to construct selected Jalaali month range.' };
+    async function collectWorklogsInRange({
+        baseUrl,
+        headers,
+        username,
+        startMoment,
+        endMoment,
+        includeDetails = true
+    }) {
+        if (!startMoment?.isValid() || !endMoment?.isValid()) {
+            return { ok: false, reason: 'Invalid worklog range.' };
+        }
+
+        const start = startMoment.clone().startOf('day');
+        const end = endMoment.clone().endOf('day');
+        if (end.isBefore(start)) {
+            return { ok: false, reason: 'Invalid worklog range.' };
         }
 
         const fromYMD = start.format('YYYY-MM-DD');
@@ -708,13 +735,14 @@
                 seenWorklogKeys.add(key);
 
                 const startedRaw = typeof log.started === 'string' ? log.started : '';
-                const date = startedRaw.split('T')[0];
-                if (!date) continue;
+                if (!startedRaw) continue;
 
-                const dateMoment = moment(date, 'YYYY-MM-DD', true);
-                if (!dateMoment.isValid()) continue;
-                if (dateMoment.isBefore(start, 'day') || dateMoment.isAfter(end, 'day')) continue;
+                const startedMoment = moment(startedRaw);
+                if (!startedMoment.isValid()) continue;
+                const localStarted = startedMoment.clone().utcOffset(TEHRAN_OFFSET_MIN);
+                if (localStarted.isBefore(start) || localStarted.isAfter(end)) continue;
 
+                const date = localStarted.format('YYYY-MM-DD');
                 const hoursRaw = log.timeSpentSeconds ?? log.timeSpentInSeconds ?? 0;
                 const hours = Number.isFinite(hoursRaw) ? hoursRaw / 3600 : 0;
 
@@ -723,35 +751,77 @@
                 dailyTotalsMap[date] = (dailyTotalsMap[date] || 0) + hours;
 
                 if (includeDetails) {
+                    const dateMoment = moment(date, 'YYYY-MM-DD', true);
                     worklogs.push({
                         worklogId: log.id || null,
                         issueKey: issue.key,
                         issueType: issue?.fields?.issuetype?.name || null,
                         summary: issue?.fields?.summary,
                         date,
-                        persianDate: dateMoment.format('jYYYY/jMM/jDD'),
+                        persianDate: dateMoment.isValid() ? dateMoment.format('jYYYY/jMM/jDD') : '',
                         timeSpent: log.timeSpent,
                         hours: +(hours).toFixed(2),
                         comment: log.comment || '',
                         dueDate: issue?.fields?.duedate || null,
-                        status: issue?.fields?.status?.name || null
+                        status: issue?.fields?.status?.name || null,
+                        started: startedMoment.toISOString()
                     });
                 }
             }
+        }
+
+        if (includeDetails) {
+            worklogs.sort((a, b) => {
+                const aMoment = moment(a.started || a.date, moment.ISO_8601, true);
+                const bMoment = moment(b.started || b.date, moment.ISO_8601, true);
+                if (aMoment.isValid() && bMoment.isValid()) {
+                    return aMoment.valueOf() - bMoment.valueOf();
+                }
+                return (a.started || a.date || '').localeCompare(b.started || b.date || '');
+            });
+        }
+
+        return {
+            ok: true,
+            jql,
+            worklogs,
+            totalWorklogs,
+            totalLoggedHours,
+            dailyTotalsMap,
+            fromYMD,
+            toYMD
+        };
+    }
+
+    async function buildMonthlyReport({ baseUrl, headers, username, jYear, jMonth, nowG, includeDetails = true }) {
+        const { start, end } = jMonthRange(jYear, jMonth);
+        if (!start || !end) {
+            return { ok: false, reason: 'Failed to construct selected Jalaali month range.' };
+        }
+
+        const core = await collectWorklogsInRange({
+            baseUrl,
+            headers,
+            username,
+            startMoment: start,
+            endMoment: end,
+            includeDetails
+        });
+        if (!core?.ok) {
+            return core;
         }
 
         let dueIssuesCurrentMonth = [];
         let assignedIssues = [];
 
         if (includeDetails) {
-            worklogs.sort((a, b) => moment(a.date, 'YYYY-MM-DD').diff(moment(b.date, 'YYYY-MM-DD')));
             try {
                 dueIssuesCurrentMonth = await fetchIssuesDueThisMonth({
                     baseUrl,
                     headers,
                     username,
-                    start: fromYMD,
-                    end: toYMD
+                    start: core.fromYMD,
+                    end: core.toYMD
                 });
             } catch (err) {
                 console.error('Failed to fetch due issues for selected month:', err);
@@ -770,13 +840,13 @@
             }
         }
 
-        const dailySummary = Object.entries(dailyTotalsMap)
+        const dailySummary = Object.entries(core.dailyTotalsMap)
             .sort((a, b) => a[0].localeCompare(b[0]))
             .map(([date, hours]) => ({ date, hours: (+hours).toFixed(2) }));
 
         const holidayDays = buildHolidaysSetFromStatic(jYear, jMonth);
         const daysInMonth = mj(jYear, jMonth, 1).endOf('jMonth').jDate();
-        const dailyTotalsForCalendar = { ...dailyTotalsMap };
+        const dailyTotalsForCalendar = { ...core.dailyTotalsMap };
 
         const days = [];
         for (let jDay = 1; jDay <= daysInMonth; jDay++) {
@@ -814,13 +884,13 @@
             jYear,
             jMonth,
             jMonthLabel: mj(jYear, jMonth, 1).format('jYYYY/jMM'),
-            jql,
+            jql: core.jql,
             totalHours,
             expectedByNowHours,
             expectedByEndMonthHours,
             summary: {
-                totalWorklogs,
-                totalHours: (+totalLoggedHours).toFixed(2),
+                totalWorklogs: core.totalWorklogs,
+                totalHours: (+core.totalLoggedHours).toFixed(2),
                 dailySummary
             }
         };
@@ -829,7 +899,7 @@
             const deficits = days.filter(d => d.isWorkday && !d.isFuture && d.hours < 6);
             result.days = days;
             result.deficits = deficits;
-            result.worklogs = worklogs;
+            result.worklogs = core.worklogs;
             result.dueIssuesCurrentMonth = dueIssuesCurrentMonth;
             result.assignedIssues = assignedIssues;
         }
@@ -837,6 +907,37 @@
         result.baseUrl = baseUrl;
 
         return result;
+    }
+
+    async function buildWorklogsRangeReport({ baseUrl, headers, username, from, to }) {
+        const startMoment = parseToTehranMoment(from);
+        const endMoment = parseToTehranMoment(to);
+        if (!startMoment.isValid() || !endMoment.isValid()) {
+            return { ok: false, reason: 'Invalid date range provided.' };
+        }
+
+        const core = await collectWorklogsInRange({
+            baseUrl,
+            headers,
+            username,
+            startMoment,
+            endMoment,
+            includeDetails: true
+        });
+
+        if (!core?.ok) {
+            return core;
+        }
+
+        return {
+            ok: true,
+            baseUrl,
+            range: {
+                from: core.fromYMD,
+                to: core.toYMD
+            },
+            worklogs: core.worklogs
+        };
     }
 
     const SEASONS = [
@@ -1079,6 +1180,29 @@
                 ? `${err.response.status} ${err.response.statusText}`
                 : (err?.message || 'Failed to load active sprint issues.');
             return { ok: false, reason };
+        }
+    });
+
+    ipcMain.handle('worklogs:range', async (_evt, payload) => {
+        const username = (payload?.username || '').trim();
+        if (!username) {
+            return { ok: false, reason: 'No Jira username selected in UI.' };
+        }
+        const auth = await getJiraAuthContext();
+        if (!auth.ok) {
+            return auth;
+        }
+        try {
+            return await buildWorklogsRangeReport({
+                baseUrl: auth.baseUrl,
+                headers: auth.headers,
+                username,
+                from: payload?.from,
+                to: payload?.to
+            });
+        } catch (err) {
+            console.error('Failed to load worklogs for range', err);
+            return { ok: false, reason: err?.message || 'Unable to load worklogs for selected range.' };
         }
     });
 
