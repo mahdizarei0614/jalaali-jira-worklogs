@@ -2197,6 +2197,39 @@
             }).filter(Boolean);
         }
 
+        function logCalendarWorklogs(rawWorklogs, events, { message } = {}) {
+            const rawList = Array.isArray(rawWorklogs) ? rawWorklogs : [];
+            const eventList = Array.isArray(events) ? events : [];
+            const selectionSnapshot = currentSelection ? { ...currentSelection } : {};
+            const payload = {
+                source: 'calendar-data',
+                timestamp: new Date().toISOString(),
+                selection: selectionSnapshot,
+                rawWorklogs: rawList,
+                transformedEvents: eventList
+            };
+            if (message) {
+                payload.message = message;
+            }
+            try {
+                if (typeof console.groupCollapsed === 'function') {
+                    console.groupCollapsed('[Calendar] Worklog data');
+                    console.info('Selection snapshot:', selectionSnapshot);
+                    console.info('Raw worklogs from server:', rawList);
+                    console.info('Transformed calendar events:', eventList);
+                    if (message) {
+                        console.info('Message:', message);
+                    }
+                    console.groupEnd();
+                } else {
+                    console.info('[Calendar] Worklog data', payload);
+                }
+            } catch (err) {
+                console.info('[Calendar] Worklog data', payload);
+            }
+            renderWorklogLog(payload);
+        }
+
         function canShowCalendar(selection) {
             return selectionKeyOf(selection) && selection?.username;
         }
@@ -2240,6 +2273,7 @@
                 closeModal({ discard: false, silent: true });
                 clearEvents();
                 showMessage('Select a user and month to see worklogs.');
+                renderWorklogLog(null);
                 setFeedback(null);
                 return;
             }
@@ -2260,12 +2294,14 @@
             if (!res || !res.ok) {
                 clearEvents();
                 const message = res ? (res.reason || 'Unable to load worklogs.') : 'No data yet.';
+                logCalendarWorklogs(res?.worklogs, [], { message });
                 showMessage(message);
                 return;
             }
 
             currentBaseUrl = res.baseUrl || null;
             const events = buildEvents(res.worklogs, res.baseUrl);
+            logCalendarWorklogs(res.worklogs, events);
             if (!events.length) {
                 clearEvents();
                 showMessage('No worklogs found for this period.');
