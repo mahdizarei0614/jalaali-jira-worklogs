@@ -1365,6 +1365,24 @@
 
         renderWorklogLog(null);
 
+        function logCalendarWorklogs(rawWorklogs, events) {
+            const raw = Array.isArray(rawWorklogs) ? rawWorklogs : [];
+            const calendarEvents = Array.isArray(events) ? events : [];
+            const logPayload = {
+                rawWorklogs: raw,
+                calendarEvents
+            };
+            try {
+                console.groupCollapsed('Issues calendar worklogs');
+                console.log('Raw worklogs from server:', raw);
+                console.log('Transformed calendar events:', calendarEvents);
+                console.groupEnd();
+            } catch (err) {
+                console.warn('Failed to log calendar worklogs', err);
+            }
+            renderWorklogLog(logPayload);
+        }
+
         const getSelfUser = typeof userSelectCtx?.getSelfUser === 'function'
             ? () => (userSelectCtx.getSelfUser() || '').trim()
             : () => '';
@@ -2241,6 +2259,7 @@
                 clearEvents();
                 showMessage('Select a user and month to see worklogs.');
                 setFeedback(null);
+                renderWorklogLog(null);
                 return;
             }
 
@@ -2253,6 +2272,7 @@
             if (state.isFetching && !state.result) {
                 clearEvents();
                 showMessage('Loading…');
+                renderWorklogLog({ status: 'loading' });
                 return;
             }
 
@@ -2260,12 +2280,14 @@
             if (!res || !res.ok) {
                 clearEvents();
                 const message = res ? (res.reason || 'Unable to load worklogs.') : 'No data yet.';
+                renderWorklogLog(null);
                 showMessage(message);
                 return;
             }
 
             currentBaseUrl = res.baseUrl || null;
             const events = buildEvents(res.worklogs, res.baseUrl);
+            logCalendarWorklogs(res.worklogs, events);
             if (!events.length) {
                 clearEvents();
                 showMessage('No worklogs found for this period.');
