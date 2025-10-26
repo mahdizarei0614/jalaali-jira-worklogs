@@ -717,6 +717,8 @@
 
                 const hoursRaw = log.timeSpentSeconds ?? log.timeSpentInSeconds ?? 0;
                 const hours = Number.isFinite(hoursRaw) ? hoursRaw / 3600 : 0;
+                const startedMoment = startedRaw ? moment(startedRaw) : null;
+                const startedTime = startedMoment?.isValid() ? startedMoment.format('HH:mm') : null;
 
                 totalWorklogs += 1;
                 totalLoggedHours += hours;
@@ -729,6 +731,8 @@
                         issueType: issue?.fields?.issuetype?.name || null,
                         summary: issue?.fields?.summary,
                         date,
+                        started: startedRaw || null,
+                        startedTime,
                         persianDate: dateMoment.format('jYYYY/jMM/jDD'),
                         timeSpent: log.timeSpent,
                         hours: +(hours).toFixed(2),

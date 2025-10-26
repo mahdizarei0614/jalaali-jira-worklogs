@@ -1414,6 +1414,8 @@
         let lastSelectionKey = null;
         let currentSelection = selectionSnapshot ? { ...selectionSnapshot } : {};
         let currentBaseUrl = null;
+        let suppressSelectionSync = false;
+        let pendingCalendarSelection = null;
         let pendingDraft = null;
         let feedbackTimer = null;
         let modalOpen = false;
@@ -1438,7 +1440,7 @@
                 eventTimeFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
                 dayHeaderContent: (args) => formatDayHeader(args.date),
                 titleFormat: () => '',
-                datesSet: (info) => updateToolbarTitle(info.start, info.end),
+                datesSet: handleCalendarDatesSet,
                 eventContent: (arg) => renderEventContent(arg.event),
                 eventDidMount: (info) => applyEventMetadata(info.el, info.event),
                 selectable: true,
@@ -1481,6 +1483,46 @@
             const formatter = new Intl.DateTimeFormat('fa-IR', { dateStyle: 'medium' });
             const inclusiveEnd = new Date(end.getTime() - 1);
             titleEl.textContent = `${formatter.format(start)} — ${formatter.format(inclusiveEnd)}`;
+        }
+
+        function handleCalendarDatesSet(info) {
+            if (!info) return;
+            updateToolbarTitle(info.start, info.end);
+            if (!info.view) return;
+            if (suppressSelectionSync) {
+                suppressSelectionSync = false;
+                return;
+            }
+            const currentStart = info.view.currentStart || info.start;
+            if (!currentStart) return;
+            const startMoment = createMoment(currentStart);
+            if (!startMoment) return;
+            const jYear = Number.parseInt(startMoment.format('jYYYY'), 10);
+            const jMonth = Number.parseInt(startMoment.format('jM'), 10);
+            if (!Number.isFinite(jYear) || !Number.isFinite(jMonth)) return;
+
+            const viewType = typeof info.view.type === 'string' ? info.view.type : '';
+            const shouldSync = !viewType || /daygrid|timegrid|list/i.test(viewType);
+            if (!shouldSync) return;
+
+            if (currentSelection?.jYear === jYear && currentSelection?.jMonth === jMonth) {
+                return;
+            }
+
+            if (typeof reportStateInstance?.setSelection === 'function') {
+                const targetKey = `${jYear}-${jMonth}`;
+                pendingCalendarSelection = targetKey;
+                reportStateInstance.setSelection(
+                    { jYear, jMonth },
+                    { pushSelection: true, refresh: true }
+                ).catch((err) => {
+                    console.error('Failed to sync selection from calendar navigation', err);
+                }).finally(() => {
+                    if (pendingCalendarSelection === targetKey) {
+                        pendingCalendarSelection = null;
+                    }
+                });
+            }
         }
 
         function computeEventHours(event) {
@@ -2158,7 +2200,13 @@
             }
             const uniqueWorklogs = Array.from(new Set(worklogs));
             return uniqueWorklogs.map((worklog, idx) => {
-                let startMoment = createMoment(worklog?.date || worklog?.started);
+                let startMoment = null;
+                if (worklog?.started) {
+                    startMoment = createMoment(worklog.started);
+                }
+                if (!startMoment && worklog?.date) {
+                    startMoment = createMoment(worklog.date);
+                }
                 if (!startMoment && worklog?.persianDate) {
                     startMoment = createMoment(worklog.persianDate, 'jYYYY/jM/jD');
                 }
@@ -2188,6 +2236,8 @@
                         comment: (worklog?.comment || '').toString(),
                         timeSpent: worklog?.timeSpent || '',
                         jalaaliDate: worklog?.persianDate || '',
+                        started: worklog?.started || '',
+                        startedTime: worklog?.startedTime || '',
                         hours,
                         hoursText,
                         issueUrl: buildIssueUrl(baseUrl, issueKey),
@@ -2226,10 +2276,20 @@
             if (selectionKey && selectionKey !== lastSelectionKey) {
                 lastSelectionKey = selectionKey;
                 const targetMoment = createMoment(`${currentSelection.jYear}/${currentSelection.jMonth}/1`, 'jYYYY/jM/jD');
-                if (targetMoment) {
+                const isCalendarDriven = pendingCalendarSelection === selectionKey;
+                if (isCalendarDriven) {
+                    pendingCalendarSelection = null;
+                }
+                if (!isCalendarDriven && targetMoment) {
                     const cal = ensureCalendar();
-                    cal.gotoDate(targetMoment.toDate());
-                    updateToolbarTitle(cal.view.currentStart, cal.view.currentEnd);
+                    suppressSelectionSync = true;
+                    try {
+                        cal.gotoDate(targetMoment.toDate());
+                        updateToolbarTitle(cal.view.currentStart, cal.view.currentEnd);
+                    } catch (err) {
+                        suppressSelectionSync = false;
+                        console.error('Failed to sync calendar to selection', err);
+                    }
                 }
             } else if (!selectionKey) {
                 lastSelectionKey = null;
