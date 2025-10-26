@@ -634,9 +634,26 @@
         }
     }
 
+    function normalizeUserIdentifier(value) {
+        if (value == null) return '';
+        return String(value).trim().toLowerCase();
+    }
+
     function authorMatches(author, username) {
         if (!author || !username) return false;
-        return author.name === username || author.emailAddress === username;
+
+        const target = normalizeUserIdentifier(username);
+        if (!target) return false;
+
+        const candidates = [
+            author.accountId,
+            author.name,
+            author.emailAddress,
+            author.key,
+            author.displayName
+        ];
+
+        return candidates.some((candidate) => normalizeUserIdentifier(candidate) === target);
     }
 
     function authorKey(author) {
