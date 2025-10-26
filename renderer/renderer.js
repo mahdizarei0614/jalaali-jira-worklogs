@@ -1426,7 +1426,9 @@
         let activeIssues = [];
         let activeIssueMap = new Map();
         const issuesCache = new Map();
-        const recentlyCreatedWorklogIds = new Set();
+        const recentlyCreatedWorklogIds = new Map();
+        const recentlyCreatedWorklogFingerprints = new Map();
+        let calendarRangeInitialized = false;
 
         function ensureCalendar() {
             if (calendar) return calendar;
@@ -1569,12 +1571,6 @@
                         setEvents(events);
                     }
                     hideMessage();
-                    const visibleIds = new Set(events.map((event) => String(event.id)));
-                    for (const id of Array.from(recentlyCreatedWorklogIds)) {
-                        if (!visibleIds.has(id)) {
-                            recentlyCreatedWorklogIds.delete(id);
-                        }
-                    }
                     return res;
                 })
                 .catch((err) => {
@@ -1605,7 +1601,14 @@
                 const rangeStart = view.currentStart || info.start;
                 const rangeEnd = view.currentEnd || info.end;
                 if (rangeStart && rangeEnd) {
-                    setCalendarRange(rangeStart, rangeEnd);
+                    const rangeChanged = setCalendarRange(rangeStart, rangeEnd);
+                    if (rangeChanged) {
+                        if (calendarRangeInitialized) {
+                            clearRecentlyCreatedWorklogs({ updateEvents: true });
+                        } else {
+                            calendarRangeInitialized = true;
+                        }
+                    }
                     refreshCalendarRange({ force: true });
                 }
             }
@@ -1792,6 +1795,117 @@
             return `${jYear}-${jMonth}`;
         }
 
+        function buildWorklogFingerprint(issueKey, startedIso, timeSpentSeconds) {
+            const key = (issueKey || '').toString().trim().toUpperCase();
+            const start = startedIso ? new Date(startedIso) : null;
+            const normalizedStart = start && Number.isFinite(start.getTime())
+                ? start.toISOString()
+                : '';
+            const duration = Number.isFinite(timeSpentSeconds)
+                ? Math.max(60, Math.round(timeSpentSeconds))
+                : '';
+            if (!key && !normalizedStart) {
+                return '';
+            }
+            return `${key}|${normalizedStart}|${duration}`;
+        }
+
+        function getCurrentSelectionKey() {
+            return selectionKeyOf(currentSelection);
+        }
+
+        function markWorklogAsRecentlyCreated({ id = null, issueKey = '', started = '', timeSpentSeconds = null }) {
+            const selectionKey = getCurrentSelectionKey();
+            const entry = { selectionKey, addedAt: Date.now() };
+            const idString = id != null ? String(id) : null;
+            if (idString != null) {
+                recentlyCreatedWorklogIds.set(idString, entry);
+            }
+            const fingerprint = buildWorklogFingerprint(issueKey, started, timeSpentSeconds);
+            if (fingerprint) {
+                recentlyCreatedWorklogFingerprints.set(fingerprint, entry);
+            }
+            applyRecentlyCreatedHighlight({ id: idString, fingerprint });
+        }
+
+        function isWorklogRecentlyCreated({ id = null, fingerprint = '' }) {
+            const selectionKey = getCurrentSelectionKey();
+            if (id != null) {
+                const entry = recentlyCreatedWorklogIds.get(String(id));
+                if (entry && (!entry.selectionKey || !selectionKey || entry.selectionKey === selectionKey)) {
+                    return true;
+                }
+            }
+            if (fingerprint) {
+                const entry = recentlyCreatedWorklogFingerprints.get(fingerprint);
+                if (entry && (!entry.selectionKey || !selectionKey || entry.selectionKey === selectionKey)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function setEventNewState(event, isNew) {
+            if (!event || event.extendedProps?.isDraft) return;
+            if (typeof event.setExtendedProp === 'function') {
+                event.setExtendedProp('isNew', !!isNew);
+            } else if (event.extendedProps) {
+                event.extendedProps.isNew = !!isNew;
+            }
+            const classNames = Array.isArray(event.classNames)
+                ? [...event.classNames]
+                : (typeof event.getProp === 'function' ? event.getProp('classNames') || [] : []);
+            const hasClass = classNames.includes('calendar-event--new');
+            if (isNew && !hasClass) {
+                classNames.push('calendar-event--new');
+            } else if (!isNew && hasClass) {
+                const idx = classNames.indexOf('calendar-event--new');
+                if (idx >= 0) {
+                    classNames.splice(idx, 1);
+                }
+            }
+            if (typeof event.setProp === 'function') {
+                event.setProp('classNames', classNames);
+            }
+        }
+
+        function clearRecentlyCreatedWorklogs({ updateEvents = false } = {}) {
+            recentlyCreatedWorklogIds.clear();
+            recentlyCreatedWorklogFingerprints.clear();
+            if (updateEvents && calendar && typeof calendar.getEvents === 'function') {
+                calendar.getEvents().forEach((event) => {
+                    if (event?.extendedProps?.isNew) {
+                        setEventNewState(event, false);
+                    }
+                });
+            }
+        }
+
+        function applyRecentlyCreatedHighlight({ id = null, fingerprint = '' } = {}) {
+            if (!calendar || typeof calendar.getEvents !== 'function') return;
+            const idString = id != null ? String(id) : null;
+            const targetFingerprint = fingerprint || '';
+            calendar.getEvents().forEach((event) => {
+                if (!event || event.extendedProps?.isDraft) return;
+                const eventId = event.id != null ? String(event.id) : '';
+                if (idString && eventId === idString) {
+                    setEventNewState(event, true);
+                    return;
+                }
+                if (!targetFingerprint) return;
+                const startedIso = event.extendedProps?.started || (event.start ? event.start.toISOString() : '');
+                const durationSeconds = Math.max(60, Math.round(computeEventHours(event) * 3600));
+                const eventFingerprint = buildWorklogFingerprint(
+                    event.extendedProps?.issueKey || '',
+                    startedIso,
+                    durationSeconds
+                );
+                if (eventFingerprint && eventFingerprint === targetFingerprint) {
+                    setEventNewState(event, true);
+                }
+            });
+        }
+
         function showMessage(text) {
             messageEl.textContent = text;
             container.classList.add('is-message-visible');
@@ -1969,6 +2083,11 @@
                 issuesCache.set(username, entry);
                 return entry;
             }
+        }
+
+        function invalidateIssuesCacheForUser(username) {
+            if (!username) return;
+            issuesCache.delete(username);
         }
 
         function populateIssueOptions(issues, selectedKey = '') {
@@ -2206,9 +2325,13 @@
                     throw errObj;
                 }
                 const newWorklogId = res?.worklogId ?? null;
-                if (newWorklogId != null) {
-                    recentlyCreatedWorklogIds.add(String(newWorklogId));
-                }
+                markWorklogAsRecentlyCreated({
+                    id: newWorklogId,
+                    issueKey,
+                    started: payload.started,
+                    timeSpentSeconds: durationSeconds
+                });
+                invalidateIssuesCacheForUser(currentSelection?.username || '');
                 if (res?.log) {
                     renderWorklogLog(res.log);
                 } else {
@@ -2339,12 +2462,19 @@
                 const hours = Number.isFinite(hoursValue) ? hoursValue : 0;
                 const durationHours = hours > 0 ? hours : 0.25;
                 const endMoment = startMoment.clone().add(durationHours, 'hours');
+                let durationSeconds = Number.parseFloat(worklog?.timeSpentSeconds);
+                if (!Number.isFinite(durationSeconds)) {
+                    durationSeconds = Math.max(60, Math.round(durationHours * 3600));
+                } else {
+                    durationSeconds = Math.max(60, Math.round(durationSeconds));
+                }
                 const summary = (worklog?.summary || '').toString().replace(/\s+/g, ' ').trim();
                 const issueKey = (worklog?.issueKey || '').toString().trim();
                 const titleParts = [issueKey, summary].filter(Boolean);
                 const hoursText = Number.isFinite(hoursValue) ? formatHours(hoursValue) : null;
                 const id = String(worklog?.worklogId ?? worklog?.id ?? `worklog-${idx}`);
-                const isNew = recentlyCreatedWorklogIds.has(id);
+                const fingerprint = buildWorklogFingerprint(issueKey, startMoment.toISOString(), durationSeconds);
+                const isNew = isWorklogRecentlyCreated({ id, fingerprint });
                 return {
                     id,
                     title: titleParts.join(' — ') || (worklog?.persianDate || ''),
@@ -2395,6 +2525,12 @@
         reportStateInstance.subscribe((state) => {
             currentSelection = state?.selection ? { ...state.selection } : {};
             const selectionKey = selectionKeyOf(currentSelection);
+            const selectionChanged = selectionKey && selectionKey !== lastSelectionKey;
+            const selectionCleared = !selectionKey && lastSelectionKey;
+            if (selectionChanged || selectionCleared) {
+                clearRecentlyCreatedWorklogs({ updateEvents: true });
+                calendarRangeInitialized = false;
+            }
             if (selectionKey && selectionKey !== lastSelectionKey) {
                 lastSelectionKey = selectionKey;
                 const targetMoment = createMoment(`${currentSelection.jYear}/${currentSelection.jMonth}/1`, 'jYYYY/jM/jD');
@@ -2420,8 +2556,14 @@
             const username = (currentSelection?.username || '').trim();
             const usernameChanged = username !== lastSelectionUsername;
             lastSelectionUsername = username;
+            if (usernameChanged) {
+                clearRecentlyCreatedWorklogs({ updateEvents: true });
+                calendarRangeInitialized = false;
+            }
 
             if (!canShowCalendar(currentSelection)) {
+                clearRecentlyCreatedWorklogs({ updateEvents: true });
+                calendarRangeInitialized = false;
                 clearPendingDraft({ silent: true });
                 closeModal({ discard: false, silent: true });
                 clearEvents();
