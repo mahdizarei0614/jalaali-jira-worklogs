@@ -1335,11 +1335,35 @@
         const commentInput = root.querySelector('[data-worklog-comment]');
         const confirmBtn = root.querySelector('[data-worklog-confirm]');
         const cancelBtn = root.querySelector('[data-worklog-cancel]');
+        const logOutput = root.querySelector('[data-worklog-log]');
 
         if (!container || !calendarEl || !messageEl || !modal || !issueSelect || !commentInput || !confirmBtn || !cancelBtn) {
             console.warn('Issues worklogs view missing required elements.');
             return {};
         }
+
+        function renderWorklogLog(content) {
+            if (!logOutput) return;
+            if (content == null) {
+                logOutput.textContent = '';
+                logOutput.hidden = true;
+                return;
+            }
+            let text;
+            if (typeof content === 'string') {
+                text = content;
+            } else {
+                try {
+                    text = JSON.stringify(content, null, 2);
+                } catch (err) {
+                    text = String(content);
+                }
+            }
+            logOutput.textContent = text;
+            logOutput.hidden = false;
+        }
+
+        renderWorklogLog(null);
 
         const getSelfUser = typeof userSelectCtx?.getSelfUser === 'function'
             ? () => (userSelectCtx.getSelfUser() || '').trim()
@@ -1396,6 +1420,7 @@
         let activeIssues = [];
         let activeIssueMap = new Map();
         const issuesCache = new Map();
+        const recentlyCreatedWorklogIds = new Set();
 
         function ensureCalendar() {
             if (calendar) return calendar;
@@ -1582,6 +1607,11 @@
                     });
                 }
                 return;
+            }
+            if (props.isNew) {
+                el.classList.add('calendar-event--new');
+            } else {
+                el.classList.remove('calendar-event--new');
             }
             const tooltipParts = [];
             if (props.jalaaliDate) tooltipParts.push(props.jalaaliDate);
@@ -1930,9 +1960,31 @@
         function handleEventClick(info) {
             const event = info?.event;
             if (!event) return;
+            const jsEvent = info?.jsEvent;
+            if (jsEvent) {
+                const actionBtn = jsEvent.target?.closest('[data-calendar-draft-action]');
+                if (actionBtn) {
+                    jsEvent.preventDefault();
+                    jsEvent.stopPropagation();
+                    if (actionBtn.disabled || actionBtn.getAttribute('aria-disabled') === 'true') {
+                        return;
+                    }
+                    const action = actionBtn.dataset.calendarDraftAction;
+                    if (action === 'confirm') {
+                        handleDraftSubmit(event);
+                        return;
+                    }
+                    if (action === 'cancel') {
+                        handleDraftCancel(event);
+                        return;
+                    }
+                }
+            }
             if (event.extendedProps?.isDraft) {
-                info.jsEvent.preventDefault();
-                info.jsEvent.stopPropagation();
+                if (jsEvent) {
+                    jsEvent.preventDefault();
+                    jsEvent.stopPropagation();
+                }
                 if (!modalOpen && event.extendedProps.stage !== 'submitting') {
                     openModalForEvent(event, { preserveValues: true });
                 }
@@ -1971,6 +2023,7 @@
             }
             try {
                 setDraftStage(event, 'submitting');
+                renderWorklogLog({ status: 'pending', message: 'Submitting worklog…' });
                 const payload = {
                     issueKey,
                     started: start.toISOString(),
@@ -1980,7 +2033,23 @@
                 };
                 const res = await window.appApi.createWorklog(payload);
                 if (!res?.ok) {
-                    throw new Error(res?.reason || 'Failed to add worklog.');
+                    if (res?.log) {
+                        renderWorklogLog(res.log);
+                    } else {
+                        renderWorklogLog({ success: false, message: res?.reason || 'Failed to add worklog.' });
+                    }
+                    const errObj = new Error(res?.reason || 'Failed to add worklog.');
+                    if (res?.log) errObj.log = res.log;
+                    throw errObj;
+                }
+                const newWorklogId = res?.worklogId ?? null;
+                if (newWorklogId != null) {
+                    recentlyCreatedWorklogIds.add(String(newWorklogId));
+                }
+                if (res?.log) {
+                    renderWorklogLog(res.log);
+                } else {
+                    renderWorklogLog({ success: true, message: 'Worklog added successfully.' });
                 }
                 setFeedback('Worklog added successfully. Refreshing data…', { variant: 'success', timeout: 5000 });
                 clearPendingDraft({ silent: true });
@@ -1988,6 +2057,11 @@
                 await reportStateInstance.refresh({ force: true });
             } catch (err) {
                 console.error('Failed to submit worklog', err);
+                if (err?.log) {
+                    renderWorklogLog(err.log);
+                } else {
+                    renderWorklogLog({ success: false, message: err?.message || 'Failed to submit worklog.' });
+                }
                 setFeedback(err?.message || 'Failed to submit worklog.', { variant: 'error', timeout: 6000 });
                 setDraftStage(event, 'ready');
             }
@@ -2099,12 +2173,15 @@
                 const issueKey = (worklog?.issueKey || '').toString().trim();
                 const titleParts = [issueKey, summary].filter(Boolean);
                 const hoursText = Number.isFinite(hoursValue) ? formatHours(hoursValue) : null;
+                const id = String(worklog?.worklogId ?? worklog?.id ?? `worklog-${idx}`);
+                const isNew = recentlyCreatedWorklogIds.has(id);
                 return {
-                    id: String(worklog?.worklogId ?? worklog?.id ?? `worklog-${idx}`),
+                    id,
                     title: titleParts.join(' — ') || (worklog?.persianDate || ''),
                     start: startMoment.toISOString(),
                     end: endMoment.toISOString(),
                     allDay: false,
+                    classNames: isNew ? ['calendar-event--new'] : [],
                     extendedProps: {
                         issueKey,
                         summary,
@@ -2113,7 +2190,8 @@
                         jalaaliDate: worklog?.persianDate || '',
                         hours,
                         hoursText,
-                        issueUrl: buildIssueUrl(baseUrl, issueKey)
+                        issueUrl: buildIssueUrl(baseUrl, issueKey),
+                        isNew
                     }
                 };
             }).filter(Boolean);
@@ -2196,6 +2274,13 @@
 
             setEvents(events);
             hideMessage();
+
+            const visibleIds = new Set(events.map((event) => String(event.id)));
+            for (const id of Array.from(recentlyCreatedWorklogIds)) {
+                if (!visibleIds.has(id)) {
+                    recentlyCreatedWorklogIds.delete(id);
+                }
+            }
         });
 
         return {

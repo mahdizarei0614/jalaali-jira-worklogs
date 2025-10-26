@@ -1122,18 +1122,58 @@
         }
 
         try {
-            const { data } = await axios.post(
+            const response = await axios.post(
                 `${auth.baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}/worklog`,
                 body,
                 { headers: auth.headers }
             );
-            return { ok: true, worklogId: data?.id || data?.worklogId || null };
+            const data = response?.data;
+            const logDetails = {
+                success: true,
+                issueKey,
+                request: {
+                    url: `${auth.baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}/worklog`,
+                    body
+                },
+                response: {
+                    status: response?.status,
+                    statusText: response?.statusText,
+                    data
+                }
+            };
+            console.log('[jira:create-worklog] Success', logDetails);
+            return { ok: true, worklogId: data?.id || data?.worklogId || null, log: logDetails };
         } catch (err) {
+            const errorPayload = {
+                issueKey,
+                status: err?.response?.status,
+                statusText: err?.response?.statusText,
+                data: err?.response?.data,
+                message: err?.message
+            };
+            console.error('[jira:create-worklog] Failure', errorPayload);
             const reason = err?.response?.data?.errorMessages?.join(', ')
                 ?? err?.response?.statusText
                 ?? err?.message
                 ?? 'Failed to add worklog.';
-            return { ok: false, reason };
+            return {
+                ok: false,
+                reason,
+                log: {
+                    success: false,
+                    issueKey,
+                    request: {
+                        url: `${auth.baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}/worklog`,
+                        body
+                    },
+                    response: {
+                        status: err?.response?.status,
+                        statusText: err?.response?.statusText,
+                        data: err?.response?.data,
+                        message: err?.message
+                    }
+                }
+            };
         }
     });
 
