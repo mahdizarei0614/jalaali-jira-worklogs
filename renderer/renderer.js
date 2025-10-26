@@ -1427,6 +1427,7 @@
         let activeIssueMap = new Map();
         const issuesCache = new Map();
         const recentlyCreatedWorklogIds = new Set();
+        let pendingIssueReloadUser = null;
 
         function ensureCalendar() {
             if (calendar) return calendar;
@@ -1771,7 +1772,9 @@
                 }
                 return;
             }
-            if (props.isNew) {
+            const eventId = event?.id != null ? String(event.id) : '';
+            const shouldHighlight = props.isNew || (eventId && recentlyCreatedWorklogIds.has(eventId));
+            if (shouldHighlight) {
                 el.classList.add('calendar-event--new');
             } else {
                 el.classList.remove('calendar-event--new');
@@ -1942,13 +1945,13 @@
             confirmBtn.disabled = !(issueSelect.value && activeIssueMap.has(issueSelect.value));
         }
 
-        async function loadIssuesForUser(username) {
+        async function loadIssuesForUser(username, { force = false } = {}) {
             if (!username) {
                 return { ok: false, reason: 'No user selected.' };
             }
             const cached = issuesCache.get(username);
             const now = Date.now();
-            if (cached && now - cached.timestamp < 5 * 60 * 1000) {
+            if (!force && cached && now - cached.timestamp < 5 * 60 * 1000) {
                 return cached;
             }
             if (typeof window.appApi?.getActiveSprintIssues !== 'function') {
@@ -2018,7 +2021,12 @@
             }
             const username = (currentSelection?.username || '').trim();
             const existingKey = preserveValues ? (event.extendedProps?.issueKey || '') : '';
-            loadIssuesForUser(username).then((result) => {
+            const forceReload = pendingIssueReloadUser && pendingIssueReloadUser === username;
+            if (forceReload) {
+                issuesCache.delete(username);
+                pendingIssueReloadUser = null;
+            }
+            loadIssuesForUser(username, { force: forceReload }).then((result) => {
                 activeIssues = result.ok ? result.issues : [];
                 activeIssueMap = new Map(activeIssues.map((issue) => [issue.issueKey, issue]));
                 if (result.ok) {
@@ -2213,6 +2221,11 @@
                     renderWorklogLog(res.log);
                 } else {
                     renderWorklogLog({ success: true, message: 'Worklog added successfully.' });
+                }
+                const usernameKey = (currentSelection?.username || '').trim();
+                if (usernameKey) {
+                    issuesCache.delete(usernameKey);
+                    pendingIssueReloadUser = usernameKey;
                 }
                 setFeedback('Worklog added successfully. Refreshing data…', { variant: 'success', timeout: 5000 });
                 clearPendingDraft({ silent: true });

@@ -603,6 +603,37 @@
         };
     }
 
+    function shouldUseAdfComments(baseUrl) {
+        if (!baseUrl) return false;
+        try {
+            const { hostname } = new URL(baseUrl);
+            const host = hostname.toLowerCase();
+            return (
+                host.endsWith('.atlassian.net') ||
+                host.endsWith('.jira.com') ||
+                host.endsWith('.jira-dev.com')
+            );
+        } catch (err) {
+            return false;
+        }
+    }
+
+    function buildWorklogFailureLog(issueKey, attempts) {
+        const lastAttempt = attempts?.length ? attempts[attempts.length - 1] : null;
+        const log = {
+            success: false,
+            issueKey,
+            attempts: Array.isArray(attempts) ? attempts : []
+        };
+        if (lastAttempt?.request) {
+            log.request = lastAttempt.request;
+        }
+        if (lastAttempt?.response) {
+            log.response = lastAttempt.response;
+        }
+        return log;
+    }
+
     async function whoAmI() {
         const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
         const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
@@ -1222,68 +1253,123 @@
             return { ok: false, reason: 'Invalid worklog duration.' };
         }
         const timeSpentSeconds = Math.max(60, Math.round(seconds));
-        const body = {
+        const worklogUrl = `${auth.baseUrl}/rest/api/latest/issue/${encodeURIComponent(issueKey)}/worklog`;
+        const attemptHistory = [];
+        const submitWorklog = async (requestBody, label) => {
+            try {
+                const response = await axios.post(worklogUrl, requestBody, { headers: auth.headers });
+                const data = response?.data;
+                const worklogId = data?.id ?? data?.worklogId ?? null;
+                const entry = {
+                    label,
+                    request: {
+                        url: worklogUrl,
+                        body: requestBody
+                    },
+                    response: {
+                        status: response?.status,
+                        statusText: response?.statusText,
+                        data
+                    },
+                    success: worklogId != null
+                };
+                if (worklogId == null) {
+                    attemptHistory.push(entry);
+                    const err = new Error('Worklog create response missing id.');
+                    err.response = response;
+                    err.__worklogLogged = true;
+                    throw err;
+                }
+                attemptHistory.push(entry);
+                return { response, worklogId, body: requestBody };
+            } catch (error) {
+                if (!error?.__worklogLogged) {
+                    attemptHistory.push({
+                        label,
+                        success: false,
+                        request: {
+                            url: worklogUrl,
+                            body: requestBody
+                        },
+                        response: {
+                            status: error?.response?.status,
+                            statusText: error?.response?.statusText,
+                            data: error?.response?.data,
+                            message: error?.message
+                        }
+                    });
+                    if (error && typeof error === 'object') {
+                        error.__worklogLogged = true;
+                    }
+                }
+                throw error;
+            }
+        };
+
+        const rawComment = typeof comment === 'string' ? comment : '';
+        const trimmedComment = rawComment.trim();
+        const hasComment = !!trimmedComment;
+        const baseBody = {
             started: startedFormatted,
             timeSpentSeconds
         };
-        if (comment && comment.trim()) {
-            body.comment = buildWorklogCommentDoc(comment.trim());
+        const useAdf = hasComment && shouldUseAdfComments(auth.baseUrl);
+        const primaryBody = hasComment
+            ? {
+                ...baseBody,
+                comment: useAdf ? buildWorklogCommentDoc(trimmedComment) : trimmedComment
+            }
+            : baseBody;
+
+        let finalResult = null;
+        try {
+            finalResult = await submitWorklog(primaryBody, useAdf ? 'adf' : 'primary');
+        } catch (primaryErr) {
+            if (useAdf && hasComment) {
+                try {
+                    const fallbackBody = { ...baseBody, comment: trimmedComment };
+                    finalResult = await submitWorklog(fallbackBody, 'plain-fallback');
+                } catch (fallbackErr) {
+                    const reason = fallbackErr?.response?.data?.errorMessages?.join(', ')
+                        ?? fallbackErr?.response?.statusText
+                        ?? fallbackErr?.message
+                        ?? primaryErr?.message
+                        ?? 'Failed to add worklog.';
+                    const logPayload = buildWorklogFailureLog(issueKey, attemptHistory);
+                    console.error('[jira:create-worklog] Failure', logPayload);
+                    return { ok: false, reason, log: logPayload };
+                }
+            } else {
+                const reason = primaryErr?.response?.data?.errorMessages?.join(', ')
+                    ?? primaryErr?.response?.statusText
+                    ?? primaryErr?.message
+                    ?? 'Failed to add worklog.';
+                const logPayload = buildWorklogFailureLog(issueKey, attemptHistory);
+                console.error('[jira:create-worklog] Failure', logPayload);
+                return { ok: false, reason, log: logPayload };
+            }
         }
 
-        try {
-            const response = await axios.post(
-                `${auth.baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}/worklog`,
-                body,
-                { headers: auth.headers }
-            );
-            const data = response?.data;
-            const logDetails = {
-                success: true,
-                issueKey,
-                request: {
-                    url: `${auth.baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}/worklog`,
-                    body
-                },
-                response: {
-                    status: response?.status,
-                    statusText: response?.statusText,
-                    data
-                }
-            };
-            console.log('[jira:create-worklog] Success', logDetails);
-            return { ok: true, worklogId: data?.id || data?.worklogId || null, log: logDetails };
-        } catch (err) {
-            const errorPayload = {
-                issueKey,
-                status: err?.response?.status,
-                statusText: err?.response?.statusText,
-                data: err?.response?.data,
-                message: err?.message
-            };
-            console.error('[jira:create-worklog] Failure', errorPayload);
-            const reason = err?.response?.data?.errorMessages?.join(', ')
-                ?? err?.response?.statusText
-                ?? err?.message
-                ?? 'Failed to add worklog.';
-            return {
-                ok: false,
-                reason,
-                log: {
-                    success: false,
-                    issueKey,
-                    request: {
-                        url: `${auth.baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}/worklog`,
-                        body
-                    },
-                    response: {
-                        status: err?.response?.status,
-                        statusText: err?.response?.statusText,
-                        data: err?.response?.data,
-                        message: err?.message
-                    }
-                }
-            };
-        }
+        const successLog = {
+            success: true,
+            issueKey,
+            request: {
+                url: worklogUrl,
+                body: finalResult?.body ?? primaryBody
+            },
+            response: {
+                status: finalResult?.response?.status,
+                statusText: finalResult?.response?.statusText,
+                data: finalResult?.response?.data
+            },
+            attempts: attemptHistory
+        };
+        console.log('[jira:create-worklog] Success', successLog);
+        return {
+            ok: true,
+            worklogId: finalResult?.worklogId ?? null,
+            log: successLog
+        };
     });
 
     ipcMain.handle('views:load', async (_evt, relPath) => {
