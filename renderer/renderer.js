@@ -1427,6 +1427,41 @@
         let activeIssueMap = new Map();
         const issuesCache = new Map();
         const recentlyCreatedWorklogIds = new Set();
+        const recentlyCreatedWorklogFingerprints = new Set();
+
+        function buildWorklogFingerprint({ issueKey, startMoment = null, started = null, durationSeconds = null }) {
+            const key = (issueKey || '').trim();
+            if (!key) {
+                return '';
+            }
+            let isoStart = '';
+            if (startMoment && typeof startMoment.toISOString === 'function') {
+                isoStart = startMoment.toISOString();
+            } else if (started) {
+                const parsed = createMoment(started);
+                isoStart = parsed ? parsed.toISOString() : '';
+            }
+            if (!isoStart) {
+                return '';
+            }
+            let seconds = Number.isFinite(durationSeconds) ? Math.round(durationSeconds) : NaN;
+            if (!Number.isFinite(seconds)) {
+                return '';
+            }
+            if (seconds < 60) {
+                seconds = 60;
+            }
+            return `${key}__${isoStart}__${seconds}`;
+        }
+
+        function rememberRecentlyCreatedWorklog({ id = null, fingerprint = '' } = {}) {
+            if (id != null && id !== '') {
+                recentlyCreatedWorklogIds.add(String(id));
+            }
+            if (fingerprint) {
+                recentlyCreatedWorklogFingerprints.add(fingerprint);
+            }
+        }
 
         function ensureCalendar() {
             if (calendar) return calendar;
@@ -1570,9 +1605,19 @@
                     }
                     hideMessage();
                     const visibleIds = new Set(events.map((event) => String(event.id)));
+                    const visibleFingerprints = new Set(
+                        events
+                            .map((event) => event?.extendedProps?.worklogFingerprint)
+                            .filter((fingerprint) => typeof fingerprint === 'string' && fingerprint)
+                    );
                     for (const id of Array.from(recentlyCreatedWorklogIds)) {
                         if (!visibleIds.has(id)) {
                             recentlyCreatedWorklogIds.delete(id);
+                        }
+                    }
+                    for (const fingerprint of Array.from(recentlyCreatedWorklogFingerprints)) {
+                        if (!visibleFingerprints.has(fingerprint)) {
+                            recentlyCreatedWorklogFingerprints.delete(fingerprint);
                         }
                     }
                     return res;
@@ -2206,8 +2251,15 @@
                     throw errObj;
                 }
                 const newWorklogId = res?.worklogId ?? null;
-                if (newWorklogId != null) {
-                    recentlyCreatedWorklogIds.add(String(newWorklogId));
+                const newWorklogFingerprint = buildWorklogFingerprint({
+                    issueKey,
+                    started: payload.started,
+                    durationSeconds
+                });
+                rememberRecentlyCreatedWorklog({ id: newWorklogId, fingerprint: newWorklogFingerprint });
+                const selectionUsername = (currentSelection?.username || '').trim();
+                if (selectionUsername) {
+                    issuesCache.delete(selectionUsername);
                 }
                 if (res?.log) {
                     renderWorklogLog(res.log);
@@ -2343,8 +2395,29 @@
                 const issueKey = (worklog?.issueKey || '').toString().trim();
                 const titleParts = [issueKey, summary].filter(Boolean);
                 const hoursText = Number.isFinite(hoursValue) ? formatHours(hoursValue) : null;
-                const id = String(worklog?.worklogId ?? worklog?.id ?? `worklog-${idx}`);
-                const isNew = recentlyCreatedWorklogIds.has(id);
+                const rawId = worklog?.worklogId ?? worklog?.id;
+                const id = rawId != null ? String(rawId) : `worklog-${idx}`;
+                const trackableId = rawId != null ? id : null;
+                const secondsCandidates = [
+                    worklog?.timeSpentSeconds,
+                    worklog?.seconds,
+                    Number.isFinite(hoursValue) ? hoursValue * 3600 : NaN
+                ];
+                let durationSeconds = null;
+                for (const candidate of secondsCandidates) {
+                    const num = Number(candidate);
+                    if (Number.isFinite(num) && num > 0) {
+                        durationSeconds = num;
+                        break;
+                    }
+                }
+                const fingerprint = buildWorklogFingerprint({
+                    issueKey,
+                    startMoment,
+                    durationSeconds
+                });
+                const isNew = (trackableId && recentlyCreatedWorklogIds.has(trackableId))
+                    || (fingerprint && recentlyCreatedWorklogFingerprints.has(fingerprint));
                 return {
                     id,
                     title: titleParts.join(' — ') || (worklog?.persianDate || ''),
@@ -2363,7 +2436,8 @@
                         hours,
                         hoursText,
                         issueUrl: buildIssueUrl(baseUrl, issueKey),
-                        isNew
+                        isNew,
+                        worklogFingerprint: fingerprint
                     }
                 };
             }).filter(Boolean);
