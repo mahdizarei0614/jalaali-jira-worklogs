@@ -1438,7 +1438,7 @@
                 expandRows: true,
                 stickyHeaderDates: true,
                 headerToolbar: { start: 'prev,next today', center: 'title', end: 'timeGridWeek,dayGridMonth' },
-                buttonText: { today: 'امروز', timeGridWeek: 'هفته', dayGridMonth: 'ماه' },
+                buttonText: { today: 'Go to Today', timeGridWeek: 'Weekly View', dayGridMonth: 'Monthly View' },
                 nowIndicator: true,
                 slotLabelFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
                 eventTimeFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
