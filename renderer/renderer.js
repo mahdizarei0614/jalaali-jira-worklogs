@@ -1185,7 +1185,10 @@
         }
 
         return {
-            onShow: () => reportStateInstance.refresh()
+            onShow: () => {
+                refreshForCurrentView({ force: true });
+                return reportStateInstance.refresh();
+            }
         };
     }
 
@@ -1313,7 +1316,10 @@
         });
 
         return {
-            onShow: () => reportStateInstance.refresh()
+            onShow: () => {
+                refreshForCurrentView({ force: true });
+                return reportStateInstance.refresh();
+            }
         };
     }
 
@@ -1414,6 +1420,8 @@
         let lastSelectionKey = null;
         let currentSelection = selectionSnapshot ? { ...selectionSnapshot } : {};
         let currentBaseUrl = null;
+        let suppressSelectionSync = false;
+        let pendingCalendarSelection = null;
         let pendingDraft = null;
         let feedbackTimer = null;
         let modalOpen = false;
@@ -1421,6 +1429,9 @@
         let activeIssueMap = new Map();
         const issuesCache = new Map();
         const recentlyCreatedWorklogIds = new Set();
+        let rangeRequest = null;
+        let lastFetchedRangeKey = null;
+        let lastRangeUsername = null;
 
         function ensureCalendar() {
             if (calendar) return calendar;
@@ -1438,7 +1449,7 @@
                 eventTimeFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
                 dayHeaderContent: (args) => formatDayHeader(args.date),
                 titleFormat: () => '',
-                datesSet: (info) => updateToolbarTitle(info.start, info.end),
+                datesSet: handleCalendarDatesSet,
                 eventContent: (arg) => renderEventContent(arg.event),
                 eventDidMount: (info) => applyEventMetadata(info.el, info.event),
                 selectable: true,
@@ -1481,6 +1492,50 @@
             const formatter = new Intl.DateTimeFormat('fa-IR', { dateStyle: 'medium' });
             const inclusiveEnd = new Date(end.getTime() - 1);
             titleEl.textContent = `${formatter.format(start)} — ${formatter.format(inclusiveEnd)}`;
+        }
+
+        function handleCalendarDatesSet(info) {
+            if (!info) return;
+            updateToolbarTitle(info.start, info.end);
+            const derivedRange = deriveRangeFromInfo(info);
+            if (derivedRange) {
+                requestRangeFetch(derivedRange);
+            }
+            if (!info.view) return;
+            if (suppressSelectionSync) {
+                suppressSelectionSync = false;
+                return;
+            }
+            const currentStart = info.view.currentStart || info.start;
+            if (!currentStart) return;
+            const startMoment = createMoment(currentStart);
+            if (!startMoment) return;
+            const jYear = Number.parseInt(startMoment.format('jYYYY'), 10);
+            const jMonth = Number.parseInt(startMoment.format('jM'), 10);
+            if (!Number.isFinite(jYear) || !Number.isFinite(jMonth)) return;
+
+            const viewType = typeof info.view.type === 'string' ? info.view.type : '';
+            const shouldSync = !viewType || /daygrid|timegrid|list/i.test(viewType);
+            if (!shouldSync) return;
+
+            if (currentSelection?.jYear === jYear && currentSelection?.jMonth === jMonth) {
+                return;
+            }
+
+            if (typeof reportStateInstance?.setSelection === 'function') {
+                const targetKey = `${jYear}-${jMonth}`;
+                pendingCalendarSelection = targetKey;
+                reportStateInstance.setSelection(
+                    { jYear, jMonth },
+                    { pushSelection: true, refresh: true }
+                ).catch((err) => {
+                    console.error('Failed to sync selection from calendar navigation', err);
+                }).finally(() => {
+                    if (pendingCalendarSelection === targetKey) {
+                        pendingCalendarSelection = null;
+                    }
+                });
+            }
         }
 
         function computeEventHours(event) {
@@ -2054,7 +2109,10 @@
                 setFeedback('Worklog added successfully. Refreshing data…', { variant: 'success', timeout: 5000 });
                 clearPendingDraft({ silent: true });
                 closeModal({ discard: false, silent: true });
-                await reportStateInstance.refresh({ force: true });
+                await Promise.all([
+                    refreshForCurrentView({ force: true }) || Promise.resolve(null),
+                    reportStateInstance.refresh({ force: true })
+                ]);
             } catch (err) {
                 console.error('Failed to submit worklog', err);
                 if (err?.log) {
@@ -2158,7 +2216,13 @@
             }
             const uniqueWorklogs = Array.from(new Set(worklogs));
             return uniqueWorklogs.map((worklog, idx) => {
-                let startMoment = createMoment(worklog?.date || worklog?.started);
+                let startMoment = null;
+                if (worklog?.started) {
+                    startMoment = createMoment(worklog.started);
+                }
+                if (!startMoment && worklog?.date) {
+                    startMoment = createMoment(worklog.date);
+                }
                 if (!startMoment && worklog?.persianDate) {
                     startMoment = createMoment(worklog.persianDate, 'jYYYY/jM/jD');
                 }
@@ -2188,6 +2252,8 @@
                         comment: (worklog?.comment || '').toString(),
                         timeSpent: worklog?.timeSpent || '',
                         jalaaliDate: worklog?.persianDate || '',
+                        started: worklog?.started || '',
+                        startedTime: worklog?.startedTime || '',
                         hours,
                         hoursText,
                         issueUrl: buildIssueUrl(baseUrl, issueKey),
@@ -2195,6 +2261,120 @@
                     }
                 };
             }).filter(Boolean);
+        }
+
+        function buildRangeKey(username, range) {
+            if (!username || !range?.startDate || !range?.endDate) {
+                return '';
+            }
+            return `${username}|${range.startDate}|${range.endDate}`;
+        }
+
+        function buildRangeFromDates(startDate, endDate) {
+            const startMoment = createMoment(startDate);
+            const endMoment = createMoment(endDate);
+            if (!startMoment || !endMoment) {
+                return null;
+            }
+            const inclusiveEnd = endMoment.clone().subtract(1, 'millisecond');
+            if (inclusiveEnd.isBefore(startMoment)) {
+                return null;
+            }
+            const startDay = startMoment.clone().startOf('day');
+            const endDay = inclusiveEnd.clone().endOf('day');
+            return {
+                startMoment: startDay,
+                endMoment: endDay,
+                startDate: startDay.format('YYYY-MM-DD'),
+                endDate: endDay.format('YYYY-MM-DD')
+            };
+        }
+
+        function deriveRangeFromInfo(info) {
+            if (!info) return null;
+            const viewStart = info.view?.currentStart ?? info.start ?? null;
+            const viewEnd = info.view?.currentEnd ?? info.end ?? null;
+            if (!viewStart || !viewEnd) return null;
+            return buildRangeFromDates(viewStart, viewEnd);
+        }
+
+        function getActiveRange() {
+            if (!calendar || !calendar.view) return null;
+            return buildRangeFromDates(calendar.view.currentStart, calendar.view.currentEnd);
+        }
+
+        function resetRangeState() {
+            rangeRequest = null;
+            lastFetchedRangeKey = null;
+            lastRangeUsername = null;
+        }
+
+        function requestRangeFetch(range, { force = false } = {}) {
+            if (!range?.startDate || !range?.endDate) return null;
+            const username = (currentSelection.username || '').trim();
+            if (!username || typeof window.appApi?.scanNow !== 'function') return null;
+
+            const key = buildRangeKey(username, range);
+            if (!force) {
+                if (lastFetchedRangeKey === key) return null;
+                if (rangeRequest && rangeRequest.key === key) return null;
+            }
+
+            const requestToken = Symbol('calendar-range-request');
+            rangeRequest = { key, token: requestToken };
+            showMessage('Loading…');
+
+            return Promise.resolve(window.appApi.scanNow({
+                username,
+                rangeStartDate: range.startDate,
+                rangeEndDate: range.endDate
+            })).then((res) => {
+                if (!rangeRequest || rangeRequest.token !== requestToken) {
+                    return;
+                }
+                if (!res || !res.ok) {
+                    clearEvents();
+                    showMessage(res?.reason || 'Unable to load worklogs.');
+                    return;
+                }
+
+                currentBaseUrl = res.baseUrl || null;
+                const events = buildEvents(res.worklogs, res.baseUrl);
+                if (!events.length) {
+                    clearEvents();
+                    showMessage('No worklogs found for this period.');
+                } else {
+                    setEvents(events);
+                    hideMessage();
+
+                    const visibleIds = new Set(events.map((event) => String(event.id)));
+                    for (const id of Array.from(recentlyCreatedWorklogIds)) {
+                        if (!visibleIds.has(id)) {
+                            recentlyCreatedWorklogIds.delete(id);
+                        }
+                    }
+                }
+
+                lastFetchedRangeKey = key;
+                lastRangeUsername = username;
+            }).catch((err) => {
+                if (!rangeRequest || rangeRequest.token !== requestToken) {
+                    return;
+                }
+                console.error('Failed to load worklogs for calendar range', err);
+                clearEvents();
+                showMessage(err?.message || 'Unable to load worklogs.');
+            }).finally(() => {
+                if (rangeRequest && rangeRequest.token === requestToken) {
+                    rangeRequest = null;
+                }
+            });
+        }
+
+        function refreshForCurrentView(options = {}) {
+            const range = getActiveRange();
+            if (!range) return Promise.resolve(null);
+            return requestRangeFetch(range, options);
         }
 
         function canShowCalendar(selection) {
@@ -2218,7 +2398,7 @@
             });
         }
 
-        showMessage('Select a user and month to see worklogs.');
+        showMessage('Select a user to see worklogs.');
 
         reportStateInstance.subscribe((state) => {
             currentSelection = state?.selection ? { ...state.selection } : {};
@@ -2226,20 +2406,31 @@
             if (selectionKey && selectionKey !== lastSelectionKey) {
                 lastSelectionKey = selectionKey;
                 const targetMoment = createMoment(`${currentSelection.jYear}/${currentSelection.jMonth}/1`, 'jYYYY/jM/jD');
-                if (targetMoment) {
+                const isCalendarDriven = pendingCalendarSelection === selectionKey;
+                if (isCalendarDriven) {
+                    pendingCalendarSelection = null;
+                }
+                if (!isCalendarDriven && targetMoment) {
                     const cal = ensureCalendar();
-                    cal.gotoDate(targetMoment.toDate());
-                    updateToolbarTitle(cal.view.currentStart, cal.view.currentEnd);
+                    suppressSelectionSync = true;
+                    try {
+                        cal.gotoDate(targetMoment.toDate());
+                        updateToolbarTitle(cal.view.currentStart, cal.view.currentEnd);
+                    } catch (err) {
+                        suppressSelectionSync = false;
+                        console.error('Failed to sync calendar to selection', err);
+                    }
                 }
             } else if (!selectionKey) {
                 lastSelectionKey = null;
             }
 
             if (!canShowCalendar(currentSelection)) {
+                resetRangeState();
                 clearPendingDraft({ silent: true });
                 closeModal({ discard: false, silent: true });
                 clearEvents();
-                showMessage('Select a user and month to see worklogs.');
+                showMessage('Select a user to see worklogs.');
                 setFeedback(null);
                 return;
             }
@@ -2250,41 +2441,23 @@
                 setFeedback(null);
             }
 
-            if (state.isFetching && !state.result) {
-                clearEvents();
-                showMessage('Loading…');
-                return;
+            const username = (currentSelection.username || '').trim();
+            const usernameChanged = username && username !== lastRangeUsername;
+            if (usernameChanged) {
+                lastFetchedRangeKey = null;
             }
 
-            const res = state.result;
-            if (!res || !res.ok) {
-                clearEvents();
-                const message = res ? (res.reason || 'Unable to load worklogs.') : 'No data yet.';
-                showMessage(message);
-                return;
-            }
-
-            currentBaseUrl = res.baseUrl || null;
-            const events = buildEvents(res.worklogs, res.baseUrl);
-            if (!events.length) {
-                clearEvents();
-                showMessage('No worklogs found for this period.');
-                return;
-            }
-
-            setEvents(events);
-            hideMessage();
-
-            const visibleIds = new Set(events.map((event) => String(event.id)));
-            for (const id of Array.from(recentlyCreatedWorklogIds)) {
-                if (!visibleIds.has(id)) {
-                    recentlyCreatedWorklogIds.delete(id);
-                }
+            const activeRange = getActiveRange();
+            if (activeRange) {
+                requestRangeFetch(activeRange, { force: usernameChanged });
             }
         });
 
         return {
-            onShow: () => reportStateInstance.refresh()
+            onShow: () => {
+                refreshForCurrentView({ force: true });
+                return reportStateInstance.refresh();
+            }
         };
     }
 

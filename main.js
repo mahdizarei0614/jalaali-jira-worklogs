@@ -679,14 +679,28 @@
         return { jYear, jMonth, source: 'current' };
     }
 
-    async function buildMonthlyReport({ baseUrl, headers, username, jYear, jMonth, nowG, includeDetails = true }) {
-        const { start, end } = jMonthRange(jYear, jMonth);
+    function normaliseRangeDate(value) {
+        if (!value) return null;
+        const cleaned = toAsciiDigits(value).trim();
+        if (!cleaned) return null;
+        const m = moment(cleaned, ['YYYY-MM-DD', moment.ISO_8601], true);
+        if (!m.isValid()) return null;
+        return m;
+    }
+
+    async function collectWorklogsWithinRange({ baseUrl, headers, username, start, end, includeDetails = true }) {
         if (!start || !end) {
-            return { ok: false, reason: 'Failed to construct selected Jalaali month range.' };
+            return { ok: false, reason: 'Invalid date range provided.' };
         }
 
-        const fromYMD = start.format('YYYY-MM-DD');
-        const toYMD = end.format('YYYY-MM-DD');
+        const rangeStart = start.clone().startOf('day');
+        const rangeEnd = end.clone().endOf('day');
+        if (!rangeStart.isValid() || !rangeEnd.isValid() || rangeEnd.isBefore(rangeStart)) {
+            return { ok: false, reason: 'Invalid date range provided.' };
+        }
+
+        const fromYMD = rangeStart.format('YYYY-MM-DD');
+        const toYMD = rangeEnd.format('YYYY-MM-DD');
         const jql = `worklogAuthor = "${username}" AND worklogDate >= "${fromYMD}" AND worklogDate <= "${toYMD}"`;
 
         const issues = await searchIssuesPaged(baseUrl, headers, jql);
@@ -713,10 +727,12 @@
 
                 const dateMoment = moment(date, 'YYYY-MM-DD', true);
                 if (!dateMoment.isValid()) continue;
-                if (dateMoment.isBefore(start, 'day') || dateMoment.isAfter(end, 'day')) continue;
+                if (dateMoment.isBefore(rangeStart, 'day') || dateMoment.isAfter(rangeEnd, 'day')) continue;
 
                 const hoursRaw = log.timeSpentSeconds ?? log.timeSpentInSeconds ?? 0;
                 const hours = Number.isFinite(hoursRaw) ? hoursRaw / 3600 : 0;
+                const startedMoment = startedRaw ? moment(startedRaw) : null;
+                const startedTime = startedMoment?.isValid() ? startedMoment.format('HH:mm') : null;
 
                 totalWorklogs += 1;
                 totalLoggedHours += hours;
@@ -729,6 +745,8 @@
                         issueType: issue?.fields?.issuetype?.name || null,
                         summary: issue?.fields?.summary,
                         date,
+                        started: startedRaw || null,
+                        startedTime,
                         persianDate: dateMoment.format('jYYYY/jMM/jDD'),
                         timeSpent: log.timeSpent,
                         hours: +(hours).toFixed(2),
@@ -740,11 +758,87 @@
             }
         }
 
+        if (includeDetails) {
+            worklogs.sort((a, b) => {
+                const dateDiff = moment(a.date, 'YYYY-MM-DD').diff(moment(b.date, 'YYYY-MM-DD'));
+                if (dateDiff !== 0) return dateDiff;
+                return (a.startedTime || '').localeCompare(b.startedTime || '');
+            });
+        }
+
+        return {
+            ok: true,
+            jql,
+            fromYMD,
+            toYMD,
+            worklogs,
+            totalWorklogs,
+            totalLoggedHours,
+            dailyTotalsMap,
+            rangeStart,
+            rangeEnd
+        };
+    }
+
+    async function buildWorklogRangeReport({ baseUrl, headers, username, start, end }) {
+        const summary = await collectWorklogsWithinRange({
+            baseUrl,
+            headers,
+            username,
+            start,
+            end,
+            includeDetails: true
+        });
+
+        if (!summary?.ok) {
+            return summary || { ok: false, reason: 'Unable to load worklogs for the requested range.' };
+        }
+
+        const totalHours = +(summary.totalLoggedHours ?? 0).toFixed(2);
+
+        return {
+            ok: true,
+            baseUrl,
+            jql: summary.jql,
+            range: {
+                start: summary.rangeStart.format('YYYY-MM-DD'),
+                end: summary.rangeEnd.format('YYYY-MM-DD'),
+                startJalaali: summary.rangeStart.format('jYYYY/jMM/jDD'),
+                endJalaali: summary.rangeEnd.format('jYYYY/jMM/jDD')
+            },
+            totalHours,
+            totalWorklogs: summary.totalWorklogs,
+            worklogs: summary.worklogs
+        };
+    }
+
+    async function buildMonthlyReport({ baseUrl, headers, username, jYear, jMonth, nowG, includeDetails = true }) {
+        const { start, end } = jMonthRange(jYear, jMonth);
+        if (!start || !end) {
+            return { ok: false, reason: 'Failed to construct selected Jalaali month range.' };
+        }
+
+        const summary = await collectWorklogsWithinRange({
+            baseUrl,
+            headers,
+            username,
+            start,
+            end,
+            includeDetails
+        });
+
+        if (!summary?.ok) {
+            return summary || { ok: false, reason: 'Unable to load worklogs for the selected month.' };
+        }
+
+        const { jql, fromYMD, toYMD, totalWorklogs, totalLoggedHours } = summary;
+        const dailyTotalsMap = summary.dailyTotalsMap;
+        const worklogs = summary.worklogs || [];
+
         let dueIssuesCurrentMonth = [];
         let assignedIssues = [];
 
         if (includeDetails) {
-            worklogs.sort((a, b) => moment(a.date, 'YYYY-MM-DD').diff(moment(b.date, 'YYYY-MM-DD')));
             try {
                 dueIssuesCurrentMonth = await fetchIssuesDueThisMonth({
                     baseUrl,
@@ -925,9 +1019,23 @@
         if (!baseUrl || !token) return { ok: false, reason: 'Missing Jira base URL or token.' };
         if (!username) return { ok: false, reason: 'No Jira username selected in UI.' };
 
+        const headers = buildHeaders(baseUrl, token);
+        const rangeStartInput = opts?.rangeStartDate ?? opts?.rangeStart;
+        const rangeEndInput = opts?.rangeEndDate ?? opts?.rangeEnd;
+        const rangeStartMoment = normaliseRangeDate(rangeStartInput);
+        const rangeEndMoment = normaliseRangeDate(rangeEndInput);
+        if (rangeStartMoment && rangeEndMoment) {
+            return buildWorklogRangeReport({
+                baseUrl,
+                headers,
+                username,
+                start: rangeStartMoment,
+                end: rangeEndMoment
+            });
+        }
+
         const { jYear, jMonth } = resolveTargetMonth(opts);
         const nowG = mtNow();
-        const headers = buildHeaders(baseUrl, token);
 
         const monthCache = new Map();
         const monthResult = await buildMonthlyReport({
