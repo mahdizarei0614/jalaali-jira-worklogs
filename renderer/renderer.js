@@ -1437,8 +1437,8 @@
                 height: 'auto',
                 expandRows: true,
                 stickyHeaderDates: true,
-                headerToolbar: { start: 'prev,next today', center: 'title', end: '' },
-                buttonText: { today: 'امروز' },
+                headerToolbar: { start: 'prev,next today', center: 'title', end: 'dayGridMonth,timeGridWeek,timeGridDay' },
+                buttonText: { today: 'امروز', month: 'ماه', week: 'هفته', day: 'روز' },
                 nowIndicator: true,
                 slotLabelFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
                 eventTimeFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
@@ -1556,7 +1556,11 @@
                     const events = buildEvents(res.worklogs, res.baseUrl);
                     if (!events.length) {
                         clearEvents();
-                        showMessage('No worklogs found for this period.');
+                        if ((currentSelection?.username || '').trim()) {
+                            hideMessage();
+                        } else {
+                            showMessage('Select a user to see worklogs.');
+                        }
                     } else {
                         setEvents(events);
                         hideMessage();
