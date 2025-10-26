@@ -2152,12 +2152,48 @@
             });
         }
 
-        function buildEvents(worklogs, baseUrl) {
+        function uniqueWorklogsOf(worklogs) {
             if (!Array.isArray(worklogs) || worklogs.length === 0) {
                 return [];
             }
-            const uniqueWorklogs = Array.from(new Set(worklogs));
-            return uniqueWorklogs.map((worklog, idx) => {
+            return Array.from(new Set(worklogs));
+        }
+
+        function logCalendarWorklogs(rawWorklogs, displayedWorklogs, events) {
+            const rawList = Array.isArray(rawWorklogs) ? rawWorklogs : [];
+            const displayedList = Array.isArray(displayedWorklogs) ? displayedWorklogs : [];
+            const eventList = Array.isArray(events) ? events : [];
+            if (!rawList.length && !displayedList.length && !eventList.length) {
+                console.info('[Calendar] No worklogs available to display.');
+                return;
+            }
+            const groupMethod = typeof console.groupCollapsed === 'function'
+                ? 'groupCollapsed'
+                : (typeof console.group === 'function' ? 'group' : null);
+            if (groupMethod) {
+                console[groupMethod]('[Calendar] Worklogs for calendar view');
+            }
+            console.log('[Calendar] Raw worklogs from server (%d):', rawList.length, rawList);
+            console.log('[Calendar] Worklogs displayed in calendar (%d):', displayedList.length, displayedList);
+            console.log('[Calendar] Transformed calendar events (%d):', eventList.length, eventList);
+            const limit = Math.max(displayedList.length, eventList.length);
+            for (let idx = 0; idx < limit; idx += 1) {
+                const raw = idx < displayedList.length ? displayedList[idx] : undefined;
+                const event = idx < eventList.length ? eventList[idx] : undefined;
+                if (typeof raw === 'undefined' && typeof event === 'undefined') continue;
+                console.log(`[Calendar] Entry ${idx + 1}`, { raw, event });
+            }
+            if (groupMethod) {
+                console.groupEnd();
+            }
+        }
+
+        function buildEvents(worklogs, baseUrl, { skipDedupe = false } = {}) {
+            const sourceWorklogs = skipDedupe ? (Array.isArray(worklogs) ? worklogs : []) : uniqueWorklogsOf(worklogs);
+            if (!sourceWorklogs.length) {
+                return [];
+            }
+            return sourceWorklogs.map((worklog, idx) => {
                 let startMoment = createMoment(worklog?.date || worklog?.started);
                 if (!startMoment && worklog?.persianDate) {
                     startMoment = createMoment(worklog.persianDate, 'jYYYY/jM/jD');
@@ -2265,7 +2301,9 @@
             }
 
             currentBaseUrl = res.baseUrl || null;
-            const events = buildEvents(res.worklogs, res.baseUrl);
+            const displayedWorklogs = uniqueWorklogsOf(res.worklogs);
+            const events = buildEvents(displayedWorklogs, res.baseUrl, { skipDedupe: true });
+            logCalendarWorklogs(res.worklogs, displayedWorklogs, events);
             if (!events.length) {
                 clearEvents();
                 showMessage('No worklogs found for this period.');
