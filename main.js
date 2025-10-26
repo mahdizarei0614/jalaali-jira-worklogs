@@ -730,6 +730,7 @@
                         summary: issue?.fields?.summary,
                         date,
                         persianDate: dateMoment.format('jYYYY/jMM/jDD'),
+                        started: startedRaw || null,
                         timeSpent: log.timeSpent,
                         hours: +(hours).toFixed(2),
                         comment: log.comment || '',
@@ -955,6 +956,111 @@
         });
 
         return { ...monthResult, quarterReport };
+    }
+
+    async function fetchWorklogsRange(opts = {}) {
+        const baseUrl = (STORE.get('jiraBaseUrl', '') || '').trim().replace(/\/+$/, '');
+        const token = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
+        const username = (opts?.username || lastUI.username || '').trim();
+        const startInput = opts?.start;
+        const endInput = opts?.end;
+
+        if (!baseUrl || !token) {
+            return { ok: false, reason: 'Missing Jira base URL or token.' };
+        }
+        if (!username) {
+            return { ok: false, reason: 'No Jira username selected in UI.' };
+        }
+        if (!startInput || !endInput) {
+            return { ok: false, reason: 'Invalid range provided.' };
+        }
+
+        const rangeStart = moment(startInput);
+        const rangeEndExclusive = moment(endInput);
+        if (!rangeStart.isValid() || !rangeEndExclusive.isValid() || !rangeEndExclusive.isAfter(rangeStart)) {
+            return { ok: false, reason: 'Invalid range provided.' };
+        }
+
+        const headers = buildHeaders(baseUrl, token);
+        const startOfDay = rangeStart.clone().startOf('day');
+        const inclusiveEnd = rangeEndExclusive.clone().subtract(1, 'second');
+        const endOfDay = inclusiveEnd.clone().endOf('day');
+
+        const fromYMD = startOfDay.format('YYYY-MM-DD');
+        const toYMD = endOfDay.format('YYYY-MM-DD');
+
+        const jql = `worklogAuthor = "${username}" AND worklogDate >= "${fromYMD}" AND worklogDate <= "${toYMD}"`;
+
+        try {
+            const issues = await searchIssuesPaged(baseUrl, headers, jql);
+            const worklogs = [];
+            const seenWorklogKeys = new Set();
+
+            for (const issue of issues) {
+                const initial = issue?.fields?.worklog ?? {};
+                const fullLogs = await getFullIssueWorklogs(baseUrl, headers, issue.key, initial);
+                for (const log of fullLogs) {
+                    if (!authorMatches(log.author, username)) continue;
+
+                    const key = worklogKey(issue.key, log);
+                    if (seenWorklogKeys.has(key)) continue;
+
+                    const startedRaw = typeof log.started === 'string' ? log.started : '';
+                    if (!startedRaw) continue;
+                    const startedMoment = moment(startedRaw);
+                    if (!startedMoment.isValid()) continue;
+                    if (startedMoment.isBefore(rangeStart) || !startedMoment.isBefore(rangeEndExclusive)) continue;
+
+                    seenWorklogKeys.add(key);
+
+                    const hoursRaw = log.timeSpentSeconds ?? log.timeSpentInSeconds ?? 0;
+                    const hours = Number.isFinite(hoursRaw) ? hoursRaw / 3600 : 0;
+                    const date = startedMoment.format('YYYY-MM-DD');
+
+                    worklogs.push({
+                        worklogId: log.id || null,
+                        issueKey: issue.key,
+                        issueType: issue?.fields?.issuetype?.name || null,
+                        summary: issue?.fields?.summary,
+                        date,
+                        persianDate: startedMoment.format('jYYYY/jMM/jDD'),
+                        started: startedRaw,
+                        timeSpent: log.timeSpent,
+                        hours: +(hours).toFixed(2),
+                        comment: log.comment || '',
+                        dueDate: issue?.fields?.duedate || null,
+                        status: issue?.fields?.status?.name || null
+                    });
+                }
+            }
+
+            worklogs.sort((a, b) => {
+                const aStart = moment(a.started || a.date);
+                const bStart = moment(b.started || b.date);
+                if (aStart.isValid() && bStart.isValid()) {
+                    return aStart.valueOf() - bStart.valueOf();
+                }
+                return 0;
+            });
+
+            lastUI.username = username;
+
+            return {
+                ok: true,
+                baseUrl,
+                username,
+                start: rangeStart.toISOString(),
+                end: rangeEndExclusive.toISOString(),
+                viewType: opts?.viewType || null,
+                jql,
+                worklogs
+            };
+        } catch (err) {
+            const reason = err?.response?.status
+                ? `${err.response.status} ${err.response.statusText}`
+                : (err?.message || 'Failed to load worklogs for range.');
+            return { ok: false, reason };
+        }
     }
     // ===== Notifications / scheduling, auth, routing, IPC (unchanged from your last working version) =====
     // ... keep the rest of your file exactly as in your latest working build ...
@@ -1299,4 +1405,12 @@
     });
 
     ipcMain.handle('scan:now', (_evt, opts) => computeScan(opts || {}));
+    ipcMain.handle('worklogs:range', async (_evt, payload) => {
+        try {
+            return await fetchWorklogsRange(payload || {});
+        } catch (err) {
+            const message = err?.message || 'Failed to load worklogs for range.';
+            return { ok: false, reason: message };
+        }
+    });
 })();

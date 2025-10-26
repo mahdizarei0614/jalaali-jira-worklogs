@@ -1421,6 +1421,12 @@
         let activeIssueMap = new Map();
         const issuesCache = new Map();
         const recentlyCreatedWorklogIds = new Set();
+        let calendarRange = null;
+        let lastFetchedRangeKey = null;
+        let pendingRangeKey = null;
+        let activeRangeRequest = 0;
+        let rangeLoading = false;
+        let lastReportResult = null;
 
         function ensureCalendar() {
             if (calendar) return calendar;
@@ -1438,7 +1444,10 @@
                 eventTimeFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
                 dayHeaderContent: (args) => formatDayHeader(args.date),
                 titleFormat: () => '',
-                datesSet: (info) => updateToolbarTitle(info.start, info.end),
+                datesSet: (info) => {
+                    updateToolbarTitle(info.start, info.end);
+                    handleCalendarDatesSet(info);
+                },
                 eventContent: (arg) => renderEventContent(arg.event),
                 eventDidMount: (info) => applyEventMetadata(info.el, info.event),
                 selectable: true,
@@ -1451,6 +1460,7 @@
             });
             calendar.render();
             updateToolbarTitle(calendar.view.currentStart, calendar.view.currentEnd);
+            handleCalendarDatesSet({ start: calendar.view.currentStart, end: calendar.view.currentEnd, view: calendar.view });
             return calendar;
         }
 
@@ -1481,6 +1491,124 @@
             const formatter = new Intl.DateTimeFormat('fa-IR', { dateStyle: 'medium' });
             const inclusiveEnd = new Date(end.getTime() - 1);
             titleEl.textContent = `${formatter.format(start)} — ${formatter.format(inclusiveEnd)}`;
+        }
+
+        function handleCalendarDatesSet(info) {
+            if (!info) return;
+            const start = info.start instanceof Date ? new Date(info.start.getTime()) : null;
+            const end = info.end instanceof Date ? new Date(info.end.getTime()) : null;
+            const viewType = info?.view?.type || calendar?.view?.type || null;
+            if (!start || !end) return;
+            const previousStartIso = calendarRange?.start ? calendarRange.start.toISOString() : null;
+            const previousEndIso = calendarRange?.end ? calendarRange.end.toISOString() : null;
+            const previousViewType = calendarRange?.viewType || null;
+            const nextStartIso = start.toISOString();
+            const nextEndIso = end.toISOString();
+            const changed = !calendarRange
+                || previousStartIso !== nextStartIso
+                || previousEndIso !== nextEndIso
+                || previousViewType !== viewType;
+            calendarRange = { start, end, viewType };
+            if (!canShowCalendar(currentSelection)) {
+                return;
+            }
+            if (changed) {
+                pendingRangeKey = null;
+                if (!rangeLoading) {
+                    lastFetchedRangeKey = null;
+                }
+            }
+            if (changed || !lastFetchedRangeKey) {
+                refreshCalendarRange({ force: changed, reason: 'dates-set' });
+            }
+        }
+
+        function refreshCalendarRange({ force = false } = {}) {
+            if (!calendarRange) return;
+            if (!canShowCalendar(currentSelection)) return;
+            if (typeof window.appApi?.fetchWorklogsRange !== 'function') {
+                clearEvents();
+                showMessage('Calendar range API is unavailable.');
+                return;
+            }
+            const username = (currentSelection?.username || '').trim();
+            if (!username) return;
+            const { start, end, viewType } = calendarRange;
+            if (!(start instanceof Date) || !(end instanceof Date)) return;
+
+            const rangeKey = [username, viewType || 'default', start.toISOString(), end.toISOString()].join('|');
+            if (!force) {
+                if (rangeKey === lastFetchedRangeKey) {
+                    return;
+                }
+                if (rangeKey === pendingRangeKey && rangeLoading) {
+                    return;
+                }
+            }
+
+            pendingRangeKey = rangeKey;
+            const existingEvents = (calendar && typeof calendar.getEvents === 'function') ? calendar.getEvents() : [];
+            const hadEvents = existingEvents.length > 0;
+            if (!hadEvents) {
+                showMessage('Loading…');
+            }
+            rangeLoading = true;
+            const requestId = ++activeRangeRequest;
+            window.appApi.fetchWorklogsRange({
+                username,
+                start: start.toISOString(),
+                end: end.toISOString(),
+                viewType
+            }).then((res) => {
+                if (requestId !== activeRangeRequest) {
+                    return;
+                }
+                pendingRangeKey = null;
+                if (!res || !res.ok) {
+                    if (!hadEvents) {
+                        clearEvents();
+                    }
+                    const message = res ? (res.reason || 'Unable to load worklogs.') : 'Unable to load worklogs.';
+                    showMessage(message);
+                    lastFetchedRangeKey = null;
+                    return;
+                }
+
+                currentBaseUrl = res.baseUrl || currentBaseUrl || null;
+                const events = buildEvents(res.worklogs, res.baseUrl || currentBaseUrl);
+                if (!events.length) {
+                    clearEvents();
+                    showMessage('No worklogs found for this period.');
+                    lastFetchedRangeKey = rangeKey;
+                    return;
+                }
+
+                setEvents(events);
+                hideMessage();
+                lastFetchedRangeKey = rangeKey;
+
+                const visibleIds = new Set(events.map((event) => String(event.id)));
+                for (const id of Array.from(recentlyCreatedWorklogIds)) {
+                    if (!visibleIds.has(id)) {
+                        recentlyCreatedWorklogIds.delete(id);
+                    }
+                }
+            }).catch((err) => {
+                if (requestId !== activeRangeRequest) {
+                    return;
+                }
+                console.error('Failed to load calendar range', err);
+                pendingRangeKey = null;
+                if (!hadEvents) {
+                    clearEvents();
+                }
+                showMessage(err?.message || 'Unable to load worklogs.');
+                lastFetchedRangeKey = null;
+            }).finally(() => {
+                if (requestId === activeRangeRequest) {
+                    rangeLoading = false;
+                }
+            });
         }
 
         function computeEventHours(event) {
@@ -2156,9 +2284,32 @@
             if (!Array.isArray(worklogs) || worklogs.length === 0) {
                 return [];
             }
-            const uniqueWorklogs = Array.from(new Set(worklogs));
-            return uniqueWorklogs.map((worklog, idx) => {
-                let startMoment = createMoment(worklog?.date || worklog?.started);
+            const entries = [];
+            const seenIds = new Set();
+            worklogs.forEach((worklog, idx) => {
+                if (!worklog) return;
+                const rawId = worklog.worklogId ?? worklog.id ?? `worklog-${idx}`;
+                const id = String(rawId);
+                if (seenIds.has(id)) {
+                    return;
+                }
+                seenIds.add(id);
+                entries.push({ worklog, id });
+            });
+            return entries.map(({ worklog, id }) => {
+                let startMoment = null;
+                if (worklog?.started) {
+                    startMoment = createMoment(worklog.started);
+                }
+                if (!startMoment && worklog?.start) {
+                    startMoment = createMoment(worklog.start);
+                }
+                if (!startMoment && worklog?.startTime) {
+                    startMoment = createMoment(worklog.startTime);
+                }
+                if (!startMoment && worklog?.date) {
+                    startMoment = createMoment(worklog.date);
+                }
                 if (!startMoment && worklog?.persianDate) {
                     startMoment = createMoment(worklog.persianDate, 'jYYYY/jM/jD');
                 }
@@ -2173,7 +2324,6 @@
                 const issueKey = (worklog?.issueKey || '').toString().trim();
                 const titleParts = [issueKey, summary].filter(Boolean);
                 const hoursText = Number.isFinite(hoursValue) ? formatHours(hoursValue) : null;
-                const id = String(worklog?.worklogId ?? worklog?.id ?? `worklog-${idx}`);
                 const isNew = recentlyCreatedWorklogIds.has(id);
                 return {
                     id,
@@ -2191,7 +2341,9 @@
                         hours,
                         hoursText,
                         issueUrl: buildIssueUrl(baseUrl, issueKey),
-                        isNew
+                        isNew,
+                        started: worklog?.started || null,
+                        date: worklog?.date || null
                     }
                 };
             }).filter(Boolean);
@@ -2221,6 +2373,9 @@
         showMessage('Select a user and month to see worklogs.');
 
         reportStateInstance.subscribe((state) => {
+            const previousSelection = currentSelection ? { ...currentSelection } : {};
+            const previousUsername = (previousSelection?.username || '').trim();
+
             currentSelection = state?.selection ? { ...state.selection } : {};
             const selectionKey = selectionKeyOf(currentSelection);
             if (selectionKey && selectionKey !== lastSelectionKey) {
@@ -2235,12 +2390,20 @@
                 lastSelectionKey = null;
             }
 
+            const username = (currentSelection?.username || '').trim();
+            const usernameChanged = username !== previousUsername;
+
             if (!canShowCalendar(currentSelection)) {
                 clearPendingDraft({ silent: true });
                 closeModal({ discard: false, silent: true });
                 clearEvents();
                 showMessage('Select a user and month to see worklogs.');
                 setFeedback(null);
+                calendarRange = null;
+                lastFetchedRangeKey = null;
+                pendingRangeKey = null;
+                rangeLoading = false;
+                activeRangeRequest += 1;
                 return;
             }
 
@@ -2250,36 +2413,24 @@
                 setFeedback(null);
             }
 
-            if (state.isFetching && !state.result) {
-                clearEvents();
-                showMessage('Loading…');
-                return;
+            if (state?.result?.baseUrl) {
+                currentBaseUrl = state.result.baseUrl;
             }
 
-            const res = state.result;
-            if (!res || !res.ok) {
-                clearEvents();
-                const message = res ? (res.reason || 'Unable to load worklogs.') : 'No data yet.';
-                showMessage(message);
-                return;
+            const resultChanged = state?.result && state.result !== lastReportResult;
+            lastReportResult = state?.result || null;
+
+            const cal = ensureCalendar();
+            if (!calendarRange && cal) {
+                handleCalendarDatesSet({ start: cal.view.currentStart, end: cal.view.currentEnd, view: cal.view });
             }
 
-            currentBaseUrl = res.baseUrl || null;
-            const events = buildEvents(res.worklogs, res.baseUrl);
-            if (!events.length) {
-                clearEvents();
-                showMessage('No worklogs found for this period.');
-                return;
-            }
-
-            setEvents(events);
-            hideMessage();
-
-            const visibleIds = new Set(events.map((event) => String(event.id)));
-            for (const id of Array.from(recentlyCreatedWorklogIds)) {
-                if (!visibleIds.has(id)) {
-                    recentlyCreatedWorklogIds.delete(id);
-                }
+            if (usernameChanged || resultChanged) {
+                lastFetchedRangeKey = null;
+                pendingRangeKey = null;
+                refreshCalendarRange({ force: true });
+            } else if (!rangeLoading && (!lastFetchedRangeKey || !calendarRange)) {
+                refreshCalendarRange();
             }
         });
 
