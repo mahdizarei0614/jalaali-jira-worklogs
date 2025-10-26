@@ -717,6 +717,8 @@
 
                 const hoursRaw = log.timeSpentSeconds ?? log.timeSpentInSeconds ?? 0;
                 const hours = Number.isFinite(hoursRaw) ? hoursRaw / 3600 : 0;
+                const startedMoment = startedRaw ? moment(startedRaw) : null;
+                const startedTime = startedMoment?.isValid() ? startedMoment.format('HH:mm') : null;
 
                 totalWorklogs += 1;
                 totalLoggedHours += hours;
@@ -729,6 +731,8 @@
                         issueType: issue?.fields?.issuetype?.name || null,
                         summary: issue?.fields?.summary,
                         date,
+                        started: startedRaw || null,
+                        startedTime,
                         persianDate: dateMoment.format('jYYYY/jMM/jDD'),
                         timeSpent: log.timeSpent,
                         hours: +(hours).toFixed(2),
@@ -915,6 +919,87 @@
         }
 
         return { ok: true, jYear, seasons };
+    }
+
+    async function fetchCalendarWorklogs({ baseUrl, headers, username, startDate, endDate }) {
+        const startClean = toAsciiDigits(startDate);
+        const endClean = toAsciiDigits(endDate);
+        const startMoment = moment(startClean, 'YYYY-MM-DD', true);
+        const endMoment = moment(endClean, 'YYYY-MM-DD', true);
+        if (!startMoment.isValid() || !endMoment.isValid()) {
+            return { ok: false, reason: 'Invalid calendar date range.' };
+        }
+        if (endMoment.isBefore(startMoment, 'day')) {
+            return { ok: false, reason: 'Calendar range end must be on or after the start date.' };
+        }
+
+        const rangeStart = startMoment.clone().startOf('day');
+        const rangeEnd = endMoment.clone().endOf('day');
+        const fromYMD = rangeStart.format('YYYY-MM-DD');
+        const toYMD = rangeEnd.format('YYYY-MM-DD');
+        const jql = `worklogAuthor = "${username}" AND worklogDate >= "${fromYMD}" AND worklogDate <= "${toYMD}"`;
+
+        const issues = await searchIssuesPaged(baseUrl, headers, jql);
+
+        const seenWorklogKeys = new Set();
+        const worklogs = [];
+
+        for (const issue of issues) {
+            const initial = issue?.fields?.worklog ?? {};
+            const fullWls = await getFullIssueWorklogs(baseUrl, headers, issue.key, initial);
+            for (const log of fullWls) {
+                if (!authorMatches(log.author, username)) continue;
+
+                const key = worklogKey(issue.key, log);
+                if (seenWorklogKeys.has(key)) continue;
+                seenWorklogKeys.add(key);
+
+                const startedRaw = typeof log.started === 'string' ? log.started : '';
+                const date = startedRaw.split('T')[0];
+                if (!date) continue;
+
+                const dateMoment = moment(date, 'YYYY-MM-DD', true);
+                if (!dateMoment.isValid()) continue;
+                if (dateMoment.isBefore(rangeStart, 'day') || dateMoment.isAfter(rangeEnd, 'day')) continue;
+
+                const hoursRaw = log.timeSpentSeconds ?? log.timeSpentInSeconds ?? 0;
+                const hours = Number.isFinite(hoursRaw) ? hoursRaw / 3600 : 0;
+                const startedMoment = startedRaw ? moment(startedRaw) : null;
+                const startedTime = startedMoment?.isValid() ? startedMoment.format('HH:mm') : null;
+
+                worklogs.push({
+                    worklogId: log.id || null,
+                    issueKey: issue.key,
+                    issueType: issue?.fields?.issuetype?.name || null,
+                    summary: issue?.fields?.summary,
+                    date,
+                    started: startedRaw || null,
+                    startedTime,
+                    persianDate: dateMoment.format('jYYYY/jMM/jDD'),
+                    timeSpent: log.timeSpent,
+                    hours: +(hours).toFixed(2),
+                    comment: log.comment || '',
+                    dueDate: issue?.fields?.duedate || null,
+                    status: issue?.fields?.status?.name || null
+                });
+            }
+        }
+
+        worklogs.sort((a, b) => {
+            const aMoment = moment(a.started || `${a.date}T00:00:00`);
+            const bMoment = moment(b.started || `${b.date}T00:00:00`);
+            if (aMoment.isValid() && bMoment.isValid()) {
+                return aMoment.diff(bMoment);
+            }
+            return a.date.localeCompare(b.date);
+        });
+
+        return {
+            ok: true,
+            baseUrl,
+            worklogs,
+            range: { start: fromYMD, end: toYMD }
+        };
     }
 
     async function computeScan(opts) {
@@ -1174,6 +1259,40 @@
                     }
                 }
             };
+        }
+    });
+
+    ipcMain.handle('calendar:worklogs', async (_evt, payload) => {
+        const username = (payload?.username || '').trim();
+        const startDate = (payload?.startDate || '').trim();
+        const endDate = (payload?.endDate || '').trim();
+
+        if (!username) {
+            return { ok: false, reason: 'No Jira username selected in UI.' };
+        }
+        if (!startDate || !endDate) {
+            return { ok: false, reason: 'Calendar range is missing start or end date.' };
+        }
+
+        const auth = await getJiraAuthContext();
+        if (!auth.ok) {
+            return auth;
+        }
+
+        try {
+            return await fetchCalendarWorklogs({
+                baseUrl: auth.baseUrl,
+                headers: auth.headers,
+                username,
+                startDate,
+                endDate
+            });
+        } catch (err) {
+            console.error('Failed to load calendar worklogs', err);
+            const reason = err?.response?.status
+                ? `${err.response.status} ${err.response.statusText}`
+                : (err?.message || 'Failed to load worklogs.');
+            return { ok: false, reason };
         }
     });
 
