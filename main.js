@@ -694,6 +694,7 @@
         const seenWorklogKeys = new Set();
         const worklogs = [];
         const dailyTotalsMap = {};
+        const calendarRawEntries = [];
         let totalWorklogs = 0;
         let totalLoggedHours = 0;
 
@@ -721,6 +722,13 @@
                 totalWorklogs += 1;
                 totalLoggedHours += hours;
                 dailyTotalsMap[date] = (dailyTotalsMap[date] || 0) + hours;
+                calendarRawEntries.push({
+                    issueKey: issue.key,
+                    worklogId: log.id || null,
+                    started: startedRaw || null,
+                    timeSpent: log.timeSpent ?? null,
+                    timeSpentSeconds: Number.isFinite(hoursRaw) ? hoursRaw : null
+                });
 
                 if (includeDetails) {
                     worklogs.push({
@@ -802,6 +810,9 @@
                 color
             });
         }
+
+        console.log('[calendar] Raw worklogs from server for calendar view', calendarRawEntries);
+        console.log('[calendar] Transformed calendar entries', days);
 
         const totalHours = +days.reduce((sum, d) => sum + d.hours, 0).toFixed(2);
         const workdaysAll = days.filter(d => d.isWorkday).length;
