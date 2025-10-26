@@ -2153,17 +2153,29 @@
         }
 
         function buildEvents(worklogs, baseUrl) {
-            if (!Array.isArray(worklogs) || worklogs.length === 0) {
-                return [];
+            const rawList = Array.isArray(worklogs) ? worklogs : [];
+            if (rawList.length === 0) {
+                return {
+                    events: [],
+                    entries: [],
+                    totals: {
+                        received: 0,
+                        unique: 0,
+                        skipped: 0
+                    }
+                };
             }
-            const uniqueWorklogs = Array.from(new Set(worklogs));
-            return uniqueWorklogs.map((worklog, idx) => {
+            const uniqueWorklogs = Array.from(new Set(rawList));
+            const entries = [];
+            let skipped = 0;
+            uniqueWorklogs.forEach((worklog, idx) => {
                 let startMoment = createMoment(worklog?.date || worklog?.started);
                 if (!startMoment && worklog?.persianDate) {
                     startMoment = createMoment(worklog.persianDate, 'jYYYY/jM/jD');
                 }
                 if (!startMoment) {
-                    return null;
+                    skipped += 1;
+                    return;
                 }
                 const hoursValue = Number.parseFloat(worklog?.hours);
                 const hours = Number.isFinite(hoursValue) ? hoursValue : 0;
@@ -2175,7 +2187,7 @@
                 const hoursText = Number.isFinite(hoursValue) ? formatHours(hoursValue) : null;
                 const id = String(worklog?.worklogId ?? worklog?.id ?? `worklog-${idx}`);
                 const isNew = recentlyCreatedWorklogIds.has(id);
-                return {
+                const transformed = {
                     id,
                     title: titleParts.join(' — ') || (worklog?.persianDate || ''),
                     start: startMoment.toISOString(),
@@ -2194,7 +2206,49 @@
                         isNew
                     }
                 };
-            }).filter(Boolean);
+                entries.push({ raw: worklog, transformed });
+            });
+            return {
+                events: entries.map((entry) => entry.transformed),
+                entries,
+                totals: {
+                    received: rawList.length,
+                    unique: uniqueWorklogs.length,
+                    skipped
+                }
+            };
+        }
+
+        function logCalendarWorklogs(rawWorklogs, buildResult) {
+            const entries = Array.isArray(buildResult?.entries) ? buildResult.entries : [];
+            const totals = buildResult?.totals || {};
+            const safeRaw = Array.isArray(rawWorklogs) ? rawWorklogs : [];
+            const payload = {
+                status: 'calendar-worklogs',
+                fetchedAt: new Date().toISOString(),
+                totals: {
+                    received: totals.received ?? safeRaw.length,
+                    unique: totals.unique ?? entries.length,
+                    rendered: entries.length,
+                    skipped: totals.skipped ?? Math.max(0, (totals.unique ?? entries.length) - entries.length)
+                },
+                worklogs: entries.map((entry) => ({
+                    raw: entry.raw,
+                    transformed: entry.transformed
+                }))
+            };
+
+            renderWorklogLog(entries.length ? payload : { ...payload, message: 'No worklogs to render.' });
+
+            if (typeof console?.groupCollapsed === 'function') {
+                console.groupCollapsed('Calendar worklogs');
+                console.log('Raw worklogs from server:', safeRaw);
+                console.log('Transformed calendar events:', entries.map((entry) => entry.transformed));
+                console.groupEnd();
+            } else {
+                console.log('Raw worklogs from server:', safeRaw);
+                console.log('Transformed calendar events:', entries.map((entry) => entry.transformed));
+            }
         }
 
         function canShowCalendar(selection) {
@@ -2241,6 +2295,7 @@
                 clearEvents();
                 showMessage('Select a user and month to see worklogs.');
                 setFeedback(null);
+                renderWorklogLog(null);
                 return;
             }
 
@@ -2253,6 +2308,7 @@
             if (state.isFetching && !state.result) {
                 clearEvents();
                 showMessage('Loading…');
+                renderWorklogLog(null);
                 return;
             }
 
@@ -2261,11 +2317,14 @@
                 clearEvents();
                 const message = res ? (res.reason || 'Unable to load worklogs.') : 'No data yet.';
                 showMessage(message);
+                renderWorklogLog({ status: 'calendar-worklogs', message });
                 return;
             }
 
             currentBaseUrl = res.baseUrl || null;
-            const events = buildEvents(res.worklogs, res.baseUrl);
+            const buildResult = buildEvents(res.worklogs, res.baseUrl);
+            logCalendarWorklogs(res.worklogs, buildResult);
+            const events = buildResult.events;
             if (!events.length) {
                 clearEvents();
                 showMessage('No worklogs found for this period.');
