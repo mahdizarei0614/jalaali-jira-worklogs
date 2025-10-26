@@ -717,6 +717,8 @@
 
                 const hoursRaw = log.timeSpentSeconds ?? log.timeSpentInSeconds ?? 0;
                 const hours = Number.isFinite(hoursRaw) ? hoursRaw / 3600 : 0;
+                const startedMoment = startedRaw ? moment(startedRaw) : null;
+                const startedTime = startedMoment?.isValid() ? startedMoment.format('HH:mm') : null;
 
                 totalWorklogs += 1;
                 totalLoggedHours += hours;
@@ -729,6 +731,8 @@
                         issueType: issue?.fields?.issuetype?.name || null,
                         summary: issue?.fields?.summary,
                         date,
+                        started: startedRaw || null,
+                        startedTime,
                         persianDate: dateMoment.format('jYYYY/jMM/jDD'),
                         timeSpent: log.timeSpent,
                         hours: +(hours).toFixed(2),
@@ -955,6 +959,111 @@
         });
 
         return { ...monthResult, quarterReport };
+    }
+
+    async function fetchWorklogsRange(opts = {}) {
+        const username = (opts?.username || '').trim();
+        if (!username) {
+            return { ok: false, reason: 'No Jira username provided.' };
+        }
+
+        const rawStart = opts?.start ?? opts?.from ?? opts?.rangeStart ?? null;
+        const rawEnd = opts?.end ?? opts?.to ?? opts?.rangeEnd ?? null;
+        if (!rawStart || !rawEnd) {
+            return { ok: false, reason: 'Missing start or end of range.' };
+        }
+
+        const startMoment = moment(rawStart);
+        const endMomentExclusive = moment(rawEnd);
+        if (!startMoment.isValid() || !endMomentExclusive.isValid()) {
+            return { ok: false, reason: 'Invalid range provided.' };
+        }
+
+        const startDay = startMoment.clone().startOf('day');
+        let endDay = endMomentExclusive.clone().subtract(1, 'millisecond').endOf('day');
+        if (!endDay.isValid() || endDay.isBefore(startDay)) {
+            endDay = startDay.clone().endOf('day');
+        }
+
+        const auth = await getJiraAuthContext();
+        if (!auth.ok) {
+            return auth;
+        }
+
+        const fromYMD = startDay.format('YYYY-MM-DD');
+        const toYMD = endDay.format('YYYY-MM-DD');
+        const jql = `worklogAuthor = "${username}" AND worklogDate >= "${fromYMD}" AND worklogDate <= "${toYMD}"`;
+
+        let issues;
+        try {
+            issues = await searchIssuesPaged(auth.baseUrl, auth.headers, jql);
+        } catch (err) {
+            console.error('Failed to search issues for worklog range', err);
+            return { ok: false, reason: err?.message || 'Unable to load worklogs.' };
+        }
+
+        const seenWorklogKeys = new Set();
+        const worklogs = [];
+
+        for (const issue of issues) {
+            try {
+                const initial = issue?.fields?.worklog ?? {};
+                const fullWorklogs = await getFullIssueWorklogs(auth.baseUrl, auth.headers, issue.key, initial);
+                for (const log of fullWorklogs) {
+                    if (!authorMatches(log.author, username)) continue;
+
+                    const key = worklogKey(issue.key, log);
+                    if (seenWorklogKeys.has(key)) continue;
+
+                    const startedRaw = typeof log.started === 'string' ? log.started : '';
+                    const date = startedRaw.split('T')[0];
+                    if (!date) continue;
+
+                    const dateMoment = moment(date, 'YYYY-MM-DD', true);
+                    if (!dateMoment.isValid()) continue;
+                    if (dateMoment.isBefore(startDay, 'day') || dateMoment.isAfter(endDay, 'day')) continue;
+
+                    seenWorklogKeys.add(key);
+
+                    const hoursRaw = log.timeSpentSeconds ?? log.timeSpentInSeconds ?? 0;
+                    const hours = Number.isFinite(hoursRaw) ? hoursRaw / 3600 : 0;
+                    const startedMoment = startedRaw ? moment(startedRaw) : null;
+                    const startedTime = startedMoment?.isValid() ? startedMoment.format('HH:mm') : null;
+
+                    worklogs.push({
+                        worklogId: log.id || null,
+                        issueKey: issue.key,
+                        issueType: issue?.fields?.issuetype?.name || null,
+                        summary: issue?.fields?.summary,
+                        date,
+                        started: startedRaw || null,
+                        startedTime,
+                        persianDate: dateMoment.format('jYYYY/jMM/jDD'),
+                        timeSpent: log.timeSpent,
+                        hours: +hours.toFixed(2),
+                        comment: log.comment || '',
+                        dueDate: issue?.fields?.duedate || null,
+                        status: issue?.fields?.status?.name || null
+                    });
+                }
+            } catch (err) {
+                console.error('Failed to load worklogs for issue', issue?.key, err);
+            }
+        }
+
+        worklogs.sort((a, b) => {
+            const aMoment = a.started ? moment(a.started) : moment(a.date, 'YYYY-MM-DD');
+            const bMoment = b.started ? moment(b.started) : moment(b.date, 'YYYY-MM-DD');
+            return aMoment.valueOf() - bMoment.valueOf();
+        });
+
+        return {
+            ok: true,
+            username,
+            range: { from: fromYMD, to: toYMD },
+            baseUrl: auth.baseUrl,
+            worklogs
+        };
     }
     // ===== Notifications / scheduling, auth, routing, IPC (unchanged from your last working version) =====
     // ... keep the rest of your file exactly as in your latest working build ...
@@ -1299,4 +1408,5 @@
     });
 
     ipcMain.handle('scan:now', (_evt, opts) => computeScan(opts || {}));
+    ipcMain.handle('worklogs:range', async (_evt, payload) => fetchWorklogsRange(payload || {}));
 })();
