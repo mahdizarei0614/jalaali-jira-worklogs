@@ -1437,12 +1437,12 @@
                 height: 'auto',
                 expandRows: true,
                 stickyHeaderDates: true,
-                headerToolbar: { start: 'prev,next today', center: 'title', end: '' },
-                buttonText: { today: 'امروز' },
+                headerToolbar: { start: 'prev,next today', center: 'title', end: 'timeGridWeek,dayGridMonth' },
+                buttonText: { today: 'امروز', timeGridWeek: 'هفته', dayGridMonth: 'ماه' },
                 nowIndicator: true,
                 slotLabelFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
                 eventTimeFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
-                dayHeaderContent: (args) => formatDayHeader(args.date),
+                dayHeaderContent: (args) => formatDayHeader(args.date, args.view?.type),
                 titleFormat: () => '',
                 datesSet: handleCalendarDatesSet,
                 eventContent: (arg) => renderEventContent(arg.event),
@@ -1460,18 +1460,27 @@
             return calendar;
         }
 
-        function formatDayHeader(date) {
+        function formatDayHeader(date, viewType) {
             const m = createMoment(date);
             if (m) {
-                const html = `
-                    <div class="calendar-day-header">
-                        <span class="calendar-day-header__name">${escapeHtml(m.format('dddd'))}</span>
-                        <span class="calendar-day-header__date">${escapeHtml(m.format('D'))}</span>
-                    </div>
-                `;
+                const html = viewType === 'dayGridMonth'
+                    ? `
+                        <div class="calendar-day-header">
+                            <span class="calendar-day-header__name">${escapeHtml(m.format('dddd'))}</span>
+                        </div>
+                    `
+                    : `
+                        <div class="calendar-day-header">
+                            <span class="calendar-day-header__name">${escapeHtml(m.format('dddd'))}</span>
+                            <span class="calendar-day-header__date">${escapeHtml(m.format('D'))}</span>
+                        </div>
+                    `;
                 return { html };
             }
-            const text = new Intl.DateTimeFormat('fa-IR', { weekday: 'short', day: 'numeric' }).format(date);
+            const formatOptions = viewType === 'dayGridMonth'
+                ? { weekday: 'short' }
+                : { weekday: 'short', day: 'numeric' };
+            const text = new Intl.DateTimeFormat('fa-IR', formatOptions).format(date);
             return { text };
         }
 
@@ -1556,11 +1565,10 @@
                     const events = buildEvents(res.worklogs, res.baseUrl);
                     if (!events.length) {
                         clearEvents();
-                        showMessage('No worklogs found for this period.');
                     } else {
                         setEvents(events);
-                        hideMessage();
                     }
+                    hideMessage();
                     const visibleIds = new Set(events.map((event) => String(event.id)));
                     for (const id of Array.from(recentlyCreatedWorklogIds)) {
                         if (!visibleIds.has(id)) {
