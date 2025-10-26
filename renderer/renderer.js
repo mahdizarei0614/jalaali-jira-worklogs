@@ -1428,6 +1428,12 @@
         const issuesCache = new Map();
         const recentlyCreatedWorklogIds = new Set();
 
+        function invalidateIssuesCache(username) {
+            const key = (username || '').trim();
+            if (!key) return;
+            issuesCache.delete(key);
+        }
+
         function ensureCalendar() {
             if (calendar) return calendar;
             calendar = new CalendarCtor(calendarEl, {
@@ -1569,12 +1575,6 @@
                         setEvents(events);
                     }
                     hideMessage();
-                    const visibleIds = new Set(events.map((event) => String(event.id)));
-                    for (const id of Array.from(recentlyCreatedWorklogIds)) {
-                        if (!visibleIds.has(id)) {
-                            recentlyCreatedWorklogIds.delete(id);
-                        }
-                    }
                     return res;
                 })
                 .catch((err) => {
@@ -1605,7 +1605,10 @@
                 const rangeStart = view.currentStart || info.start;
                 const rangeEnd = view.currentEnd || info.end;
                 if (rangeStart && rangeEnd) {
-                    setCalendarRange(rangeStart, rangeEnd);
+                    const rangeChanged = setCalendarRange(rangeStart, rangeEnd);
+                    if (rangeChanged && recentlyCreatedWorklogIds.size) {
+                        recentlyCreatedWorklogIds.clear();
+                    }
                     refreshCalendarRange({ force: true });
                 }
             }
@@ -2168,6 +2171,7 @@
                 closeModal({ discard: false, silent: true });
                 return;
             }
+            const usernameKey = (currentSelection?.username || '').trim();
             const issueKey = props.issueKey;
             if (!issueKey) {
                 openModalForEvent(event, { preserveValues: true });
@@ -2214,11 +2218,17 @@
                 } else {
                     renderWorklogLog({ success: true, message: 'Worklog added successfully.' });
                 }
+                if (usernameKey) {
+                    invalidateIssuesCache(usernameKey);
+                }
                 setFeedback('Worklog added successfully. Refreshing data…', { variant: 'success', timeout: 5000 });
                 clearPendingDraft({ silent: true });
                 closeModal({ discard: false, silent: true });
                 await reportStateInstance.refresh({ force: true });
                 await refreshCalendarRange({ force: true });
+                if (usernameKey) {
+                    loadIssuesForUser(usernameKey).catch(() => {});
+                }
             } catch (err) {
                 console.error('Failed to submit worklog', err);
                 if (err?.log) {
