@@ -1421,6 +1421,24 @@
         let activeIssueMap = new Map();
         const issuesCache = new Map();
         const recentlyCreatedWorklogIds = new Set();
+        let suppressCalendarSync = false;
+        let resumeCalendarSyncTimer = null;
+
+        function withSuppressedCalendarSync(callback) {
+            suppressCalendarSync = true;
+            if (resumeCalendarSyncTimer) {
+                clearTimeout(resumeCalendarSyncTimer);
+                resumeCalendarSyncTimer = null;
+            }
+            try {
+                callback();
+            } finally {
+                resumeCalendarSyncTimer = window.setTimeout(() => {
+                    suppressCalendarSync = false;
+                    resumeCalendarSyncTimer = null;
+                }, 0);
+            }
+        }
 
         function ensureCalendar() {
             if (calendar) return calendar;
@@ -1438,7 +1456,7 @@
                 eventTimeFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
                 dayHeaderContent: (args) => formatDayHeader(args.date),
                 titleFormat: () => '',
-                datesSet: (info) => updateToolbarTitle(info.start, info.end),
+                datesSet: (info) => handleCalendarDatesSet(info),
                 eventContent: (arg) => renderEventContent(arg.event),
                 eventDidMount: (info) => applyEventMetadata(info.el, info.event),
                 selectable: true,
@@ -1481,6 +1499,45 @@
             const formatter = new Intl.DateTimeFormat('fa-IR', { dateStyle: 'medium' });
             const inclusiveEnd = new Date(end.getTime() - 1);
             titleEl.textContent = `${formatter.format(start)} — ${formatter.format(inclusiveEnd)}`;
+        }
+
+        function handleCalendarDatesSet(info) {
+            if (!info) return;
+            updateToolbarTitle(info.start, info.end);
+            if (suppressCalendarSync) {
+                return;
+            }
+            syncSelectionToCalendar(info);
+        }
+
+        function syncSelectionToCalendar(info) {
+            const viewType = info?.view?.type || '';
+            let targetDate = info?.start instanceof Date ? info.start : null;
+            if (/week/i.test(viewType) && info?.start instanceof Date && info?.end instanceof Date) {
+                const startMs = info.start.getTime();
+                const inclusiveEndMs = info.end.getTime() - 1;
+                const rangeMidpoint = startMs + Math.max(0, inclusiveEndMs - startMs) / 2;
+                targetDate = new Date(rangeMidpoint);
+            } else if (/month/i.test(viewType) && info?.start instanceof Date) {
+                targetDate = info.start;
+            } else if (!targetDate && info?.end instanceof Date) {
+                targetDate = new Date(info.end.getTime() - 1);
+            }
+            if (!targetDate) return;
+            const targetMoment = createMoment(targetDate);
+            if (!targetMoment) return;
+            const jYear = Number.parseInt(targetMoment.format('jYYYY'), 10);
+            const jMonth = Number.parseInt(targetMoment.format('jM'), 10);
+            if (!Number.isFinite(jYear) || !Number.isFinite(jMonth)) return;
+            if (currentSelection?.jYear === jYear && currentSelection?.jMonth === jMonth) {
+                return;
+            }
+            reportStateInstance.setSelection(
+                { jYear, jMonth },
+                { pushSelection: true, refresh: true }
+            ).catch((err) => {
+                console.warn('Failed to update selection from calendar', err);
+            });
         }
 
         function computeEventHours(event) {
@@ -2152,16 +2209,71 @@
             });
         }
 
+        function resolveWorklogStartMoment(worklog) {
+            if (!worklog) return null;
+            const rawStart = [worklog.started, worklog.start, worklog.startDateTime]
+                .map((value) => (typeof value === 'string' ? value.trim() : ''))
+                .find((value) => value);
+            if (rawStart) {
+                const startMoment = createMoment(rawStart);
+                if (startMoment) return startMoment;
+                if (momentRef && typeof momentRef.parseZone === 'function') {
+                    const zoned = momentRef.parseZone(rawStart);
+                    if (zoned?.isValid()) {
+                        if (typeof zoned.locale === 'function') {
+                            zoned.locale('fa');
+                        }
+                        return zoned;
+                    }
+                }
+            }
+            const timeValue = [worklog.startTime, worklog.time, worklog.startedTime]
+                .map((value) => (typeof value === 'string' ? value.trim() : ''))
+                .find((value) => value);
+            const dateValue = (worklog.date || worklog.gregorianDate || '').toString().trim();
+            if (momentRef && dateValue && timeValue) {
+                const hasHyphen = dateValue.includes('-');
+                const hasSlash = dateValue.includes('/');
+                if (hasHyphen) {
+                    const combined = momentRef(`${dateValue} ${timeValue}`, 'YYYY-MM-DD HH:mm', true);
+                    if (combined?.isValid()) {
+                        if (typeof combined.locale === 'function') combined.locale('fa');
+                        return combined;
+                    }
+                } else if (hasSlash) {
+                    const combined = momentRef(`${dateValue} ${timeValue}`, 'jYYYY/jM/jD HH:mm', true);
+                    if (combined?.isValid()) {
+                        if (typeof combined.locale === 'function') combined.locale('fa');
+                        return combined;
+                    }
+                }
+            }
+            const persianDate = (worklog.persianDate || '').toString().trim();
+            if (momentRef && persianDate && timeValue) {
+                const combined = momentRef(`${persianDate} ${timeValue}`, 'jYYYY/jM/jD HH:mm', true);
+                if (combined?.isValid()) {
+                    if (typeof combined.locale === 'function') combined.locale('fa');
+                    return combined;
+                }
+            }
+            if (dateValue) {
+                const gregorianMoment = createMoment(dateValue);
+                if (gregorianMoment) return gregorianMoment;
+            }
+            if (persianDate) {
+                const persianMoment = createMoment(persianDate, 'jYYYY/jM/jD');
+                if (persianMoment) return persianMoment;
+            }
+            return null;
+        }
+
         function buildEvents(worklogs, baseUrl) {
             if (!Array.isArray(worklogs) || worklogs.length === 0) {
                 return [];
             }
             const uniqueWorklogs = Array.from(new Set(worklogs));
             return uniqueWorklogs.map((worklog, idx) => {
-                let startMoment = createMoment(worklog?.date || worklog?.started);
-                if (!startMoment && worklog?.persianDate) {
-                    startMoment = createMoment(worklog.persianDate, 'jYYYY/jM/jD');
-                }
+                const startMoment = resolveWorklogStartMoment(worklog);
                 if (!startMoment) {
                     return null;
                 }
@@ -2228,8 +2340,9 @@
                 const targetMoment = createMoment(`${currentSelection.jYear}/${currentSelection.jMonth}/1`, 'jYYYY/jM/jD');
                 if (targetMoment) {
                     const cal = ensureCalendar();
-                    cal.gotoDate(targetMoment.toDate());
-                    updateToolbarTitle(cal.view.currentStart, cal.view.currentEnd);
+                    withSuppressedCalendarSync(() => {
+                        cal.gotoDate(targetMoment.toDate());
+                    });
                 }
             } else if (!selectionKey) {
                 lastSelectionKey = null;
