@@ -118,7 +118,7 @@
             align-items:flex-start;
         }
         .sidebar{
-            width:240px;
+            width:320px;
             background:var(--card);
             border-right:1px solid var(--border);
             display:flex;
@@ -909,44 +909,52 @@
             <div class="sidebar-title">Alo Worklogs</div>
             <div class="sidebar-subtitle">by SkyBlueDev</div>
         </div>
-        <div class="sidebar-control">
-            <label class="sidebar-label" for="sidebarTeamSelect">Team</label>
-            <select id="sidebarTeamSelect"></select>
-        </div>
-        <div class="sidebar-control">
-            <label class="sidebar-label" for="sidebarUserSelect">User</label>
-            <select id="sidebarUserSelect"></select>
-        </div>
-        <div class="sidebar-control">
-            <label class="sidebar-label" for="sidebarJYear">Jalaali Year</label>
-            <select id="sidebarJYear"></select>
-        </div>
-        <div class="sidebar-control">
-            <label class="sidebar-label" for="sidebarJMonth">Jalaali Month</label>
-            <select id="sidebarJMonth"></select>
-        </div>
-        <div class="sidebar-control">
-            <label class="sidebar-label" for="sidebarTimeOffHours">Time-off (hours this month)</label>
-            <select id="sidebarTimeOffHours"></select>
-        </div>
-        <hr class="sidebar-divider" />
         <nav class="nav" aria-label="Primary">
-            <div class="nav-group" data-nav-group="issues" data-nav-depth="0">
-                <button
-                    type="button"
-                    class="nav-group-toggle"
-                    data-nav-toggle="issues"
-                    aria-expanded="false"
-                    aria-controls="navGroupIssues"
-                >
-                    <span class="nav-group-toggle__label">Issues</span>
-                    <span class="nav-group-toggle__icon" aria-hidden="true"></span>
-                </button>
-                <div class="nav-group-content" id="navGroupIssues" data-nav-content="issues" hidden>
-                    <button type="button" class="nav-item" data-route="issues" aria-controls="issuesView" data-nav-parents="issues">Assigned</button>
-                    <button type="button" class="nav-item" data-route="issues-worklogs" aria-controls="issuesWorklogsView" data-nav-parents="issues">Worklogs</button>
-                </div>
+            <button type="button" class="nav-item" data-route="issues" aria-controls="issuesView" data-nav-parents="issues">Assigned</button>
+            <button type="button" class="nav-item" data-route="issues-worklogs" aria-controls="issuesWorklogsView" data-nav-parents="issues">Worklogs</button>
+        </nav>
+        <hr class="sidebar-divider" />
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: .5rem;">
+            <div class="sidebar-control">
+                <label class="sidebar-label" for="sidebarTeamSelect">Team</label>
+                <select id="sidebarTeamSelect"></select>
             </div>
+            <div class="sidebar-control">
+                <label class="sidebar-label" for="sidebarUserSelect">User</label>
+                <select id="sidebarUserSelect"></select>
+            </div>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem;">
+            <div class="sidebar-control">
+                <label class="sidebar-label" for="sidebarJYear">Jalaali Year</label>
+                <select id="sidebarJYear"></select>
+            </div>
+            <div class="sidebar-control">
+                <label class="sidebar-label" for="sidebarJMonth">Jalaali Month</label>
+                <select id="sidebarJMonth"></select>
+            </div>
+            <div class="sidebar-control">
+                <label class="sidebar-label" for="sidebarTimeOffHours">Time-off</label>
+                <select id="sidebarTimeOffHours"></select>
+            </div>
+        </div>
+        <nav class="nav" aria-label="Primary">
+<!--            <div class="nav-group" data-nav-group="issues" data-nav-depth="0">-->
+<!--                <button-->
+<!--                    type="button"-->
+<!--                    class="nav-group-toggle"-->
+<!--                    data-nav-toggle="issues"-->
+<!--                    aria-expanded="false"-->
+<!--                    aria-controls="navGroupIssues"-->
+<!--                >-->
+<!--                    <span class="nav-group-toggle__label">Issues</span>-->
+<!--                    <span class="nav-group-toggle__icon" aria-hidden="true"></span>-->
+<!--                </button>-->
+<!--                <div class="nav-group-content" id="navGroupIssues" data-nav-content="issues" hidden>-->
+<!--                    <button type="button" class="nav-item" data-route="issues" aria-controls="issuesView" data-nav-parents="issues">Assigned</button>-->
+<!--                    <button type="button" class="nav-item" data-route="issues-worklogs" aria-controls="issuesWorklogsView" data-nav-parents="issues">Worklogs</button>-->
+<!--                </div>-->
+<!--            </div>-->
             <div class="nav-group" data-nav-group="reports" data-nav-depth="0">
                 <button
                     type="button"
@@ -1001,6 +1009,7 @@
             class="btn btn-outline sidebar-action"
             hidden
         >Get Full Report</button>
+        <hr class="sidebar-divider" />
         <nav class="nav" aria-label="Settings">
             <div class="nav-group" data-nav-group="settings" data-nav-depth="0">
                 <button

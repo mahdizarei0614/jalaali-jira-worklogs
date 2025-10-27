@@ -1,5 +1,5 @@
 {
-  "name": "alo-worklog",
+  "name": "jira-worklog",
   "version": "2.2.0",
   "description": "Jira worklog checker with Jalaali calendar",
   "license": "ISC",
@@ -9,7 +9,9 @@
   "scripts": {
     "start": "electron .",
     "postinstall": "electron-builder install-app-deps",
-    "dist": "electron-builder --win nsis",
+    "dist": "npm run dist:win && npm run dist:mac",
+    "dist:win": "electron-builder --win nsis",
+    "dist:mac": "electron-builder --mac dmg",
     "dist:portable": "electron-builder --win portable"
   },
   "dependencies": {
@@ -26,8 +28,8 @@
     "electron-builder": "^26.0.12"
   },
   "build": {
-    "appId": "com.alo.alo-worklog",
-    "productName": "AloWorklogs",
+    "appId": "com.skybluedev.jiraworklogs",
+    "productName": "Jira Worklogs",
     "directories": {
       "buildResources": "build",
       "output": "dist"
@@ -55,6 +57,18 @@
       "createStartMenuShortcut": true,
       "shortcutName": "AloWorklogs",
       "runAfterFinish": true
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": ["dmg", "zip"]
+    },
+    "dmg": {
+      "background": "build/background.png",
+      "icon": "build/icon.icns",
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
     }
   }
 }
