@@ -1,4 +1,4 @@
-# Agent Guidelines for `jira-worklogs-electron`
+# Agent Guidelines for `jalaali-jira-worklogs`
 
 These instructions apply to the entire repository unless a more specific `AGENTS.md` overrides them.
 
