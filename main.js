@@ -1105,8 +1105,14 @@
         const t = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
         return !!t;
     }
-    async function loadLogin() { await mainWindow.loadFile(path.join(__dirname, 'renderer', 'login.html')); }
-    async function loadMain()  { await mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html')); }
+    async function loadLogin() {
+        await mainWindow.loadFile(path.join(__dirname, 'renderer', 'dist', 'browser', 'index.html'), {
+            hash: '/auth/login',
+        });
+    }
+    async function loadMain() {
+        await mainWindow.loadFile(path.join(__dirname, 'renderer', 'dist', 'browser', 'index.html'));
+    }
 
     function sendNotification(deficits, jYear, jMonth) {
         const title = `Worklog < 6h — ${mj(jYear, jMonth, 1).format('jYYYY/jMM')}`;
@@ -1377,12 +1383,17 @@
             throw new Error('Invalid view path');
         }
         const normalized = path.normalize(relPath);
-        const baseDir = path.join(__dirname, 'renderer');
+        const baseDir = path.join(__dirname, 'renderer', 'dist', 'browser');
         const resolved = path.resolve(baseDir, normalized);
         if (path.relative(baseDir, resolved).startsWith('..')) {
             throw new Error('Invalid view path');
         }
-        return fs.readFile(resolved, 'utf8');
+        try {
+            return await fs.readFile(resolved, 'utf8');
+        } catch (error) {
+            console.warn('[views:load] Missing template', normalized, error);
+            return '<!-- view not found -->';
+        }
     });
 
     ipcMain.handle('auth:whoami', async () => whoAmI());
@@ -1413,13 +1424,16 @@
     ipcMain.handle('auth:authorize', async (_evt, { token }) => {
         if (!token || !token.trim()) return { ok: false, reason: 'Empty token' };
         await keytar.setPassword(SERVICE_NAME, TOKEN_ACCOUNT, token.trim());
-        await (async () => mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html')))();
+        await (async () => mainWindow.loadFile(path.join(__dirname, 'renderer', 'dist', 'browser', 'index.html')))();
         return { ok: true };
     });
     ipcMain.handle('auth:logout', async () => {
         await keytar.deletePassword(SERVICE_NAME, TOKEN_ACCOUNT);
         lastUI.username = null;
-        await (async () => mainWindow.loadFile(path.join(__dirname, 'renderer', 'login.html')))();
+        await (async () =>
+            mainWindow.loadFile(path.join(__dirname, 'renderer', 'dist', 'browser', 'index.html'), {
+                hash: '/auth/login',
+            }))();
         return { ok: true };
     });
 

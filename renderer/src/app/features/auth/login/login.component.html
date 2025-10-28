@@ -1,0 +1,15 @@
+<section class="auth card">
+  <h1>ورود به جیرای شرکت</h1>
+  <p class="text-muted">توکن دسترسی را از ادمین دریافت کرده و در فرم زیر وارد کنید.</p>
+  <form (ngSubmit)="submit()">
+    <label class="field">
+      <span>توکن دسترسی</span>
+      <textarea [ngModel]="token()" (ngModelChange)="token.set($event)" rows="4" name="token" required></textarea>
+    </label>
+    <button class="btn" type="submit" [disabled]="!canSubmit()">
+      <span class="material-symbols-rounded">login</span>
+      <span>ورود</span>
+    </button>
+  </form>
+  <p class="error" *ngIf="error() as err">{{ err }}</p>
+</section>

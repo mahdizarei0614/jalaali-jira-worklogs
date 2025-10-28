@@ -1,0 +1,30 @@
+<form (ngSubmit)="submit()">
+  <div class="field">
+    <label>سال</label>
+    <input type="number" min="1300" [ngModel]="modelYear()" (ngModelChange)="modelYear.set($event)" name="year" />
+  </div>
+  <div class="field">
+    <label>ماه</label>
+    <select [ngModel]="modelMonth()" (ngModelChange)="modelMonth.set($event)" name="month">
+      <option *ngFor="let month of months" [ngValue]="month.value">{{ month.label }}</option>
+    </select>
+  </div>
+  <div class="field">
+    <label>تیم</label>
+    <select [ngModel]="modelTeam()" (ngModelChange)="modelTeam.set($event)" name="team">
+      <option value="" disabled>انتخاب تیم</option>
+      <option *ngFor="let team of teams()" [ngValue]="team.value">{{ team.label }}</option>
+    </select>
+  </div>
+  <div class="field">
+    <label>کاربر</label>
+    <select [ngModel]="modelUser()" (ngModelChange)="modelUser.set($event)" name="user">
+      <option value="" disabled>انتخاب کاربر</option>
+      <option *ngFor="let user of users()" [ngValue]="user.value">{{ user.text }}</option>
+    </select>
+  </div>
+  <button class="btn" type="submit" [disabled]="!canSubmit()">
+    <span class="material-symbols-rounded">search</span>
+    <span>بارگذاری</span>
+  </button>
+</form>

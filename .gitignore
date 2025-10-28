@@ -1,4 +1,6 @@
 .idea
 node_modules
 dist
+renderer/dist
+.angular
 package-lock.json

@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./renderer/dist/out-tsc",
+    "types": ["node"]
+  },
+  "files": [
+    "renderer/src/main.ts"
+  ],
+  "include": [
+    "renderer/src/**/*.ts"
+  ]
+}

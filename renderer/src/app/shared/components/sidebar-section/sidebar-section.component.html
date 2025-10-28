@@ -1,0 +1,10 @@
+<div class="section__header" role="heading" aria-level="2">
+  <button type="button" (click)="toggle()" [attr.aria-expanded]="expanded()" class="section__toggle">
+    <span class="material-symbols-rounded">{{ sidebarIcon() }}</span>
+    <span>{{ sidebarTitle() }}</span>
+    <span class="material-symbols-rounded chevron" [class.open]="expanded()">expand_more</span>
+  </button>
+</div>
+<div class="section__content" [class.open]="expanded()" role="group">
+  <ng-content />
+</div>

@@ -1,0 +1,13 @@
+<header class="header">
+  <div>
+    <h1>خروجی کامل مدیر</h1>
+    <p class="text-muted">دریافت فایل زیپ از تمامی گزارش‌ها و ضمائم.</p>
+  </div>
+</header>
+
+<button class="btn" type="button" (click)="export()" [disabled]="busy()" [attr.aria-disabled]="busy()">
+  <span class="material-symbols-rounded">download</span>
+  <span>دانلود گزارش کامل</span>
+</button>
+
+<p class="error" *ngIf="error() as err">{{ err }}</p>

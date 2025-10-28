@@ -1,0 +1,33 @@
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2rem;
+}
+
+.results {
+  margin-top: 2rem;
+  display: grid;
+  gap: 1.5rem;
+}
+
+.summary {
+  display: flex;
+  gap: 2rem;
+}
+
+.summary .label {
+  display: block;
+  color: var(--color-text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.summary .value {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.error {
+  color: #ff867d;
+  margin-top: 1rem;
+}

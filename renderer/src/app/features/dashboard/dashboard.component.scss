@@ -1,0 +1,27 @@
+.stats {
+  display: flex;
+  gap: 2rem;
+  margin-top: 1.5rem;
+}
+
+.stats .label {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+}
+
+.stats .value {
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.table-wrap {
+  overflow: auto;
+  margin-top: 1rem;
+}
+
+.error {
+  color: #ff867d;
+  margin-top: 1.5rem;
+}

@@ -1,0 +1,54 @@
+<header class="header">
+  <div>
+    <h1>گزارش ماهانه</h1>
+    <p class="text-muted">نتایج کامل اسکن ثبت لاگ‌ها در بازهٔ انتخابی.</p>
+  </div>
+  <div class="badge">
+    <span class="material-symbols-rounded">timer</span>
+    <span>{{ total() }} ساعت</span>
+  </div>
+</header>
+
+<app-selection-panel
+  [teams]="teams()"
+  (selectionChange)="handleSelection($event)"
+  [busy]="busy()"
+></app-selection-panel>
+
+<section class="results" *ngIf="result() as res">
+  <div class="summary">
+    <div>
+      <span class="label">ساعت کل</span>
+      <span class="value">{{ total() }}</span>
+    </div>
+    <div>
+      <span class="label">کسری</span>
+      <span class="value">{{ deficit() }}</span>
+    </div>
+  </div>
+  <div class="table-wrap" *ngIf="res.days?.length; else empty">
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">تاریخ</th>
+          <th scope="col">ساعت</th>
+          <th scope="col">وضعیت</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let day of res.days">
+          <td>{{ day.date }}</td>
+          <td>{{ day.totalHours }}</td>
+          <td>
+            <span class="badge">{{ day.classification }}</span>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <ng-template #empty>
+    <p class="text-muted">گزارشی برای بازه انتخاب شده یافت نشد.</p>
+  </ng-template>
+</section>
+
+<p class="error" *ngIf="error() as err">{{ err }}</p>

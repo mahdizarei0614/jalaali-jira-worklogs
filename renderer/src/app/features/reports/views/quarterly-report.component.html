@@ -1,0 +1,29 @@
+<header class="header">
+  <div>
+    <h1>گزارش فصلی</h1>
+    <p class="text-muted">تقسیم‌بندی ساعات ثبت شده بر اساس فصل.</p>
+  </div>
+</header>
+
+<section *ngIf="grouped().length; else empty">
+  <div class="grid two-cols">
+    <article class="card" *ngFor="let season of grouped()">
+      <header class="season-header">
+        <h2>{{ season.label }}</h2>
+        <span class="badge">{{ season.totalHours }} ساعت</span>
+      </header>
+      <ul class="season-list">
+        <li *ngFor="let month of season.months">
+          <span>{{ month.label }}</span>
+          <strong>{{ month.totalHours }}</strong>
+        </li>
+      </ul>
+    </article>
+  </div>
+</section>
+
+<ng-template #empty>
+  <p class="text-muted">گزارش فصلی هنوز در دسترس نیست. ابتدا اسکن ماهانه را اجرا کنید.</p>
+</ng-template>
+
+<p class="error" *ngIf="error() as err">{{ err }}</p>

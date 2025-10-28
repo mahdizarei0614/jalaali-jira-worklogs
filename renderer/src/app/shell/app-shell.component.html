@@ -1,0 +1,27 @@
+<app-sidebar #sidebar>
+  <section sidebarTitle="گزارش‌ها" sidebarIcon="equalizer">
+    <a routerLink="/dashboard" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">داشبورد</a>
+    <a routerLink="/reports/monthly" routerLinkActive="active">گزارش ماهانه</a>
+    <a routerLink="/reports/quarterly" routerLinkActive="active">گزارش فصلی</a>
+  </section>
+  <section sidebarTitle="مدیریت" sidebarIcon="admin_panel_settings">
+    <a routerLink="/auth/login" routerLinkActive="active">دسترسی</a>
+    <a routerLink="/reports/admin" routerLinkActive="active">گزارش کامل</a>
+  </section>
+</app-sidebar>
+
+<div class="layout">
+  <header class="topbar" role="banner">
+    <button class="icon-button" type="button" (click)="toggleSidebar()" aria-label="Toggle navigation">
+      <span class="material-symbols-rounded">menu</span>
+    </button>
+    <div class="spacer"></div>
+    <div class="status">
+      <span class="material-symbols-rounded">schedule</span>
+      <span>{{ timeString() }}</span>
+    </div>
+  </header>
+  <main class="content" role="main">
+    <router-outlet />
+  </main>
+</div>
