@@ -956,60 +956,45 @@
 <!--                    <button type="button" class="nav-item" data-route="issues-worklogs" aria-controls="issuesWorklogsView" data-nav-parents="issues">Worklogs</button>-->
 <!--                </div>-->
 <!--            </div>-->
-            <div class="nav-group" data-nav-group="reports" data-nav-depth="0">
+            <div class="nav-group" data-nav-group="reports-monthly" data-nav-depth="0">
                 <button
                     type="button"
                     class="nav-group-toggle"
-                    data-nav-toggle="reports"
+                    data-nav-toggle="reports-monthly"
                     aria-expanded="false"
-                    aria-controls="navGroupReports"
+                    aria-controls="navGroupReportsMonthly"
                 >
-                    <span class="nav-group-toggle__label">Reports</span>
+                    <span class="nav-group-toggle__label">Monthly</span>
                     <span class="nav-group-toggle__icon" aria-hidden="true"></span>
                 </button>
-                <div class="nav-group-content" id="navGroupReports" data-nav-content="reports" hidden>
-                    <div class="nav-group" data-nav-group="reports-monthly" data-nav-parent="reports" data-nav-depth="1">
-                        <button
-                            type="button"
-                            class="nav-group-toggle"
-                            data-nav-toggle="reports-monthly"
-                            aria-expanded="false"
-                            aria-controls="navGroupReportsMonthly"
-                        >
-                            <span class="nav-group-toggle__label">Monthly</span>
-                            <span class="nav-group-toggle__icon" aria-hidden="true"></span>
-                        </button>
-                        <div class="nav-group-content" id="navGroupReportsMonthly" data-nav-content="reports-monthly" hidden>
-                            <button type="button" class="nav-item" data-route="monthly-summary" aria-controls="monthlySummaryView" data-nav-parents="reports reports-monthly">Summary</button>
-                            <button type="button" class="nav-item" data-route="detailed-worklogs" aria-controls="detailedWorklogsView" data-nav-parents="reports reports-monthly">Detailed Worklogs</button>
-                            <button type="button" class="nav-item" data-route="due-issues" aria-controls="dueIssuesView" data-nav-parents="reports reports-monthly">Due This Month</button>
-                        </div>
-                    </div>
-                    <div class="nav-group" data-nav-group="reports-quarterly" data-nav-parent="reports" data-nav-depth="1">
-                        <button
-                            type="button"
-                            class="nav-group-toggle"
-                            data-nav-toggle="reports-quarterly"
-                            aria-expanded="false"
-                            aria-controls="navGroupReportsQuarterly"
-                        >
-                            <span class="nav-group-toggle__label">Quarterly</span>
-                            <span class="nav-group-toggle__icon" aria-hidden="true"></span>
-                        </button>
-                        <div class="nav-group-content" id="navGroupReportsQuarterly" data-nav-content="reports-quarterly" hidden>
-                            <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView" data-nav-parents="reports reports-quarterly">Summary</button>
-                        </div>
-                    </div>
+                <div class="nav-group-content" id="navGroupReportsMonthly" data-nav-content="reports-monthly" hidden>
+                    <button type="button" class="nav-item" data-route="monthly-summary" aria-controls="monthlySummaryView" data-nav-parents="reports-monthly">Summary</button>
+                    <button type="button" class="nav-item" data-route="detailed-worklogs" aria-controls="detailedWorklogsView" data-nav-parents="reports-monthly">Detailed Worklogs</button>
+                    <button type="button" class="nav-item" data-route="due-issues" aria-controls="dueIssuesView" data-nav-parents="reports-monthly">Due This Month</button>
                 </div>
             </div>
+            <div class="nav-group" data-nav-group="reports-quarterly" data-nav-depth="0">
+                <button
+                    type="button"
+                    class="nav-group-toggle"
+                    data-nav-toggle="reports-quarterly"
+                    aria-expanded="false"
+                    aria-controls="navGroupReportsQuarterly"
+                >
+                    <span class="nav-group-toggle__label">Quarterly</span>
+                    <span class="nav-group-toggle__icon" aria-hidden="true"></span>
+                </button>
+                <div class="nav-group-content" id="navGroupReportsQuarterly" data-nav-content="reports-quarterly" hidden>
+                    <button type="button" class="nav-item" data-route="quarter-report" aria-controls="quarterReportView" data-nav-parents="reports-quarterly">Summary</button>
+                </div>
+            </div>
+            <button
+                    type="button"
+                    id="adminFullReportBtn"
+                    class="btn btn-outline sidebar-action"
+                    hidden
+            >Get Full Report</button>
         </nav>
-        <hr class="sidebar-divider" />
-        <button
-            type="button"
-            id="adminFullReportBtn"
-            class="btn btn-outline sidebar-action"
-            hidden
-        >Get Full Report</button>
         <hr class="sidebar-divider" />
         <nav class="nav" aria-label="Settings">
             <div class="nav-group" data-nav-group="settings" data-nav-depth="0">
