@@ -3,7 +3,7 @@
   "version": "2.2.0",
   "description": "Jira worklog checker with Jalaali calendar",
   "license": "ISC",
-  "author": "SkyBlueDev (Mohammad Mahdi Zarei)",
+  "author": "Mohammad Mahdi Zarei (SkyBlueDev)",
   "type": "commonjs",
   "main": "main.js",
   "scripts": {
