@@ -1,0 +1,45 @@
+.report {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.report__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.report__reload {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.6rem 1.2rem;
+  background: var(--accent);
+  color: #041611;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.report__filters {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.report__filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.95rem;
+}
+
+.report__filters select,
+.report__filters input {
+  padding: 0.65rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.2);
+  color: inherit;
+}

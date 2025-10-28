@@ -1,0 +1,22 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.card__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.card__subtitle {
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}

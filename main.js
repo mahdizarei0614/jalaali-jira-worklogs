@@ -1105,8 +1105,34 @@
         const t = await keytar.getPassword(SERVICE_NAME, TOKEN_ACCOUNT);
         return !!t;
     }
-    async function loadLogin() { await mainWindow.loadFile(path.join(__dirname, 'renderer', 'login.html')); }
-    async function loadMain()  { await mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html')); }
+    let rendererIndexFile = null;
+    async function resolveRendererEntry() {
+        if (rendererIndexFile) return rendererIndexFile;
+        const distRoot = path.join(__dirname, 'renderer', 'dist');
+        const candidates = [
+            path.join(distRoot, 'browser', 'index.html'),
+            path.join(distRoot, 'index.html'),
+        ];
+        for (const candidate of candidates) {
+            try {
+                await fs.access(candidate);
+                rendererIndexFile = candidate;
+                return rendererIndexFile;
+            } catch (err) {
+                // continue searching
+            }
+        }
+        rendererIndexFile = path.join(__dirname, 'renderer', 'src', 'index.html');
+        return rendererIndexFile;
+    }
+    async function loadLogin() {
+        const entry = await resolveRendererEntry();
+        await mainWindow.loadFile(entry, { hash: '#/auth' });
+    }
+    async function loadMain()  {
+        const entry = await resolveRendererEntry();
+        await mainWindow.loadFile(entry, { hash: '#/dashboard' });
+    }
 
     function sendNotification(deficits, jYear, jMonth) {
         const title = `Worklog < 6h — ${mj(jYear, jMonth, 1).format('jYYYY/jMM')}`;
@@ -1413,13 +1439,13 @@
     ipcMain.handle('auth:authorize', async (_evt, { token }) => {
         if (!token || !token.trim()) return { ok: false, reason: 'Empty token' };
         await keytar.setPassword(SERVICE_NAME, TOKEN_ACCOUNT, token.trim());
-        await (async () => mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html')))();
+        await loadMain();
         return { ok: true };
     });
     ipcMain.handle('auth:logout', async () => {
         await keytar.deletePassword(SERVICE_NAME, TOKEN_ACCOUNT);
         lastUI.username = null;
-        await (async () => mainWindow.loadFile(path.join(__dirname, 'renderer', 'login.html')))();
+        await loadLogin();
         return { ok: true };
     });
 

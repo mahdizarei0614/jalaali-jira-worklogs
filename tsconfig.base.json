@@ -1,0 +1,23 @@
+{
+  "compileOnSave": false,
+  "compilerOptions": {
+    "baseUrl": "./",
+    "downlevelIteration": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "module": "es2022",
+    "moduleResolution": "node",
+    "target": "es2022",
+    "useDefineForClassFields": false,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "skipLibCheck": true,
+    "lib": ["es2022", "dom"],
+    "paths": {
+      "@app/*": ["renderer/src/app/*"],
+      "@shared/*": ["renderer/src/app/shared/*"]
+    }
+  }
+}

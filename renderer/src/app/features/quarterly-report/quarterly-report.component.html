@@ -1,0 +1,30 @@
+<section class="quarterly">
+  <header class="quarterly__header">
+    <div>
+      <h1 class="section-title">گزارش فصلی</h1>
+      <p class="section-subtitle">مرور عملکرد در طول فصل جاری به تفکیک ماه</p>
+    </div>
+    <button type="button" (click)="refresh()" [disabled]="loading()" class="quarterly__refresh">
+      <span class="material-symbols-rounded">refresh</span>
+      بروزرسانی
+    </button>
+  </header>
+
+  <app-card-group>
+    <app-card *ngFor="let month of summary()?.months; let i = index" [title]="'ماه ' + (i + 1)">
+      <p class="metric">{{ (month.totalHours ?? 0) | number: '1.2-2' }}</p>
+      <span class="badge">{{ month.days.length }} روز ثبت شده</span>
+    </app-card>
+  </app-card-group>
+
+  <section class="quarterly__totals" *ngIf="summary() as data">
+    <app-card-group [stacked]="true">
+      <app-card title="جمع فصلی">
+        <p class="metric">{{ (data.totalHours ?? 0) | number: '1.2-2' }}</p>
+      </app-card>
+      <app-card title="ماه‌های پوشش داده شده">
+        <p class="metric">{{ data.months.length }}</p>
+      </app-card>
+    </app-card-group>
+  </section>
+</section>

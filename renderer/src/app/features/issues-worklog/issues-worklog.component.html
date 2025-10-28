@@ -1,0 +1,36 @@
+<section class="issues">
+  <header class="issues__header">
+    <div>
+      <h1 class="section-title">گزارش کارهای ثبت شده</h1>
+      <p class="section-subtitle">لیست ساعت‌های ثبت شده بر روی تسک‌های جیرا</p>
+    </div>
+    <button type="button" class="issues__load" (click)="load()" [disabled]="loading()">
+      <span class="material-symbols-rounded">download</span>
+      دریافت داده
+    </button>
+  </header>
+
+  <div class="table-wrapper" *ngIf="worklogs().length; else empty">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">کلید</th>
+          <th scope="col">عنوان</th>
+          <th scope="col">ساعت</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let log of worklogs()">
+          <td>{{ log.issueKey }}</td>
+          <td>{{ log.summary }}</td>
+          <td>{{ (log.hours ?? 0) | number: '1.2-2' }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <ng-template #empty>
+    <div class="empty-state">
+      {{ error() || 'تا کنون گزارشی دریافت نشده است.' }}
+    </div>
+  </ng-template>
+</section>

@@ -1,0 +1,46 @@
+.sidebar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  height: 100vh;
+  padding: 2rem 1.5rem;
+  border-inline-end: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(24px);
+  background: linear-gradient(180deg, rgba(6, 10, 16, 0.86), rgba(4, 7, 11, 0.94));
+  transition: width 0.3s ease;
+}
+
+.sidebar--collapsed {
+  width: 72px;
+}
+
+.sidebar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.sidebar__brand {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.9rem;
+}
+
+.sidebar__toggle {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.4rem;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  cursor: pointer;
+}
+
+.sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 2rem;
+}

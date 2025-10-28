@@ -1,0 +1,75 @@
+<section class="report">
+  <header class="report__header">
+    <div>
+      <h1 class="section-title">گزارش ماهانه</h1>
+      <p class="section-subtitle">انتخاب تیم و کاربر برای دریافت جزئیات کامل ماه جاری</p>
+    </div>
+    <button type="button" class="report__reload" (click)="reload()" [disabled]="loading()">
+      <span class="material-symbols-rounded">refresh</span>
+      بروزرسانی داده‌ها
+    </button>
+  </header>
+
+  <div class="report__filters">
+    <label>
+      <span>تیم</span>
+      <select [ngModel]="selection().team" (ngModelChange)="onTeamChange($event)">
+        <option [ngValue]="null">انتخاب تیم</option>
+        <option *ngFor="let team of teams()" [ngValue]="team.value">{{ team.label }}</option>
+      </select>
+    </label>
+
+    <label>
+      <span>کاربر</span>
+      <select [ngModel]="selection().username" (ngModelChange)="onUserChange($event)">
+        <option [ngValue]="null">انتخاب کاربر</option>
+        <option *ngFor="let user of users()" [ngValue]="user.value">{{ user.text }}</option>
+      </select>
+    </label>
+
+    <label>
+      <span>ماه</span>
+      <select [ngModel]="selection().jMonth" (ngModelChange)="onMonthChange($event)">
+        <option *ngFor="let month of (12 | numberToArray); let i = index" [ngValue]="i + 1">ماه {{ i + 1 }}</option>
+      </select>
+    </label>
+
+    <label>
+      <span>سال</span>
+      <input type="number" [ngModel]="selection().jYear" (ngModelChange)="onYearChange($event)" />
+    </label>
+  </div>
+
+  <app-card-group [stacked]="true">
+    <app-card title="جمع ساعات">
+      <p class="metric">{{ (summary()?.totalHours ?? 0) | number: '1.2-2' }}</p>
+    </app-card>
+    <app-card title="نیاز باقیمانده">
+      <p class="metric">{{ (summary()?.deficitHours ?? 0) | number: '1.2-2' }}</p>
+    </app-card>
+  </app-card-group>
+
+  <div class="table-wrapper" *ngIf="summary()?.days?.length; else empty">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">روز</th>
+          <th scope="col">تاریخ</th>
+          <th scope="col">ساعت</th>
+          <th scope="col">وضعیت</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let day of summary()?.days">
+          <td>{{ day.jalaali }}</td>
+          <td>{{ day.date }}</td>
+          <td>{{ (day.totalHours ?? 0) | number: '1.2-2' }}</td>
+          <td>{{ day.status }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <ng-template #empty>
+    <div class="empty-state">گزارش برای بازه انتخاب شده موجود نیست.</div>
+  </ng-template>
+</section>

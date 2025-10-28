@@ -1,0 +1,42 @@
+.auth {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  max-width: 640px;
+}
+
+.auth__form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.auth__form textarea {
+  resize: vertical;
+  min-height: 120px;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.25);
+  color: inherit;
+}
+
+.auth__submit,
+.auth__logout {
+  align-self: flex-start;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.6rem 1.5rem;
+  background: var(--accent);
+  color: #041611;
+  cursor: pointer;
+}
+
+.auth__logout {
+  background: rgba(255, 255, 255, 0.1);
+  color: inherit;
+}
+
+.auth__status {
+  color: var(--text-muted);
+}

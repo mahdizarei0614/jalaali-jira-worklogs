@@ -7,7 +7,9 @@
   "type": "commonjs",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
+    "start": "npm run build:renderer && electron .",
+    "start:dev": "ng serve",
+    "build:renderer": "ng build",
     "postinstall": "electron-builder install-app-deps",
     "build:mac:iconutil": "iconutil -c icns build/icon.iconset -o build/icon.icns",
     "dist": "npm run dist:win && npm run dist:mac",
@@ -16,17 +18,33 @@
     "dist:portable": "electron-builder --win portable"
   },
   "dependencies": {
+    "@angular/animations": "^20.0.0",
+    "@angular/common": "^20.0.0",
+    "@angular/compiler": "^20.0.0",
+    "@angular/core": "^20.0.0",
+    "@angular/forms": "^20.0.0",
+    "@angular/platform-browser": "^20.0.0",
+    "@angular/platform-browser-dynamic": "^20.0.0",
+    "@angular/router": "^20.0.0",
     "axios": "^1.11.0",
     "jszip": "^3.10.1",
     "electron-store": "^10.1.0",
     "keytar": "^7.9.0",
     "moment": "^2.30.1",
     "moment-jalaali": "^0.10.4",
-    "node-cron": "^4.2.1"
+    "node-cron": "^4.2.1",
+    "rxjs": "^7.8.1",
+    "tslib": "^2.6.2",
+    "zone.js": "^0.14.4"
   },
   "devDependencies": {
+    "@angular-devkit/build-angular": "^20.0.0",
+    "@angular/cli": "^20.0.0",
+    "@types/node": "^20.11.30",
     "electron": "^37.4.0",
-    "electron-builder": "^26.0.12"
+    "electron-builder": "^26.0.12",
+    "sass": "^1.75.0",
+    "typescript": "^5.4.5"
   },
   "build": {
     "appId": "com.skybluedev.jalaalijiraworklogs",

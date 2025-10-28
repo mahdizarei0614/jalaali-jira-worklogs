@@ -1,0 +1,34 @@
+<section class="settings">
+  <header>
+    <h1 class="section-title">تنظیمات برنامه</h1>
+    <p class="section-subtitle">پیکربندی دسترسی به جیرا و یادآورهای روزانه</p>
+  </header>
+
+  <form class="settings__form" (ngSubmit)="save()">
+    <label>
+      <span>آدرس جیرا</span>
+      <input
+        type="url"
+        name="jiraBaseUrl"
+        [ngModel]="settings().jiraBaseUrl"
+        (ngModelChange)="onBaseUrlChange($event)"
+        placeholder="https://jira.example.com"
+        required
+      />
+    </label>
+
+    <label class="settings__toggle">
+      <input
+        type="checkbox"
+        name="reminderEnabled"
+        [ngModel]="settings().reminderEnabled"
+        (ngModelChange)="onReminderChange($event)"
+      />
+      <span>فعال بودن یادآورهای روزانه</span>
+    </label>
+
+    <button type="submit" class="settings__submit">ذخیره</button>
+  </form>
+
+  <p class="settings__status" *ngIf="status()">{{ status() }}</p>
+</section>

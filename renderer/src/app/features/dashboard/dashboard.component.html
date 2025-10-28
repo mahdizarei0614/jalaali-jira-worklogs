@@ -1,0 +1,57 @@
+<header>
+  <h1 class="section-title">گزارش ماه جاری</h1>
+  <p class="section-subtitle">وضعیت حضور شما در ماه انتخاب شده بر اساس تقویم جلالی</p>
+</header>
+
+<app-card-group>
+  <app-card title="ساعت کل">
+    <p class="metric">{{ (summary()?.totalHours ?? 0) | number: '1.2-2' }}</p>
+    <span class="badge badge--success">ساعت ثبت شده</span>
+  </app-card>
+  <app-card title="کسری" subtitle="ساعات مورد نیاز">
+    <p class="metric">{{ (summary()?.deficitHours ?? 0) | number: '1.2-2' }}</p>
+    <span class="badge" [class.badge--danger]="(summary()?.deficitHours || 0) > 0">ساعت باقی مانده</span>
+  </app-card>
+  <app-card title="هدف ماه" subtitle="ساعات استاندارد">
+    <p class="metric">{{ (summary()?.requiredHours ?? 0) | number: '1.2-2' }}</p>
+    <span class="badge">ساعت مورد انتظار</span>
+  </app-card>
+</app-card-group>
+
+<section class="dashboard__table">
+  <header class="dashboard__table-header">
+    <h2>جزئیات روزانه</h2>
+    <button type="button" class="dashboard__refresh" (click)="refresh()" [disabled]="loading()">
+      <span class="material-symbols-rounded">refresh</span>
+      بروزرسانی
+    </button>
+  </header>
+
+  <div class="table-wrapper" *ngIf="summary()?.days?.length; else emptyState">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">تاریخ (جلالی)</th>
+          <th scope="col">تاریخ (میلادی)</th>
+          <th scope="col">ساعت ثبت شده</th>
+          <th scope="col">وضعیت</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let day of summary()?.days">
+          <td>{{ day.jalaali }}</td>
+          <td>{{ day.date }}</td>
+          <td>{{ (day.totalHours ?? 0) | number: '1.2-2' }}</td>
+          <td>
+            <span class="badge" [class.badge--success]="day.status === 'ok'" [class.badge--danger]="day.status === 'warning'">
+              {{ day.status === 'holiday' ? 'تعطیل' : day.status === 'ok' ? 'عادی' : 'نیاز به بررسی' }}
+            </span>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <ng-template #emptyState>
+    <div class="empty-state">هنوز داده‌ای برای این بازه دریافت نشده است.</div>
+  </ng-template>
+</section>

@@ -1,0 +1,23 @@
+<div class="layout">
+  <app-sidebar
+    #sidebar
+    class="layout__sidebar"
+    (toggled)="onSidebarToggled($event)"
+    (navigate)="onNavigate($event)"
+  ></app-sidebar>
+
+  <main class="layout__content scrollbar" tabindex="-1" #mainContent>
+    <header class="layout__header">
+      <div class="layout__breadcrumbs">
+        <span class="layout__breadcrumb">{{ breadcrumb() }}</span>
+      </div>
+      <button type="button" class="layout__toggle" (click)="sidebar.toggle()">
+        <span class="material-symbols-rounded">menu</span>
+      </button>
+    </header>
+
+    <section class="layout__body">
+      <router-outlet></router-outlet>
+    </section>
+  </main>
+</div>

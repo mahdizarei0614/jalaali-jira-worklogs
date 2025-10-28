@@ -1,0 +1,19 @@
+<aside class="sidebar" [class.sidebar--collapsed]="collapsed()">
+  <div class="sidebar__header">
+    <div class="sidebar__brand">Jalaali Jira</div>
+    <button type="button" class="sidebar__toggle" (click)="toggle()">
+      <span class="material-symbols-rounded">chevron_left</span>
+    </button>
+  </div>
+
+  <nav class="sidebar__nav" aria-label="Primary">
+    <app-nav-item
+      *ngFor="let item of computedItems(); trackBy: trackByRoute"
+      [label]="item.title"
+      [icon]="item.icon"
+      [route]="item.route"
+      [isActive]="currentRoute() === item.route"
+      (pressed)="navigateTo($event)"
+    ></app-nav-item>
+  </nav>
+</aside>

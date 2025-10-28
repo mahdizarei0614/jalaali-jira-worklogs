@@ -1,0 +1,9 @@
+<section class="card">
+  <header class="card__header" *ngIf="title() || subtitle()">
+    <h3>{{ title() }}</h3>
+    <p class="card__subtitle" *ngIf="subtitle()">{{ subtitle() }}</p>
+  </header>
+  <div class="card__body">
+    <ng-content></ng-content>
+  </div>
+</section>

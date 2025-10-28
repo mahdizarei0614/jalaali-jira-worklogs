@@ -1,0 +1,27 @@
+<section class="auth">
+  <header class="auth__header">
+    <h1 class="section-title">ورود به حساب جیرا</h1>
+    <p class="section-subtitle">لطفاً توکن دسترسی شخصی خود را وارد کنید.</p>
+  </header>
+
+  <form class="auth__form" (ngSubmit)="submit()">
+    <label>
+      <span>توکن</span>
+      <textarea
+        name="token"
+        [ngModel]="token()"
+        (ngModelChange)="token.set($event)"
+        rows="4"
+        placeholder="Paste your Jira token here"
+        required
+      ></textarea>
+    </label>
+    <button type="submit" class="auth__submit">ذخیره توکن</button>
+  </form>
+
+  <button type="button" class="auth__logout" (click)="logout()" *ngIf="hasToken()">
+    خروج از حساب
+  </button>
+
+  <p class="auth__status" *ngIf="status()">{{ status() }}</p>
+</section>

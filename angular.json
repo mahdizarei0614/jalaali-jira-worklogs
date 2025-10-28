@@ -1,0 +1,51 @@
+{
+  "$schema": "./node_modules/@angular/cli/lib/config/schema.json",
+  "version": 1,
+  "defaultProject": "worklogs-app",
+  "projects": {
+    "worklogs-app": {
+      "projectType": "application",
+      "root": "renderer",
+      "sourceRoot": "renderer/src",
+      "prefix": "app",
+      "architect": {
+        "build": {
+          "builder": "@angular-devkit/build-angular:application",
+          "options": {
+            "outputPath": "renderer/dist",
+            "index": "renderer/src/index.html",
+            "browser": "renderer/src/main.ts",
+            "polyfills": [],
+            "assets": ["renderer/src/assets"],
+            "styles": ["renderer/src/styles.scss"],
+            "scripts": []
+          },
+          "configurations": {
+            "development": {
+              "buildOptimizer": false,
+              "optimization": false,
+              "sourceMap": true
+            },
+            "production": {
+              "buildOptimizer": true,
+              "optimization": true,
+              "sourceMap": false
+            }
+          },
+          "defaultConfiguration": "production"
+        },
+        "serve": {
+          "builder": "@angular-devkit/build-angular:dev-server",
+          "options": {
+            "browserTarget": "worklogs-app:build:development"
+          },
+          "configurations": {
+            "production": {
+              "browserTarget": "worklogs-app:build:production"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,27 @@
+.quarterly {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.quarterly__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.quarterly__refresh {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.6rem 1.2rem;
+  background: var(--accent);
+  color: #041611;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.quarterly__totals {
+  margin-top: 1rem;
+}
