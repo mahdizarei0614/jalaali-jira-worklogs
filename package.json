@@ -1,6 +1,6 @@
 {
   "name": "jalaali-jira-worklog",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Jira worklog checker with Jalaali calendar",
   "license": "ISC",
   "author": "Mohammad Mahdi Zarei (SkyBlueDev)",

@@ -154,6 +154,7 @@
     }
     if (reportFiltersBar) {
         reportFiltersBar.hidden = true;
+        reportFiltersBar.setAttribute('style', 'display: none;');
         reportFiltersBar.setAttribute('aria-hidden', 'true');
     }
     let nonAdminLayoutApplied = false;
@@ -325,6 +326,7 @@
         if (!reportFiltersBar) return;
         const isHidden = currentUserIsAdmin || Boolean(hidden);
         reportFiltersBar.hidden = isHidden;
+        reportFiltersBar.setAttribute('style', `display: ${isHidden ? 'none' : 'block'};`);
         reportFiltersBar.setAttribute('aria-hidden', isHidden ? 'true' : 'false');
     }
 
