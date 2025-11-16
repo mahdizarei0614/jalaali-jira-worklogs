@@ -139,6 +139,20 @@
     });
 
     const navGroups = new Map();
+    const REPORT_ROUTES = new Set(['monthly-summary', 'detailed-worklogs', 'due-issues', 'quarter-report']);
+    const reportFiltersContainer = $('#sidebarReportFilters');
+    const reportFiltersPortal = $('#reportFiltersPortal');
+    const teamUserControls = $('#sidebarTeamUserControls');
+    const sidebarUserSummary = $('#sidebarUserSummary');
+    let reportFiltersDetached = false;
+    const reportFiltersPlaceholder = reportFiltersContainer && reportFiltersContainer.parentElement
+        ? document.createComment('report-filters-home')
+        : null;
+    if (reportFiltersContainer && reportFiltersPlaceholder && reportFiltersContainer.parentElement) {
+        reportFiltersContainer.parentElement.insertBefore(reportFiltersPlaceholder, reportFiltersContainer.nextSibling);
+    }
+    let sidebarLayoutMode = 'default';
+    let activeRoute = null;
     $$('[data-nav-group]').forEach((groupEl) => {
         if (!groupEl) return;
         const id = groupEl.dataset.navGroup;
@@ -289,6 +303,95 @@
         }
     });
 
+    function toggleTeamUserControls(hidden) {
+        if (!teamUserControls) return;
+        if (hidden) {
+            teamUserControls.setAttribute('hidden', 'true');
+            teamUserControls.setAttribute('aria-hidden', 'true');
+        } else {
+            teamUserControls.removeAttribute('hidden');
+            teamUserControls.removeAttribute('aria-hidden');
+        }
+    }
+
+    function showSidebarSummary(text) {
+        if (!sidebarUserSummary) return;
+        if (!text) {
+            sidebarUserSummary.textContent = '';
+            sidebarUserSummary.hidden = true;
+            return;
+        }
+        sidebarUserSummary.textContent = text;
+        sidebarUserSummary.hidden = false;
+    }
+
+    function hideSidebarSummary() {
+        if (!sidebarUserSummary) return;
+        sidebarUserSummary.textContent = '';
+        sidebarUserSummary.hidden = true;
+    }
+
+    function moveReportFiltersToPortal() {
+        if (!reportFiltersContainer || !reportFiltersPortal) return;
+        if (!reportFiltersDetached) {
+            reportFiltersPortal.appendChild(reportFiltersContainer);
+            reportFiltersDetached = true;
+        }
+        updateReportFilterPortalVisibility(activeRoute);
+    }
+
+    function moveReportFiltersHome() {
+        if (!reportFiltersContainer || !reportFiltersPlaceholder || !reportFiltersPlaceholder.parentNode) return;
+        if (!reportFiltersDetached) {
+            if (reportFiltersPortal) {
+                reportFiltersPortal.hidden = true;
+            }
+            return;
+        }
+        reportFiltersPlaceholder.parentNode.insertBefore(reportFiltersContainer, reportFiltersPlaceholder);
+        reportFiltersDetached = false;
+        if (reportFiltersPortal) {
+            reportFiltersPortal.hidden = true;
+        }
+    }
+
+    function updateReportFilterPortalVisibility(route) {
+        if (!reportFiltersPortal) return;
+        const targetRoute = route || activeRoute || null;
+        if (!reportFiltersDetached || !targetRoute || !REPORT_ROUTES.has(targetRoute)) {
+            reportFiltersPortal.hidden = true;
+            return;
+        }
+        reportFiltersPortal.hidden = false;
+    }
+
+    function buildUserSummary(teamValue, userLabel) {
+        const teamLabel = TEAM_LABELS.get(teamValue) || teamValue || 'Team';
+        const cleanUser = (userLabel || '').trim();
+        if (teamLabel && cleanUser) {
+            return `${teamLabel} - ${cleanUser}`;
+        }
+        return cleanUser || teamLabel;
+    }
+
+    function activateNonAdminLayout(teamValue, userLabel) {
+        if (sidebarLayoutMode !== 'user') {
+            toggleTeamUserControls(true);
+        }
+        sidebarLayoutMode = 'user';
+        moveReportFiltersToPortal();
+        showSidebarSummary(buildUserSummary(teamValue, userLabel));
+    }
+
+    function activateAdminLayout() {
+        if (sidebarLayoutMode !== 'admin') {
+            toggleTeamUserControls(false);
+        }
+        sidebarLayoutMode = 'admin';
+        moveReportFiltersHome();
+        hideSidebarSummary();
+    }
+
     function syncNavGroupsForRoute(route, { immediate = false } = {}) {
         const parents = navItemParents.get(route) || [];
         const required = new Set(parents);
@@ -373,7 +476,6 @@
 
     const initialActive = Array.from(viewNodes.entries()).find(([, el]) => el.classList.contains('is-active'));
     const defaultRoute = initialActive ? initialActive[0] : (navItems[0]?.dataset.route || 'monthly-summary');
-    let activeRoute = null;
 
     function setRoute(route, { pushState = true } = {}) {
         if (!viewNodes.has(route)) {
@@ -411,6 +513,8 @@
 
         const previousRoute = activeRoute;
         activeRoute = route;
+
+        updateReportFilterPortalVisibility(route);
 
         syncNavGroupsForRoute(route, { immediate: !previousRoute });
 
@@ -862,6 +966,7 @@
                             { pushSelection: true, refresh: true, clearResult: true }
                         );
                     }
+                    activateNonAdminLayout(teamForSelf, displayName);
                 } else {
                     renderTeamSelectOptions(adminTeams);
                     teamSelectEl.disabled = false;
@@ -895,6 +1000,7 @@
                             }
                         );
                     }
+                    activateAdminLayout();
                 }
             } catch (err) {
                 console.error('Failed to determine user visibility', err);

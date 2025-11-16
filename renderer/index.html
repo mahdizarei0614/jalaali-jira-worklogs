@@ -133,9 +133,25 @@
         }
         .sidebar-header{ display:flex; flex-direction:column; gap:4px; margin-bottom: 18px; }
         .sidebar-title{ font-size:24px; font-weight:700; letter-spacing:.2px; }
-        .sidebar-subtitle{ font-size:12px; color:var(--muted); } 
+        .sidebar-subtitle{ font-size:12px; color:var(--muted); }
+        .sidebar-user-summary{
+            font-size:14px;
+            font-weight:600;
+            color:var(--text);
+            padding:10px 14px;
+            border-radius:12px;
+            border:1px solid var(--border);
+            background:var(--soft);
+            margin-bottom:12px;
+            display:flex;
+            align-items:center;
+            gap:6px;
+        }
         .sidebar-group-header{ font-size:18px; font-weight:700; margin-bottom: 1rem; }
         .sidebar-control{ display:flex; flex-direction:column; gap:6px; margin-bottom: 12px; }
+        .sidebar-control-grid{ display:grid; gap:.5rem; }
+        .sidebar-control-grid--two{ grid-template-columns:repeat(2, 1fr); }
+        .sidebar-control-grid--three{ grid-template-columns:repeat(3, 1fr); }
         .sidebar-label{ font-size:12px; font-weight:600; color:var(--muted); padding-left:2px; }
         .sidebar-control select{
             appearance:none; -webkit-appearance:none;
@@ -899,6 +915,27 @@
             100%{ opacity:0; }
         }
 
+        .report-filter-bar{
+            display:flex;
+            flex-direction:column;
+            gap:8px;
+            padding:16px;
+            margin-bottom:24px;
+            border-radius:16px;
+            border:1px solid var(--border);
+            background:var(--card);
+            box-shadow:0 12px 30px rgba(15,17,21,.04);
+        }
+        .report-filter-bar[hidden]{ display:none; }
+        .report-filter-bar__label{
+            font-size:12px;
+            font-weight:700;
+            color:var(--muted);
+            text-transform:uppercase;
+            letter-spacing:.32px;
+        }
+        .report-filter-bar .sidebar-control{ margin-bottom:0; }
+
         pre{ white-space:pre-wrap; background:var(--code-bg); border:1px solid var(--border); border-radius:12px; padding:10px; color:var(--code-text) }
     </style>
 </head>
@@ -909,13 +946,14 @@
             <h1 class="sidebar-title">Jalaali Jira Worklogs</h1>
             <span class="sidebar-subtitle">by Mahdi Zarei</span>
         </div>
+        <span id="sidebarUserSummary" class="sidebar-user-summary" hidden></span>
         <nav class="nav" aria-label="Primary">
             <button type="button" class="nav-item" data-route="issues" aria-controls="issuesView" data-nav-parents="issues">Assigned</button>
             <button type="button" class="nav-item" data-route="issues-worklogs" aria-controls="issuesWorklogsView" data-nav-parents="issues">Worklogs</button>
         </nav>
         <hr class="sidebar-divider" />
         <h2 class="sidebar-group-header">Reports</h2>
-        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: .5rem;">
+        <div class="sidebar-control-grid sidebar-control-grid--two" id="sidebarTeamUserControls">
             <div class="sidebar-control">
                 <label class="sidebar-label" for="sidebarTeamSelect">Team</label>
                 <select id="sidebarTeamSelect"></select>
@@ -925,7 +963,7 @@
                 <select id="sidebarUserSelect"></select>
             </div>
         </div>
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem;">
+        <div class="sidebar-control-grid sidebar-control-grid--three" id="sidebarReportFilters">
             <div class="sidebar-control">
                 <label class="sidebar-label" for="sidebarJYear">Jalaali Year</label>
                 <select id="sidebarJYear"></select>
@@ -1019,6 +1057,9 @@
         <header>
             <h2 id="viewTitle">Monthly Summary</h2>
         </header>
+        <div id="reportFiltersPortal" class="report-filter-bar" hidden>
+            <span class="report-filter-bar__label">Report Filters</span>
+        </div>
 
         <section
                 id="monthlySummaryView"
