@@ -137,6 +137,26 @@
         navItemParents.set(route, parents);
         btn.dataset.navDepth = String(parents.length);
     });
+    let activeRoute = null;
+
+    const REPORT_ROUTES = new Set(['monthly-summary', 'detailed-worklogs', 'due-issues', 'quarter-report']);
+    const sidebarUserContext = $('#sidebarUserContext');
+    const sidebarUserControls = $('#sidebarUserControls');
+    const sidebarPeriodControls = $('#sidebarPeriodControls');
+    const reportFiltersBar = $('#reportFiltersBar');
+    const reportFiltersContent = $('#reportFiltersContent');
+    const periodControlsAnchor = sidebarPeriodControls && sidebarPeriodControls.parentNode
+        ? document.createComment('sidebar-period-controls-anchor')
+        : null;
+    let periodControlsLocation = sidebarPeriodControls ? 'sidebar' : 'none';
+    if (sidebarPeriodControls && periodControlsAnchor) {
+        sidebarPeriodControls.parentNode.insertBefore(periodControlsAnchor, sidebarPeriodControls.nextSibling);
+    }
+    if (reportFiltersBar) {
+        reportFiltersBar.hidden = true;
+        reportFiltersBar.setAttribute('aria-hidden', 'true');
+    }
+    let nonAdminLayoutApplied = false;
 
     const navGroups = new Map();
     $$('[data-nav-group]').forEach((groupEl) => {
@@ -289,6 +309,98 @@
         }
     });
 
+    function getRouteForFilters(route) {
+        if (route) {
+            return route;
+        }
+        if (activeRoute) {
+            return activeRoute;
+        }
+        const hash = (window.location.hash || '').replace(/^#/, '');
+        return hash || 'monthly-summary';
+    }
+
+    function setReportFiltersHidden(hidden) {
+        if (!reportFiltersBar) return;
+        const isHidden = Boolean(hidden);
+        reportFiltersBar.hidden = isHidden;
+        reportFiltersBar.setAttribute('aria-hidden', isHidden ? 'true' : 'false');
+    }
+
+    function updateReportFiltersVisibility(route) {
+        if (!reportFiltersBar) return;
+        const currentRoute = getRouteForFilters(route);
+        const shouldShow = periodControlsLocation === 'report' && REPORT_ROUTES.has(currentRoute);
+        setReportFiltersHidden(!shouldShow);
+    }
+
+    function movePeriodControlsToReportBar(route) {
+        if (!sidebarPeriodControls || !reportFiltersContent) {
+            return;
+        }
+        if (periodControlsLocation === 'report') {
+            updateReportFiltersVisibility(route);
+            return;
+        }
+        reportFiltersContent.appendChild(sidebarPeriodControls);
+        periodControlsLocation = 'report';
+        updateReportFiltersVisibility(route);
+    }
+
+    function restorePeriodControlsToSidebar(route) {
+        if (!sidebarPeriodControls || !periodControlsAnchor) {
+            updateReportFiltersVisibility(route);
+            return;
+        }
+        if (periodControlsLocation === 'sidebar') {
+            updateReportFiltersVisibility(route);
+            return;
+        }
+        if (periodControlsAnchor.parentNode) {
+            periodControlsAnchor.parentNode.insertBefore(sidebarPeriodControls, periodControlsAnchor);
+        }
+        periodControlsLocation = 'sidebar';
+        updateReportFiltersVisibility(route);
+    }
+
+    function toggleSidebarUserControlsHidden(hidden) {
+        if (!sidebarUserControls) return;
+        sidebarUserControls.classList.toggle('is-hidden', Boolean(hidden));
+    }
+
+    function showSidebarUserContext(teamValue, displayName) {
+        if (!sidebarUserContext) return;
+        const teamLabel = teamValue ? (TEAM_LABELS.get(teamValue) || teamValue) : 'Your Team';
+        const userLabel = displayName || 'User';
+        sidebarUserContext.textContent = `${teamLabel} - ${userLabel}`;
+        sidebarUserContext.hidden = false;
+    }
+
+    function hideSidebarUserContext() {
+        if (!sidebarUserContext) return;
+        sidebarUserContext.textContent = '';
+        sidebarUserContext.hidden = true;
+    }
+
+    function applyNonAdminSidebarLayout(context = {}) {
+        const { teamValue, displayName } = context;
+        nonAdminLayoutApplied = true;
+        toggleSidebarUserControlsHidden(true);
+        showSidebarUserContext(teamValue, displayName);
+        movePeriodControlsToReportBar();
+    }
+
+    function resetSidebarLayout(route) {
+        if (!nonAdminLayoutApplied && periodControlsLocation !== 'report') {
+            updateReportFiltersVisibility(route);
+            return;
+        }
+        nonAdminLayoutApplied = false;
+        toggleSidebarUserControlsHidden(false);
+        hideSidebarUserContext();
+        restorePeriodControlsToSidebar(route);
+    }
+
     function syncNavGroupsForRoute(route, { immediate = false } = {}) {
         const parents = navItemParents.get(route) || [];
         const required = new Set(parents);
@@ -373,7 +485,6 @@
 
     const initialActive = Array.from(viewNodes.entries()).find(([, el]) => el.classList.contains('is-active'));
     const defaultRoute = initialActive ? initialActive[0] : (navItems[0]?.dataset.route || 'monthly-summary');
-    let activeRoute = null;
 
     function setRoute(route, { pushState = true } = {}) {
         if (!viewNodes.has(route)) {
@@ -411,6 +522,8 @@
 
         const previousRoute = activeRoute;
         activeRoute = route;
+
+        updateReportFiltersVisibility(route);
 
         syncNavGroupsForRoute(route, { immediate: !previousRoute });
 
@@ -846,6 +959,8 @@
 
                 if (!isAdmin) {
                     renderTeamSelectOptions();
+                    teamSelectEl.disabled = true;
+                    selectEl.disabled = true;
                     if (!teamForSelf) {
                         teamForSelf = teamSelectEl.value || DEFAULT_TEAM || TEAM_OPTIONS[0]?.value || '';
                         if (teamForSelf) {
@@ -855,14 +970,15 @@
                     if (teamForSelf) {
                         teamSelectEl.value = teamForSelf;
                         renderUserOptions(teamForSelf, self);
-                        teamSelectEl.disabled = true;
-                        selectEl.disabled = true;
                         await reportStateInstance.setSelection(
                             { team: teamForSelf, username: self },
                             { pushSelection: true, refresh: true, clearResult: true }
                         );
                     }
+                    const contextTeam = teamForSelf || teamSelectEl.value || '';
+                    applyNonAdminSidebarLayout({ teamValue: contextTeam, displayName });
                 } else {
+                    resetSidebarLayout(activeRoute);
                     renderTeamSelectOptions(adminTeams);
                     teamSelectEl.disabled = false;
                     selectEl.disabled = false;
