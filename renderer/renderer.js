@@ -60,6 +60,105 @@
     const TABLE_FEATURES = new WeakMap();
     const TABLE_FEATURE_STATES = new Set();
     let tableFeatureResizeAttached = false;
+    const REPORT_ROUTES = new Set(['monthly-summary', 'detailed-worklogs', 'due-issues', 'quarter-report']);
+    const sidebarUserContextEl = $('#sidebarUserContext');
+    const sidebarUserControls = $('#sidebarUserControls');
+    const sidebarDateControls = $('#sidebarDateControls');
+    const reportFiltersBar = $('#reportFiltersBar');
+    const reportFiltersControls = $('#reportFiltersControls');
+    const sidebarDateControlsPlaceholder = sidebarDateControls ? document.createComment('sidebar-date-controls') : null;
+    if (sidebarDateControls && sidebarDateControlsPlaceholder && sidebarDateControls.parentElement) {
+        sidebarDateControls.parentElement.insertBefore(sidebarDateControlsPlaceholder, sidebarDateControls.nextSibling);
+    }
+    let selectionControlsInReportArea = false;
+    const userAccessUiState = {
+        mode: 'unknown',
+        team: null,
+        username: null,
+        displayName: null
+    };
+    let activeRoute = null;
+
+    function setElementHidden(el, hidden) {
+        if (!el) return;
+        if (hidden) {
+            el.setAttribute('hidden', 'hidden');
+        } else {
+            el.removeAttribute('hidden');
+        }
+    }
+
+    function updateSidebarUserContext(context) {
+        if (!sidebarUserContextEl) return;
+        if (!context) {
+            sidebarUserContextEl.textContent = '';
+            sidebarUserContextEl.removeAttribute('title');
+            return;
+        }
+        const teamLabel = context.team ? (TEAM_LABELS.get(context.team) || context.team) : '';
+        const display = context.displayName || context.username || '';
+        const text = `${teamLabel || '—'} - ${display || '—'}`;
+        sidebarUserContextEl.textContent = text;
+        sidebarUserContextEl.title = text;
+    }
+
+    function moveSelectionControlsToContent() {
+        if (!sidebarDateControls || !reportFiltersControls) return;
+        if (!reportFiltersControls.contains(sidebarDateControls)) {
+            reportFiltersControls.appendChild(sidebarDateControls);
+        }
+        selectionControlsInReportArea = true;
+        updateReportFiltersVisibility(activeRoute);
+    }
+
+    function moveSelectionControlsToSidebar() {
+        if (!sidebarDateControls) return;
+        if (sidebarDateControlsPlaceholder && sidebarDateControlsPlaceholder.parentNode) {
+            sidebarDateControlsPlaceholder.parentNode.insertBefore(sidebarDateControls, sidebarDateControlsPlaceholder);
+        }
+        selectionControlsInReportArea = false;
+        updateReportFiltersVisibility(activeRoute);
+    }
+
+    function updateReportFiltersVisibility(route) {
+        if (!reportFiltersBar) return;
+        const shouldShow = selectionControlsInReportArea && REPORT_ROUTES.has(route || '');
+        setElementHidden(reportFiltersBar, !shouldShow);
+        reportFiltersBar.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
+    }
+
+    function applyUserAccessUI({ isAdmin, team, username, displayName }) {
+        const mode = isAdmin ? 'admin' : 'user';
+        const normalizedTeam = team || null;
+        const normalizedUsername = username || null;
+        const normalizedDisplay = displayName || null;
+        const hasChanged = userAccessUiState.mode !== mode
+            || userAccessUiState.team !== normalizedTeam
+            || userAccessUiState.username !== normalizedUsername
+            || userAccessUiState.displayName !== normalizedDisplay;
+        if (!hasChanged) {
+            if (mode === 'user') {
+                updateSidebarUserContext({ team: normalizedTeam, username: normalizedUsername, displayName: normalizedDisplay });
+            }
+            return;
+        }
+        userAccessUiState.mode = mode;
+        userAccessUiState.team = normalizedTeam;
+        userAccessUiState.username = normalizedUsername;
+        userAccessUiState.displayName = normalizedDisplay;
+
+        if (mode === 'admin') {
+            moveSelectionControlsToSidebar();
+            setElementHidden(sidebarUserControls, false);
+            setElementHidden(sidebarUserContextEl, true);
+            updateSidebarUserContext(null);
+        } else {
+            moveSelectionControlsToContent();
+            setElementHidden(sidebarUserControls, true);
+            setElementHidden(sidebarUserContextEl, false);
+            updateSidebarUserContext({ team: normalizedTeam, username: normalizedUsername, displayName: normalizedDisplay });
+        }
+    }
 
     function getAdminTeamsForUser(username) {
         const key = (username || '').trim();
@@ -373,8 +472,6 @@
 
     const initialActive = Array.from(viewNodes.entries()).find(([, el]) => el.classList.contains('is-active'));
     const defaultRoute = initialActive ? initialActive[0] : (navItems[0]?.dataset.route || 'monthly-summary');
-    let activeRoute = null;
-
     function setRoute(route, { pushState = true } = {}) {
         if (!viewNodes.has(route)) {
             route = defaultRoute;
@@ -411,6 +508,7 @@
 
         const previousRoute = activeRoute;
         activeRoute = route;
+        updateReportFiltersVisibility(route);
 
         syncNavGroupsForRoute(route, { immediate: !previousRoute });
 
@@ -896,6 +994,14 @@
                         );
                     }
                 }
+
+                const effectiveTeam = teamForSelf || currentSelection.team || null;
+                applyUserAccessUI({
+                    isAdmin,
+                    team: effectiveTeam,
+                    username: self,
+                    displayName
+                });
             } catch (err) {
                 console.error('Failed to determine user visibility', err);
             }
