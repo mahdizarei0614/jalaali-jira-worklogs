@@ -376,17 +376,9 @@
         sidebarUserContext.hidden = false;
     }
 
-    function hideSidebarUserContext() {
-        if (!sidebarUserContext) return;
-        sidebarUserContext.textContent = '';
-        sidebarUserContext.hidden = true;
-    }
-
-    function applyNonAdminSidebarLayout(context = {}) {
-        const { teamValue, displayName } = context;
+    function applyNonAdminSidebarLayout() {
         nonAdminLayoutApplied = true;
         toggleSidebarUserControlsHidden(true);
-        showSidebarUserContext(teamValue, displayName);
         movePeriodControlsToReportBar();
     }
 
@@ -397,7 +389,6 @@
         }
         nonAdminLayoutApplied = false;
         toggleSidebarUserControlsHidden(false);
-        hideSidebarUserContext();
         restorePeriodControlsToSidebar(route);
     }
 
@@ -957,6 +948,8 @@
                     ensureUserInTeamMap(teamForSelf, { value: self, text: displayName });
                 }
 
+                let contextTeam = teamForSelf;
+
                 if (!isAdmin) {
                     renderTeamSelectOptions();
                     teamSelectEl.disabled = true;
@@ -975,8 +968,8 @@
                             { pushSelection: true, refresh: true, clearResult: true }
                         );
                     }
-                    const contextTeam = teamForSelf || teamSelectEl.value || '';
-                    applyNonAdminSidebarLayout({ teamValue: contextTeam, displayName });
+                    contextTeam = teamForSelf || teamSelectEl.value || '';
+                    applyNonAdminSidebarLayout();
                 } else {
                     resetSidebarLayout(activeRoute);
                     renderTeamSelectOptions(adminTeams);
@@ -1011,7 +1004,10 @@
                             }
                         );
                     }
+                    contextTeam = teamForSelf;
                 }
+
+                showSidebarUserContext(contextTeam, displayName);
             } catch (err) {
                 console.error('Failed to determine user visibility', err);
             }
