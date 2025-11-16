@@ -124,7 +124,7 @@
     }
 
     const routeTitle = $('#viewTitle');
-    const defaultTitle = routeTitle?.textContent || 'Alo Worklogs';
+    const defaultTitle = routeTitle?.textContent || 'Jalaali Jira Worklogs';
     const navItems = $$('[data-route]');
     const navItemParents = new Map();
     navItems.forEach((btn) => {

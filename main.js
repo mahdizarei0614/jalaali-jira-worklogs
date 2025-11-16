@@ -1168,7 +1168,7 @@
             height: 1170,
             fullscreenable: true,
             webPreferences: { preload: path.join(__dirname, 'preload.js') },
-            title: 'Alo Worklogs',
+            title: 'Jalaali Jira Worklogs',
         });
         tokenExists().then(exists => exists ? loadMain() : loadLogin());
     }
@@ -1185,7 +1185,7 @@
             { type: 'separator' },
             { label: 'Quit', click: () => app.quit() },
         ]);
-        tray.setToolTip('Alo Worklogs');
+        tray.setToolTip('Jalaali Jira Worklogs');
         tray.setContextMenu(menu);
     }
 
