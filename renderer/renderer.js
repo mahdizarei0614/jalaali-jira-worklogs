@@ -164,6 +164,70 @@
         navGroups.set(id, state);
     });
 
+    const sidebarUserSummary = $('#sidebarUserSummary');
+    const teamControlWrap = $('#sidebarTeamControlWrap');
+    const userControlWrap = $('#sidebarUserControlWrap');
+    const reportFiltersHost = $('#reportFiltersHost');
+    const reportFiltersContainer = $('#sidebarReportFilters');
+    const reportFiltersSidebarParent = reportFiltersContainer?.parentElement || null;
+    const reportFiltersSidebarNextSibling = reportFiltersContainer?.nextElementSibling || null;
+    const REPORT_ROUTES = new Set(['monthly-summary', 'detailed-worklogs', 'due-issues', 'quarter-report']);
+    let inlineReportFiltersEnabled = false;
+    let activeRoute = null;
+
+    function setTeamUserControlsHidden(hidden) {
+        const shouldHide = Boolean(hidden);
+        [teamControlWrap, userControlWrap].forEach((node) => {
+            if (!node) return;
+            node.hidden = shouldHide;
+        });
+    }
+
+    function updateSidebarUserSummary({ visible = false, teamValue = null, username = '', displayName = '' } = {}) {
+        if (!sidebarUserSummary) return;
+        if (!visible || !username) {
+            sidebarUserSummary.hidden = true;
+            sidebarUserSummary.textContent = '';
+            return;
+        }
+        const teamLabel = TEAM_LABELS.get(teamValue) || teamValue || 'Team not set';
+        const userLabel = displayName || username;
+        sidebarUserSummary.textContent = `${teamLabel} - ${userLabel}`;
+        sidebarUserSummary.hidden = false;
+    }
+
+    function setInlineReportFiltersEnabled(enabled) {
+        const normalized = Boolean(enabled && reportFiltersHost);
+        if (inlineReportFiltersEnabled === normalized) {
+            updateReportFiltersPlacement();
+            return;
+        }
+        inlineReportFiltersEnabled = normalized;
+        updateReportFiltersPlacement();
+    }
+
+    function updateReportFiltersPlacement(route = activeRoute) {
+        if (!reportFiltersContainer) return;
+        const isReportRoute = REPORT_ROUTES.has(route || '');
+        if (inlineReportFiltersEnabled && reportFiltersHost) {
+            if (reportFiltersContainer.parentElement !== reportFiltersHost) {
+                reportFiltersHost.appendChild(reportFiltersContainer);
+            }
+            reportFiltersHost.hidden = !isReportRoute;
+        } else if (reportFiltersSidebarParent) {
+            if (reportFiltersContainer.parentElement !== reportFiltersSidebarParent) {
+                if (reportFiltersSidebarNextSibling && reportFiltersSidebarNextSibling.parentElement === reportFiltersSidebarParent) {
+                    reportFiltersSidebarParent.insertBefore(reportFiltersContainer, reportFiltersSidebarNextSibling);
+                } else {
+                    reportFiltersSidebarParent.appendChild(reportFiltersContainer);
+                }
+            }
+            if (reportFiltersHost) {
+                reportFiltersHost.hidden = true;
+            }
+        }
+    }
+
     function suppressTransition(el) {
         if (!el) {
             return () => {};
@@ -373,7 +437,6 @@
 
     const initialActive = Array.from(viewNodes.entries()).find(([, el]) => el.classList.contains('is-active'));
     const defaultRoute = initialActive ? initialActive[0] : (navItems[0]?.dataset.route || 'monthly-summary');
-    let activeRoute = null;
 
     function setRoute(route, { pushState = true } = {}) {
         if (!viewNodes.has(route)) {
@@ -411,6 +474,7 @@
 
         const previousRoute = activeRoute;
         activeRoute = route;
+        updateReportFiltersPlacement(route);
 
         syncNavGroupsForRoute(route, { immediate: !previousRoute });
 
@@ -845,6 +909,8 @@
                 }
 
                 if (!isAdmin) {
+                    setTeamUserControlsHidden(true);
+                    setInlineReportFiltersEnabled(true);
                     renderTeamSelectOptions();
                     if (!teamForSelf) {
                         teamForSelf = teamSelectEl.value || DEFAULT_TEAM || TEAM_OPTIONS[0]?.value || '';
@@ -862,7 +928,16 @@
                             { pushSelection: true, refresh: true, clearResult: true }
                         );
                     }
+                    updateSidebarUserSummary({
+                        visible: Boolean(self),
+                        teamValue: teamForSelf || null,
+                        username: self,
+                        displayName
+                    });
                 } else {
+                    setTeamUserControlsHidden(false);
+                    setInlineReportFiltersEnabled(false);
+                    updateSidebarUserSummary({ visible: false });
                     renderTeamSelectOptions(adminTeams);
                     teamSelectEl.disabled = false;
                     selectEl.disabled = false;
