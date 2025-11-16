@@ -157,6 +157,7 @@
         reportFiltersBar.setAttribute('aria-hidden', 'true');
     }
     let nonAdminLayoutApplied = false;
+    let currentUserIsAdmin = false;
 
     const navGroups = new Map();
     $$('[data-nav-group]').forEach((groupEl) => {
@@ -322,7 +323,7 @@
 
     function setReportFiltersHidden(hidden) {
         if (!reportFiltersBar) return;
-        const isHidden = Boolean(hidden);
+        const isHidden = currentUserIsAdmin || Boolean(hidden);
         reportFiltersBar.hidden = isHidden;
         reportFiltersBar.setAttribute('aria-hidden', isHidden ? 'true' : 'false');
     }
@@ -330,8 +331,18 @@
     function updateReportFiltersVisibility(route) {
         if (!reportFiltersBar) return;
         const currentRoute = getRouteForFilters(route);
-        const shouldShow = periodControlsLocation === 'report' && REPORT_ROUTES.has(currentRoute);
+        const shouldShow = !currentUserIsAdmin
+            && periodControlsLocation === 'report'
+            && REPORT_ROUTES.has(currentRoute);
         setReportFiltersHidden(!shouldShow);
+    }
+
+    function setReportFiltersAdminState(isAdmin) {
+        currentUserIsAdmin = Boolean(isAdmin);
+        if (reportFiltersBar) {
+            reportFiltersBar.classList.toggle('report-filters--admin-hidden', currentUserIsAdmin);
+        }
+        updateReportFiltersVisibility(activeRoute);
     }
 
     function movePeriodControlsToReportBar(route) {
@@ -943,6 +954,7 @@
                 const adminTeams = getAdminTeamsForUser(self);
                 const isAdmin = adminTeams.length > 0;
                 updateAdminExportAvailability({ isAdmin, teams: adminTeams, username: self });
+                setReportFiltersAdminState(isAdmin);
                 let teamForSelf = findTeamForUser(self) || '';
                 if (teamForSelf) {
                     ensureUserInTeamMap(teamForSelf, { value: self, text: displayName });
